@@ -53,6 +53,16 @@ Point it at a URL, run `/clone-website`, and your AI agent will inspect the site
 
 > Using a different agent? Open `AGENTS.md` for project instructions — most agents pick it up automatically.
 
+## Workspace Layout
+
+This repository can hold multiple completed clones without mixing their files:
+
+- The root remains the reusable template and clean scaffold.
+- Each cloned site lives in `clones/<site-slug>/`.
+- Site-specific source, assets, screenshots, research, and scripts stay inside that clone folder.
+
+See [`docs/WORKSPACE_LAYOUT.md`](docs/WORKSPACE_LAYOUT.md) and [`clones/README.md`](clones/README.md) for the convention.
+
 ## Supported Platforms
 
 | Agent                                                         | Status                     |

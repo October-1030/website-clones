@@ -1,0 +1,91 @@
+:root {
+  --bg: oklch(0.165 0.008 250);
+  --bg-deep: oklch(0.14 0.008 250);
+  --sidebar: oklch(0.15 0.008 250);
+  --surface: oklch(0.195 0.009 250);
+  --surface-raised: oklch(0.215 0.009 250);
+  --surface-hover: oklch(0.235 0.01 250);
+  --bg-elevated: var(--surface);
+  --bg-input: var(--bg-deep);
+  --border: oklch(0.23 0.008 250);
+  --border-strong: oklch(0.3 0.01 250);
+  --text: oklch(0.96 0.005 250);
+  --text-secondary: oklch(0.72 0.008 250);
+  --text-muted: oklch(0.56 0.008 250);
+  --text-faint: oklch(0.42 0.008 250);
+  --text-primary: var(--text);
+  --brand: oklch(0.72 0.16 168);
+  --brand-soft: oklch(0.72 0.16 168 / 0.12);
+  --info: oklch(0.7 0.16 230);
+  --warning: oklch(0.78 0.16 85);
+  --danger: oklch(0.66 0.2 25);
+  --violet: oklch(0.72 0.18 300);
+  --font-sans: "Noto Sans SC", -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  color: var(--text);
+  background: var(--bg);
+  font: 14px/1.5 var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  height: 100%;
+  min-height: 100vh;
+  margin: 0;
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  color: inherit;
+  font: inherit;
+}
+
+button {
+  border: 0;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+::selection {
+  color: var(--text);
+  background: oklch(0.72 0.16 168 / 0.3);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: oklch(0.34 0.008 250);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}

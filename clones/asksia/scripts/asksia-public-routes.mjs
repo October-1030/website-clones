@@ -1,0 +1,1 @@
+async (page) => page.evaluate(() => [...new Map([...document.querySelectorAll('a[href]')].map((link) => { const url = new URL(link.href); return [url.pathname, { path: url.pathname, text: link.textContent?.trim().replace(/\s+/g, ' '), href: url.href }]; })).values()].filter((item) => item.path.startsWith('/')))

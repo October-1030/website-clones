@@ -15,6 +15,9 @@ dist/
 .env.development.local
 .env.test.local
 .env.production.local
+*secrets*.txt
+MINIMAX.txt
+*.key
 
 # Debug
 npm-debug.log*

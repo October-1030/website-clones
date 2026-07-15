@@ -13,6 +13,10 @@ When multiple URLs are provided, process them independently and in parallel wher
 
 This is not a two-phase process (inspect then build). You are a **foreman walking the job site** — as you inspect each section of the page, you write a detailed specification to a file, then hand that file to a specialist builder agent with everything they need. Extraction and construction happen in parallel, but extraction is meticulous and produces auditable artifacts.
 
+## Workspace Isolation
+
+When this repository contains a `clones/` directory, treat it as a multi-clone workspace. Before starting reconnaissance, choose a stable slug for the target and work inside `clones/<site-slug>/`. Run the pre-flight build there and write all target-specific source, assets, screenshots, research, specs, and scripts there. Keep the repository root as the reusable template. Never overwrite an existing clone folder; create a new folder for every new target.
+
 ## Scope Defaults
 
 The target is whatever page `$ARGUMENTS` resolves to. Clone exactly what's visible at that URL. Unless the user specifies otherwise, use these defaults:

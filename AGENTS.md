@@ -57,6 +57,10 @@ docs/
 scripts/            # Asset download scripts
 ```
 
+## Multi-Clone Workspace Layout
+
+This repository can contain multiple completed website clones. Keep the root as the reusable template and place each target site in its own self-contained folder: `clones/<site-slug>/`. Site-specific source, assets, screenshots, research, and scripts must stay inside that folder. The existing AskSia clone is at `clones/asksia/`; never reuse it for another target.
+
 ## MOST IMPORTANT NOTES
 - When launching Claude Code agent teams, ALWAYS have each teammate work in their own worktree branch and merge everyone's work at the end, resolving any merge conflicts smartly since you are basically serving the orchestrator role and have full context to our goals, work given, work achieved, and desired outcomes.
 - After editing `AGENTS.md`, run `bash scripts/sync-agent-rules.sh` to regenerate platform-specific instruction files.

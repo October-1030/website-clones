@@ -1,0 +1,557 @@
+.app-shell {
+  width: min(1280px, 100vw);
+  height: min(820px, 100dvh);
+  margin: auto;
+  overflow: hidden;
+  color: oklch(0.96 0.005 250);
+  background: oklch(0.165 0.008 250);
+  box-shadow: 0 18px 70px oklch(0.04 0.008 250 / 0.5);
+  font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 21px;
+}
+
+.app-shell button {
+  font: inherit;
+}
+
+.app-shell-titlebar {
+  display: flex;
+  width: 100%;
+  height: 33px;
+  align-items: center;
+  justify-content: space-between;
+  padding-left: 10px;
+  color: oklch(0.78 0.008 250);
+  background: oklch(0.14 0.008 250);
+  border-bottom: 1px solid oklch(0.22 0.008 250 / 0.45);
+  user-select: none;
+}
+
+.app-shell-titlebar-brand,
+.app-shell-sidebar-brand {
+  display: flex;
+  align-items: center;
+}
+
+.app-shell-titlebar-brand {
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.app-shell-mark {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: oklch(0.12 0.012 250);
+  background: oklch(0.72 0.16 168);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 oklch(0.92 0.08 168 / 0.35);
+  font-size: 17px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.app-shell-mark--compact {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  font-size: 12px;
+}
+
+.app-shell-window-controls {
+  display: flex;
+  height: 100%;
+}
+
+.app-shell-window-button {
+  position: relative;
+  display: grid;
+  width: 45px;
+  height: 100%;
+  padding: 0;
+  place-items: center;
+  color: oklch(0.68 0.008 250);
+  background: transparent;
+  cursor: default;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.app-shell-window-button:hover {
+  color: oklch(0.96 0.005 250);
+  background: oklch(0.23 0.008 250);
+}
+
+.app-shell-window-button--close:hover {
+  color: white;
+  background: oklch(0.58 0.22 25);
+}
+
+.app-shell-minimize {
+  width: 10px;
+  height: 1px;
+  background: currentColor;
+}
+
+.app-shell-maximize {
+  width: 10px;
+  height: 9px;
+  border: 1px solid currentColor;
+}
+
+.app-shell-close,
+.app-shell-close::after {
+  position: absolute;
+  width: 12px;
+  height: 1px;
+  background: currentColor;
+  content: "";
+  transform: rotate(45deg);
+}
+
+.app-shell-close::after {
+  transform: rotate(90deg);
+}
+
+.app-shell-license {
+  display: flex;
+  width: 100%;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: oklch(0.82 0.03 85);
+  background: oklch(0.2 0.035 85);
+  border-bottom: 1px solid oklch(0.4 0.065 85 / 0.4);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.app-shell-license strong {
+  color: oklch(0.9 0.14 88);
+  font-weight: 700;
+}
+
+.app-shell-license-badge {
+  padding: 0 7px;
+  color: oklch(0.19 0.04 85);
+  background: oklch(0.82 0.14 88);
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.app-shell-license-detail {
+  color: oklch(0.68 0.025 85);
+}
+
+.app-shell-license-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  color: oklch(0.8 0.16 168);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.app-shell-license-link:hover {
+  color: oklch(0.88 0.17 168);
+}
+
+.app-shell-body {
+  display: grid;
+  height: calc(100% - 63px);
+  min-height: 0;
+  grid-template-columns: 240px minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.app-shell-sidebar {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding: 14px 12px 12px;
+  background: oklch(0.15 0.008 250);
+  border-right: 1px solid oklch(0.23 0.008 250 / 0.7);
+  overflow: hidden;
+}
+
+.app-shell-sidebar-brand {
+  height: 36px;
+  gap: 10px;
+  padding: 0 5px;
+  margin-bottom: 12px;
+}
+
+.app-shell-sidebar-brand-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 16px;
+}
+
+.app-shell-sidebar-brand-copy > span {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-overflow: ellipsis;
+}
+
+.app-shell-sidebar-brand-copy small {
+  color: oklch(0.52 0.008 250);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.025em;
+  white-space: nowrap;
+}
+
+.app-shell-new-task {
+  display: flex;
+  width: 100%;
+  height: 38px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  margin-bottom: 12px;
+  color: oklch(0.13 0.02 168);
+  background: oklch(0.72 0.16 168);
+  border-radius: 7px;
+  cursor: pointer;
+  font-weight: 700;
+  text-align: left;
+  transition: background-color 130ms ease, transform 130ms ease;
+}
+
+.app-shell-new-task:hover,
+.app-shell-new-task.is-active {
+  background: oklch(0.78 0.17 168);
+}
+
+.app-shell-new-task:active {
+  transform: translateY(1px);
+}
+
+.app-shell-new-task-plus {
+  font-size: 21px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.app-shell-new-task kbd {
+  padding: 1px 5px;
+  margin-left: auto;
+  color: oklch(0.26 0.035 168);
+  background: oklch(0.95 0.05 168 / 0.34);
+  border: 1px solid oklch(0.3 0.05 168 / 0.15);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.app-shell-nav {
+  min-height: 0;
+  flex: 1 1 auto;
+  padding-right: 2px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.31 0.008 250) transparent;
+}
+
+.app-shell-nav-group {
+  display: grid;
+  gap: 2px;
+  padding: 5px 0;
+  border-bottom: 1px solid oklch(0.23 0.008 250 / 0.55);
+}
+
+.app-shell-nav-group:first-child {
+  padding-top: 0;
+}
+
+.app-shell-nav-group:last-child {
+  border-bottom: 0;
+}
+
+.app-shell-nav-item {
+  display: flex;
+  width: 100%;
+  min-height: 34px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  color: oklch(0.68 0.008 250);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.app-shell-nav-item:hover {
+  color: oklch(0.9 0.006 250);
+  background: oklch(0.205 0.009 250);
+}
+
+.app-shell-nav-item.is-active {
+  color: oklch(0.91 0.025 168);
+  background: oklch(0.72 0.16 168 / 0.13);
+  box-shadow: inset 2px 0 0 oklch(0.72 0.16 168);
+}
+
+.app-shell-nav-icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: oklch(0.58 0.012 250);
+  font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", sans-serif;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.app-shell-nav-item.is-active .app-shell-nav-icon {
+  color: oklch(0.72 0.16 168);
+}
+
+.app-shell-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell-sidebar-footer {
+  flex: 0 0 auto;
+  padding-top: 10px;
+  border-top: 1px solid oklch(0.23 0.008 250 / 0.55);
+}
+
+.app-shell-points-card {
+  display: flex;
+  height: 54px;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  background: oklch(0.19 0.012 250);
+  border: 1px solid oklch(0.26 0.012 250);
+  border-radius: 8px;
+}
+
+.app-shell-points-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: oklch(0.83 0.15 85);
+  background: oklch(0.83 0.15 85 / 0.1);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.app-shell-points-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  color: oklch(0.53 0.008 250);
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.app-shell-points-copy strong {
+  color: oklch(0.9 0.006 250);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.app-shell-points-arrow {
+  color: oklch(0.48 0.008 250);
+  font-size: 20px;
+}
+
+.app-shell-footer-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.app-shell-footer-button {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 6px;
+  color: oklch(0.57 0.008 250);
+  background: transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.app-shell-footer-button:hover {
+  color: oklch(0.88 0.006 250);
+  background: oklch(0.21 0.009 250);
+}
+
+.app-shell-footer-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.app-shell-main {
+  min-width: 0;
+  min-height: 0;
+  background: oklch(0.165 0.008 250);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 899px) {
+  .app-shell-body {
+    grid-template-columns: 64px minmax(0, 1fr);
+  }
+
+  .app-shell-sidebar {
+    padding: 12px 8px 10px;
+  }
+
+  .app-shell-sidebar-brand {
+    justify-content: center;
+    height: 32px;
+    padding: 0;
+    margin-bottom: 10px;
+  }
+
+  .app-shell-sidebar-brand-copy,
+  .app-shell-new-task-label,
+  .app-shell-new-task kbd,
+  .app-shell-nav-label,
+  .app-shell-points-copy,
+  .app-shell-points-arrow,
+  .app-shell-footer-button span {
+    display: none;
+  }
+
+  .app-shell-new-task {
+    justify-content: center;
+    height: 38px;
+    padding: 0;
+  }
+
+  .app-shell-new-task-plus {
+    font-size: 23px;
+  }
+
+  .app-shell-nav {
+    padding-right: 0;
+  }
+
+  .app-shell-nav-item {
+    justify-content: center;
+    min-height: 36px;
+    padding: 6px 0;
+  }
+
+  .app-shell-nav-item.is-active {
+    box-shadow: inset 2px 0 0 oklch(0.72 0.16 168);
+  }
+
+  .app-shell-nav-icon {
+    width: 22px;
+    font-size: 17px;
+  }
+
+  .app-shell-points-card {
+    justify-content: center;
+    height: 40px;
+    padding: 5px;
+  }
+
+  .app-shell-footer-actions {
+    grid-template-columns: 1fr;
+    gap: 2px;
+    margin-top: 4px;
+  }
+
+  .app-shell-footer-button {
+    height: 28px;
+    padding: 0;
+  }
+}
+
+@media (max-width: 679px) {
+  .app-shell-titlebar {
+    padding-left: 8px;
+  }
+
+  .app-shell-titlebar-name,
+  .app-shell-maximize-button {
+    display: none;
+  }
+
+  .app-shell-window-button {
+    width: 39px;
+  }
+
+  .app-shell-license {
+    justify-content: flex-start;
+    gap: 7px;
+    padding: 0 10px;
+  }
+
+  .app-shell-license-detail {
+    display: none;
+  }
+
+  .app-shell-license-link {
+    margin-left: auto;
+  }
+}
+
+@media (max-height: 700px) {
+  .app-shell-sidebar {
+    padding-top: 9px;
+    padding-bottom: 8px;
+  }
+
+  .app-shell-sidebar-brand {
+    margin-bottom: 7px;
+  }
+
+  .app-shell-new-task {
+    margin-bottom: 7px;
+  }
+
+  .app-shell-nav-group {
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+
+  .app-shell-nav-item {
+    min-height: 31px;
+  }
+}

@@ -1,0 +1,854 @@
+export const storyboundMarkup = String.raw`
+<div class="page">
+  <div class="grain"></div>
+
+  <!-- === Nav === -->
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <a href="#" class="logo">
+        <div class="logo-mark">S</div>
+        <span>Storybound</span>
+      </a>
+      <div class="nav-links">
+        <a href="#features">功能</a>
+        <a href="#tracks">赛道</a>
+        <a href="#pipeline">流水线</a>
+        <a href="#pricing">价格</a>
+        <a href="#faq">常见问题</a>
+        <a href="https://qnc80j2zlx.feishu.cn/docx/UzIqd9RWJolRB4xl8Xxcmz8ZnEh" target="_blank" rel="noopener">使用文档</a>
+      </div>
+      <div class="nav-actions">
+        <a href="#pricing" class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+          下载
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- === Hero === -->
+  <section class="hero">
+    <div class="hero-bg"></div>
+    <div class="hero-scene"></div>
+    <div class="hero-orbs">
+      <span class="hero-orb"></span>
+      <span class="hero-orb"></span>
+      <span class="hero-orb"></span>
+      <span class="hero-orb"></span>
+      <span class="hero-orb"></span>
+      <span class="hero-orb"></span>
+      <span class="hero-orb"></span>
+    </div>
+    <div class="hero-vignette"></div>
+    <div class="wrap hero-inner">
+      <div class="hero-tag">
+        <span class="hero-tag-badge">NEW</span>
+        v1.13.1 · 出图超时能捞回 + 历史任务收藏
+      </div>
+      <h1>一句话，一段故事，<br><span class="accent">一键成片</span></h1>
+      <p class="hero-sub">
+        AI 帮你把文案变成视频，从分镜到剪映草稿全自动。<br>
+        粘贴文案，几分钟后在剪映里直接微调发布。
+      </p>
+      <div class="hero-ctas">
+        <a href="/dl/win" class="btn btn-primary btn-lg">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+          立即下载 Windows
+        </a>
+        <a href="/dl/mac" class="btn btn-ghost btn-lg">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06z"></path><path d="M10 2c1 .5 2 2 2 5"></path></svg>
+          Mac 下载
+        </a>
+      </div>
+      <div class="hero-proof">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--mint)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+        免费下载 · 安装即送 <strong style="color:var(--mint-bright); font-weight:700; margin: 0 4px">5 次免费试用</strong> · 自带 API 接入即可跑完整流程
+      </div>
+
+      <!-- 软件截图 -->
+      <div class="hero-shot">
+        <div class="hero-shot-inner">
+          <div class="shot-titlebar">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="url">Storybound · 创建任务</span>
+          </div>
+          <div class="shot-body">
+            <div class="shot-side">
+              <div class="shot-side-logo">
+                <div>S</div>
+                <span>Storybound</span>
+              </div>
+              <div class="shot-side-new">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+                新建任务
+              </div>
+              <div class="shot-side-item active">
+                <span class="shot-side-dot"></span> 当前任务
+              </div>
+              <div class="shot-side-item">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+                任务队列
+              </div>
+              <div class="shot-side-item">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                历史任务
+              </div>
+              <div class="shot-side-item">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                设置
+              </div>
+            </div>
+            <div class="shot-main">
+              <h3>创建视频任务</h3>
+              <div class="shot-main-sub">粘贴一段人物故事，几分钟后在剪映里打开</div>
+              <div class="shot-textarea">
+                1972年的冬天，贵州安顺一个破旧的土坯房里，一个 22 岁的姑娘抱着两个奶娃娃，站在风里。她叫李泽英，是这家雇主请来的保姆…
+              </div>
+              <div class="shot-row">
+                <span class="chip on">人物故事</span>
+                <span class="chip">黑白摄影</span>
+                <span class="chip">9:16 竖屏</span>
+                <span class="chip">东方浩然</span>
+                <span class="chip">半自动 · 推荐</span>
+              </div>
+              <div class="shot-cta-row">
+                <div style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-faint); font-size: 12px;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--mint)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3"></rect><rect x="9" y="9" width="6" height="6"></rect></svg>
+                  使用 Claude · 推荐
+                </div>
+                <div class="shot-cta">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.5L18 9l-4.2 1.5L12 15l-1.8-4.5L6 9l4.2-1.5L12 3z"></path><path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14z"></path></svg>
+                  开始生成
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- === 3 步演示 === -->
+  <section class="section" id="how">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">如何使用</span>
+        <h2>从文案到视频<br>只需要 <span class="accent">3 步</span></h2>
+        <p>无需剪辑经验，无需找图配音 — 把文案交给 Storybound</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <span class="step-corner-shine"></span>
+          <span class="step-corner"></span>
+          <div class="step-num">1</div>
+          <div class="step-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="4" rx="1"></rect><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><path d="M9 14l2 2 4-4"></path></svg>
+          </div>
+          <h3>粘贴文案</h3>
+          <p>把对标爆款的原文案、自己写的初稿，或者一段灵感片段贴进去 — 长度不限，推荐中长文案。</p>
+        </div>
+        <div class="step">
+          <span class="step-corner-shine"></span>
+          <span class="step-corner"></span>
+          <div class="step-num">2</div>
+          <div class="step-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.5L18 9l-4.2 1.5L12 15l-1.8-4.5L6 9l4.2-1.5L12 3z"></path><path d="M19 14l.9 2.1L22 17l-2.1.9L19 20l-.9-2.1L16 17l2.1-.9L19 14z"></path></svg>
+          </div>
+          <h3>等待几分钟</h3>
+          <p>AI 自动跑完 7 步流水线：改写、分镜、配图、配音、剪映打包 — 中间随时可暂停修改。</p>
+        </div>
+        <div class="step">
+          <span class="step-corner-shine"></span>
+          <span class="step-corner"></span>
+          <div class="step-num">3</div>
+          <div class="step-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M10 14L21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"></path></svg>
+          </div>
+          <h3>剪映打开</h3>
+          <p>直接在剪映里看到草稿，文字 / 音频 / 图片 / BGM 全套齐活 — 微调发布。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- === 4 个功能卡片 === -->
+  <section class="section" id="features" style="padding-top: 40px;">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">核心功能</span>
+        <h2>每一步都<span class="accent">省到极致</span></h2>
+        <p>过去做一条视频要 2-3 小时，Storybound 把每个痛点都换成了"一键"</p>
+      </div>
+      <div class="features">
+
+        <!-- Feature 1: 改写 -->
+        <div class="feature">
+          <div class="feature-text">
+            <div class="feature-meta">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.5L18 9l-4.2 1.5L12 15l-1.8-4.5L6 9l4.2-1.5L12 3z"></path></svg>
+              AI 智能改写
+            </div>
+            <h3>
+              <span class="pain">不会写口播文案？</span>
+              AI 帮你改写
+            </h3>
+            <p class="feature-desc">粘贴对标文案，AI 自动拆解爆款结构，按你选的赛道改写为适合口播的版本 — 一气呵成。</p>
+            <ul class="feature-list">
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>拆解爆款节奏与钩子</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>适配人物故事 / 健康 / 文化等多赛道</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>同步生成封面文案、发布文案、话题标签、评论预埋</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>支持 DeepSeek / 通义 / Kimi / 智谱 / MiniMax 等多家 LLM · 可自定义接入</li>
+            </ul>
+          </div>
+          <div class="feature-visual">
+            <div class="v-diff">
+              <div class="v-diff-col">
+                <span class="v-diff-label">原文</span>
+                <p>1972年的冬天，贵州一个土坯房里，22岁的李泽英抱着两个孩子。她是雇主请来的保姆…</p>
+              </div>
+              <div class="v-diff-col after">
+                <span class="v-diff-label">改写后</span>
+                <p>那一年贵州的风，刮得能割人。土坯房里站着个 22 岁的姑娘，怀里两个还在吃奶的娃娃 — 都不是她生的…</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 2: 配图 -->
+        <div class="feature">
+          <div class="feature-text">
+            <div class="feature-meta">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><circle cx="9" cy="9" r="2"></circle><path d="M21 15l-5-5L5 21"></path></svg>
+              批量生图
+            </div>
+            <h3>
+              <span class="pain">懒得找图？</span>
+              AI 给你配齐分镜图
+            </h3>
+            <p class="feature-desc">即梦 + 全能绘图双引擎并发出图 · 10 种精选画风一键切换 · 还能 AI 帮你创建专属风格。</p>
+            <ul class="feature-list">
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>即梦 + 全能绘图双引擎，3 路并发</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>10 种精选画风：黑白摄影 / 油画 / 古风电影 / 皮克斯 3D / 中国水墨…</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">AI 自定义风格</strong>：一句话描述自动生成，或基于内置改写</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>失败自动降级，不卡在单张图上</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>人像参考图，主角形象前后一致</li>
+            </ul>
+          </div>
+          <div class="feature-visual">
+            <div class="v-gallery">
+              <div class="v-shot" data-style="黑白摄影"><img src="users/gallery/gallery-01.jpg" alt="黑白摄影风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="写实彩色"><img src="users/gallery/gallery-02.jpg" alt="写实彩色风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="油画风格"><img src="users/gallery/gallery-03.jpg" alt="油画风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="现代电影"><img src="users/gallery/gallery-04.jpg" alt="现代电影风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="古风电影"><img src="users/gallery/gallery-05.jpg" alt="古风电影风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="复古胶片"><img src="users/gallery/gallery-06.jpg" alt="复古胶片风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="水彩治愈"><img src="users/gallery/gallery-07.jpg" alt="水彩治愈风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="杂志插画"><img src="users/gallery/gallery-08.jpg" alt="杂志插画风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="皮克斯 3D"><img src="users/gallery/gallery-09.jpg" alt="皮克斯 3D 风格示例" loading="lazy" onerror="this.remove()"></div>
+              <div class="v-shot" data-style="中国水墨"><img src="users/gallery/gallery-10.jpg" alt="中国水墨风格示例" loading="lazy" onerror="this.remove()"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 3: 配音 -->
+        <div class="feature">
+          <div class="feature-text">
+            <div class="feature-meta">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M19 10a7 7 0 0 1-14 0M12 18v4"></path></svg>
+              多音色配音
+            </div>
+            <h3>
+              <span class="pain">不想找配音师？</span>
+              100+ 优质音色任你挑
+            </h3>
+            <p class="feature-desc">火山引擎 + MiniMax 双家精选音色，还可以上传 8 秒克隆你自己的声音。</p>
+            <ul class="feature-list">
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>火山引擎系统精选音色（含方言）</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>MiniMax 全量音色库 + 高质量预设</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>声音克隆：上传 8 秒克隆你自己的声音</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>5 档语速精调 + 失败自动重试</li>
+            </ul>
+          </div>
+          <div class="feature-visual">
+            <div class="v-voices">
+              <div class="v-voice on">
+                <div class="v-voice-radio"></div>
+                <div class="v-voice-name">东方浩然</div>
+                <div class="v-wave"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+                <div class="v-voice-tag">沉稳叙述</div>
+              </div>
+              <div class="v-voice">
+                <div class="v-voice-radio"></div>
+                <div class="v-voice-name">温柔小雅</div>
+                <div class="v-voice-play">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                </div>
+                <div class="v-voice-tag">治愈女声</div>
+              </div>
+              <div class="v-voice">
+                <div class="v-voice-radio"></div>
+                <div class="v-voice-name">渊博小叔</div>
+                <div class="v-voice-play">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                </div>
+                <div class="v-voice-tag">成熟稳重</div>
+              </div>
+              <div class="v-voice">
+                <div class="v-voice-radio"></div>
+                <div class="v-voice-name">爽快思思</div>
+                <div class="v-voice-play">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+                </div>
+                <div class="v-voice-tag">Skye · 干练</div>
+              </div>
+              <div class="v-voice">
+                <div class="v-voice-radio" style="border-style:dashed; background: transparent;"></div>
+                <div class="v-voice-name" style="color:var(--mint-bright)">+ 克隆我自己的声音</div>
+                <div class="v-voice-tag" style="margin-left:auto;">8 秒上传</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Feature 4: 剪映 -->
+        <div class="feature">
+          <div class="feature-text">
+            <div class="feature-meta">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path></svg>
+              剪映草稿导出
+            </div>
+            <h3>
+              <span class="pain">不会剪辑软件？</span>
+              直接打开剪映就能用
+            </h3>
+            <p class="feature-desc">完整剪映工程文件一次打包好，字幕、音频、图片、BGM、转场全套齐活。</p>
+            <ul class="feature-list">
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>原生剪映 draft 工程文件，无需导入</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>字幕 / 音频 / 图片 / BGM 全部已对齐</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>支持模板系统，一键套用既往配置</li>
+              <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>改完图后一键重新打包，旧草稿覆盖</li>
+            </ul>
+          </div>
+          <div class="feature-visual">
+            <div class="v-jianying">
+              <div class="v-jy-head">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"></path></svg>
+                剪映 · 草稿
+              </div>
+              <div class="v-jy-list">
+                <div class="v-jy-item fresh">
+                  <div class="v-jy-thumb"></div>
+                  <div class="v-jy-name">李泽英 · 中国最傻的保姆</div>
+                  <div class="v-jy-badge">NEW</div>
+                  <div class="v-jy-time">刚刚</div>
+                </div>
+                <div class="v-jy-item">
+                  <div class="v-jy-thumb"></div>
+                  <div class="v-jy-name">苏轼在黄州的那四年</div>
+                  <div class="v-jy-time">14:22</div>
+                </div>
+                <div class="v-jy-item">
+                  <div class="v-jy-thumb"></div>
+                  <div class="v-jy-name">钱学森回国那五年</div>
+                  <div class="v-jy-time">昨天</div>
+                </div>
+                <div class="v-jy-item">
+                  <div class="v-jy-thumb"></div>
+                  <div class="v-jy-name">屠呦呦 · 190 次失败</div>
+                  <div class="v-jy-time">3 天前</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- === 赛道矩阵 === -->
+  <section class="section" id="tracks">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">内容赛道</span>
+        <h2>10+ 内容赛道<br>每个都有<span class="accent">专属策略</span></h2>
+        <p>每个赛道都自带改写语气、画风、分镜模板 — 不是"通用 AI 工具"，是真正懂行</p>
+        <p style="margin-top: 12px; font-size: 14.5px; color: var(--mint-bright); font-weight: 500;">⚡ 赛道远程下发 · 持续上新 · <strong>无需重装软件</strong></p>
+      </div>
+      <div class="tracks">
+        <div class="track">
+          <div class="track-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+          </div>
+          <h4>人物故事</h4>
+          <div class="track-sub">历史名人 · 真实传记</div>
+        </div>
+        <div class="track">
+          <div class="track-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+          </div>
+          <h4>健康图书</h4>
+          <div class="track-sub">养生医学 · 中医书单</div>
+        </div>
+        <div class="track">
+          <div class="track-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+          </div>
+          <h4>民间故事</h4>
+          <div class="track-sub">传说神话 · 民间奇谭</div>
+        </div>
+        <div class="track">
+          <div class="track-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+          </div>
+          <h4>文化科普</h4>
+          <div class="track-sub">华夏文化 · 国学经典</div>
+        </div>
+        <div class="track">
+          <div class="track-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+          </div>
+          <h4>绘本故事</h4>
+          <div class="track-sub">儿童睡前 · 童话经典</div>
+        </div>
+        <div class="track">
+          <div class="track-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="21" r="1"></circle><circle cx="20" cy="21" r="1"></circle><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"></path></svg>
+          </div>
+          <h4>电商带货</h4>
+          <div class="track-sub">好物推荐 · 选品测评</div>
+        </div>
+        <div class="track">
+          <div class="track-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+          </div>
+          <h4>心灵鸡汤</h4>
+          <div class="track-sub">情感治愈 · 励志成长</div>
+        </div>
+        <div class="track more">
+          <div>+ 更多赛道<br>持续扩充中</div>
+        </div>
+      </div>
+      <div class="tracks-note">
+        每个赛道自带 <strong>专属改写策略</strong> · <strong>默认画风</strong> · <strong>分镜模板</strong>，让画面跟着内容走，不再"千篇一律"
+      </div>
+    </div>
+  </section>
+
+  <!-- === 7 步流水线 === -->
+  <section class="section" id="pipeline">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">背后机制</span>
+        <h2>每条片背后<br>都有 <span class="accent">7 步流水线</span></h2>
+        <p>不是一个黑盒模型 — 每一步可见、可调、可暂停</p>
+      </div>
+      <div class="pipeline">
+        <div class="pipeline-grid">
+          <div class="pipeline-step">
+            <div class="pipeline-step-num">0</div>
+            <h4>文案预审</h4>
+            <p>清理广告 / 敏感词</p>
+            <svg class="pipeline-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+          <div class="pipeline-step">
+            <div class="pipeline-step-num">1</div>
+            <h4>智能改写</h4>
+            <p>正文 / 标题 / 发布文案</p>
+            <svg class="pipeline-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+          <div class="pipeline-step">
+            <div class="pipeline-step-num">2</div>
+            <h4>影视分镜</h4>
+            <p>拆成可配图单元</p>
+            <svg class="pipeline-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+          <div class="pipeline-step">
+            <div class="pipeline-step-num">3</div>
+            <h4>提示词生成</h4>
+            <p>每镜配画面 prompt</p>
+            <svg class="pipeline-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+          <div class="pipeline-step">
+            <div class="pipeline-step-num">4</div>
+            <h4>批量生图</h4>
+            <p>3 路并发 + 失败降级</p>
+            <svg class="pipeline-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+          <div class="pipeline-step">
+            <div class="pipeline-step-num">5</div>
+            <h4>TTS 配音</h4>
+            <p>火山 + MiniMax 双引擎</p>
+            <svg class="pipeline-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="9 18 15 12 9 6"></polyline></svg>
+          </div>
+          <div class="pipeline-step pipeline-end">
+            <div class="pipeline-step-num">6</div>
+            <h4>剪映打包</h4>
+            <p>原生 draft 工程文件</p>
+          </div>
+        </div>
+        <div class="pipeline-tag-row">
+          <span class="pipeline-tag">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg>
+            每步可暂停
+          </span>
+          <span class="pipeline-tag">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            每步可编辑
+          </span>
+          <span class="pipeline-tag">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"></path><path d="M21 4v5h-5"></path></svg>
+            任意步骤可重跑
+          </span>
+          <span class="pipeline-tag">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>
+            断点续跑，不丢进度
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- === 价格 === -->
+  <section class="section" id="pricing">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">价格方案</span>
+        <h2>选个<span class="accent">适合的方案</span></h2>
+        <p>激活码授权 · 月度任务次数（防工作室）· 权益按套餐分级</p>
+      </div>
+      <div class="pricing">
+        <div class="plan">
+          <div class="plan-name">月卡</div>
+          <div class="plan-price">
+            <span class="amount">¥99</span>
+            <span class="unit">/ 月</span>
+          </div>
+          <div class="plan-tag">适合入门 · 短期使用</div>
+          <ul class="plan-features">
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">90 个任务</strong> / 月</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>2 台设备绑定</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>完整 7 步流水线 + 全部赛道</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>双引擎生图 + 100+ 音色 · 声音克隆</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>赠 <strong style="color:var(--mint-bright)">8 积分</strong>（约 88 张额外生图）</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Storybound 软件服务群</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>软件版本免费升级</li>
+          </ul>
+          <a class="plan-btn plan-btn-ghost" href="https://buy.52aibot.com/buy/8" target="_blank" rel="noopener">立即购买</a>
+        </div>
+
+        <div class="plan featured">
+          <span class="plan-badge">🔥 推荐 · 省 41%</span>
+          <div class="plan-name">年卡</div>
+          <div class="plan-price">
+            <span class="amount">¥699</span>
+            <span class="unit">/ 年</span>
+          </div>
+          <div class="plan-tag">日常高频 · 性价比最优</div>
+          <ul class="plan-features">
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">150 个任务</strong> / 月</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>2 台设备绑定</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>月卡全部功能</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">提示词模板自定义 · 最多 5 个</strong></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>赠 <strong style="color:var(--mint-bright)">40 积分</strong>（约 444 张额外生图）</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>Storybound 软件服务群</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>软件版本免费升级</li>
+          </ul>
+          <a class="plan-btn plan-btn-primary" href="https://buy.52aibot.com/buy/9" target="_blank" rel="noopener">立即购买</a>
+        </div>
+
+        <div class="plan">
+          <div class="plan-name">永久卡</div>
+          <div class="plan-price">
+            <span class="amount">¥1899</span>
+            <span class="unit">一次性</span>
+          </div>
+          <div class="plan-tag">深度创作者 · 长期投入</div>
+          <ul class="plan-features">
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">300 个任务</strong> / 月</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">3 台设备绑定</strong></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>年卡全部功能</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">提示词模板自定义 · 无限</strong></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>赠 <strong style="color:var(--mint-bright)">120 积分</strong>（约 1333 张额外生图）</li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">独立 VIP 群 · 陪跑 · 一对一答疑</strong></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg><strong style="color:var(--mint-bright)">推荐返佣 · 单笔最高 ¥300</strong></li>
+            <li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>软件版本免费升级</li>
+          </ul>
+          <a class="plan-btn plan-btn-ghost" href="https://buy.52aibot.com/buy/10" target="_blank" rel="noopener">立即购买</a>
+        </div>
+      </div>
+      <div class="credit-packs-section">
+        <div class="credit-packs-head">
+          <h3>生图次数不够用？<span class="accent">积分灵活充值</span></h3>
+          <p>用于 <strong style="color:var(--mint-bright)">全能绘图</strong>（0.09 积分 / 张 1K 图） · <strong style="color:var(--mint-bright)">积分永久有效</strong></p>
+        </div>
+        <div class="credit-packs">
+          <a class="credit-pack" href="https://buy.52aibot.com/" target="_blank" rel="noopener">
+            <div class="credit-pack-price">¥10</div>
+            <div class="credit-pack-credits">10 积分</div>
+            <div class="credit-pack-bonus">&nbsp;</div>
+            <div class="credit-pack-shots">约 111 张图</div>
+            <div class="credit-pack-unit">¥0.0900<span class="unit-label">/ 张</span></div>
+          </a>
+          <a class="credit-pack" href="https://buy.52aibot.com/" target="_blank" rel="noopener">
+            <div class="credit-pack-price">¥50</div>
+            <div class="credit-pack-credits">55 积分</div>
+            <div class="credit-pack-bonus">送 5</div>
+            <div class="credit-pack-shots">约 611 张图</div>
+            <div class="credit-pack-unit">¥0.0818<span class="unit-label">/ 张</span></div>
+          </a>
+          <a class="credit-pack featured" href="https://buy.52aibot.com/" target="_blank" rel="noopener">
+            <span class="credit-pack-badge">🔥 主推</span>
+            <div class="credit-pack-price">¥100</div>
+            <div class="credit-pack-credits">113 积分</div>
+            <div class="credit-pack-bonus">送 13</div>
+            <div class="credit-pack-shots">约 1,255 张图</div>
+            <div class="credit-pack-unit">¥0.0796<span class="unit-label">/ 张</span></div>
+          </a>
+          <a class="credit-pack" href="https://buy.52aibot.com/" target="_blank" rel="noopener">
+            <div class="credit-pack-price">¥300</div>
+            <div class="credit-pack-credits">345 积分</div>
+            <div class="credit-pack-bonus">送 45</div>
+            <div class="credit-pack-shots">约 3,833 张图</div>
+            <div class="credit-pack-unit">¥0.0783<span class="unit-label">/ 张</span></div>
+          </a>
+          <a class="credit-pack" href="https://buy.52aibot.com/" target="_blank" rel="noopener">
+            <div class="credit-pack-price">¥500</div>
+            <div class="credit-pack-credits">580 积分</div>
+            <div class="credit-pack-bonus">送 80</div>
+            <div class="credit-pack-shots">约 6,444 张图</div>
+            <div class="credit-pack-unit">¥0.0776<span class="unit-label">/ 张</span></div>
+          </a>
+          <a class="credit-pack" href="https://buy.52aibot.com/" target="_blank" rel="noopener">
+            <div class="credit-pack-price">¥1000</div>
+            <div class="credit-pack-credits">1180 积分</div>
+            <div class="credit-pack-bonus">送 180</div>
+            <div class="credit-pack-shots">约 13,111 张图</div>
+            <div class="credit-pack-unit">¥0.0763<span class="unit-label">/ 张</span></div>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- === 真实成绩单 === -->
+  <section class="section" style="background: linear-gradient(180deg, transparent, rgba(74,222,128,0.025), transparent);">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">真实成绩</span>
+        <h2>不是数字游戏<br>是真的做出了 <span class="accent">百万播放</span></h2>
+        <p>下面这些是 Storybound 跑出的实战案例 · 数据可追溯 · 评论真实</p>
+      </div>
+
+      <div class="proof">
+
+        <!-- Block 1: 自跑数据（视频号后台真实截图） -->
+        <div class="proof-group cols-2">
+          <div class="chat-card">
+            <img class="chat-card-img" src="users/metrics/metric-1.png" alt="视频号后台数据截图 · 单条视频 10w+ 播放" loading="lazy">
+            <div class="chat-card-caption">
+              <span>真实后台数据 · <strong style="color:var(--mint-bright)">10w+ 播放</strong> · 已声明原创</span>
+              <span class="src">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                视频号后台
+              </span>
+            </div>
+          </div>
+          <div class="chat-card">
+            <img class="chat-card-img" src="users/metrics/metric-2.png" alt="两天内连出两条破百万爆款：04-28 单条 119.4w 播放、04-29 单条 112.1w 播放" loading="lazy">
+            <div class="chat-card-caption">
+              <span><strong style="color:var(--mint-bright)">两天 · 2 条破百万播放</strong> · AI 文案的爆发力</span>
+              <span class="src">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                视频号后台
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Block 2: 用户反馈（2 张原始聊天截图） -->
+        <div>
+          <p class="proof-subtitle">他们用 Storybound 之后</p>
+          <div class="proof-group cols-2">
+            <div class="chat-card">
+              <img class="chat-card-img" src="users/feedback/feedback-group.png" alt="Storybound 服务群截图 · 用户晒视频破百万播放" loading="lazy">
+              <div class="chat-card-caption">
+                <span>"破 100 了" · 群里 <strong style="color:var(--mint-bright)">第三个破百万的用户</strong></span>
+                <span class="src">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                  服务群
+                </span>
+              </div>
+            </div>
+            <div class="chat-card">
+              <img class="chat-card-img" src="users/feedback/feedback-private.png" alt="用户冲击 30 万播放的私聊截图" loading="lazy">
+              <div class="chat-card-caption">
+                <span>"准备冲击 <strong style="color:var(--mint-bright)">30 万</strong> · 压根不敢想这么多播放量"</span>
+                <span class="src">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                  私聊
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Block 3: 粉丝评论（视频号下真实评论 4 张） -->
+        <div>
+          <p class="proof-subtitle">观众真实反馈 · 文案共情力</p>
+          <div class="proof-group cols-2">
+            <div class="chat-card">
+              <img class="chat-card-img" src="users/comments/comment1.jpg" alt="wuying 的真实评论：太精彩的故事，作者赞过" loading="lazy">
+            </div>
+            <div class="chat-card">
+              <img class="chat-card-img" src="users/comments/comment2.jpg" alt="大侠的真实评论：痛哭！唯有痛哭才能表达我的情感" loading="lazy">
+            </div>
+            <div class="chat-card">
+              <img class="chat-card-img" src="users/comments/comment3.jpg" alt="丁丁的真实评论：看的我哭的稀里哗啦" loading="lazy">
+            </div>
+            <div class="chat-card">
+              <img class="chat-card-img" src="users/comments/comment4.jpg" alt="心想事成的真实评论：母亲两个字最重的样子" loading="lazy">
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- === FAQ === -->
+  <section class="section" id="faq" style="padding-top: 60px;">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="eyebrow">常见问题</span>
+        <h2>还有些<span class="accent">疑问？</span></h2>
+        <p>这里是我们被问最多的几个问题 — 没看到答案？加客服群直接问</p>
+      </div>
+      <div class="faq">
+        <details class="faq-item" open="">
+          <summary><span class="faq-num">01</span>Storybound 跟剪映、度加剪辑有什么不同？</summary>
+          <div class="faq-body">
+            剪映 / 度加剪辑是<strong>剪辑工具</strong>，需要你自己写脚本、找素材、配音。<br>
+            Storybound 是<strong>"文案 → 剪映草稿"的全自动管道</strong> — 我们帮你跑完 AI 改写、配图、配音的所有环节，最后产出剪映可直接打开的工程文件。
+            你只需要在剪映里做最后微调。
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span class="faq-num">02</span>下载就能用吗？要付费才能开始吗？</summary>
+          <div class="faq-body">
+            <strong>不用。下载安装后默认送 5 次完整流程试用机会。</strong><br>
+            你只需要自己接入 LLM、生图、TTS 的 API Key / sessionID（火山引擎、即梦、DeepSeek、通义、Kimi、MiniMax 等主流服务，也支持 OpenAI / Claude 兼容协议自定义接入），就能跑通完整流程。<br>
+            觉得好用了再考虑买月卡 / 年卡 / 永久卡 — <strong>软件能力一开始就完整给到，付费是为了解锁更多次数、模板、客服群、返佣等增值权益</strong>。
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span class="faq-num">03</span>一定要会用剪映吗？</summary>
+          <div class="faq-body">
+            会基础操作就行（拖时间轴、调字幕大小、改 BGM 音量这种）。Storybound 出来的草稿已经把字幕、音频、图片、BGM 全部对齐好了，
+            大部分时候你只需要在剪映里看一遍、调几个字幕、点导出就完事。
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span class="faq-num">04</span>生成的视频版权归谁？</summary>
+          <div class="faq-body">
+            <strong>归你</strong>。Storybound 只是工具，所有产出（文案、图片、音频、剪映草稿）的版权和使用权完全归你所有，
+            包括商用。但请确保你输入的原始文案本身合规、不侵权。
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span class="faq-num">05</span>需要联网吗？数据安全吗？</summary>
+          <div class="faq-body">
+            软件是<strong>本地桌面应用</strong>，但调用 AI 服务（LLM / 绘图 / TTS）需要联网。<br>
+            你的文案、生成的图片、音频<strong>只保存在你本地</strong>，我们不上传任何创作内容到服务器。
+            API Key / sessionID 安全存储在系统钥匙串（Windows Credential Manager / macOS Keychain）。
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span class="faq-num">06</span>支持 Mac 吗？</summary>
+          <div class="faq-body">
+            ✅ 同时支持 <strong>Windows 10/11</strong> 和 <strong>macOS 12+</strong>，Apple Silicon 原生构建。
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span class="faq-num">07</span>出图失败怎么办？</summary>
+          <div class="faq-body">
+            内置 <strong>5 级自动降级</strong>：(1) 单图失败自动重试；(2) 风控拦截自动改写提示词重新生成；
+            (3) LLM 端二次改写规避敏感词；(4) 切换备用生图引擎；(5) 仍然失败的会用兜底图占位，你可以在画廊里单张重生。
+            —— <strong>不会卡死整条任务</strong>。
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span class="faq-num">08</span>怎么找客服？</summary>
+          <div class="faq-body">
+            主页右下角有客服微信浮动按钮，扫码加群。月卡 / 年卡用户进 Storybound 软件服务群，永久卡用户进独立 VIP 群 + 陪跑 + 一对一答疑。
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary><span class="faq-num">09</span>退款政策？</summary>
+          <div class="faq-body">
+            <strong>7 天无理由全额退款</strong>。如果你试用 7 天内觉得不合适，发邮件给我们就退。
+            积分套餐已使用的部分按消耗扣除，剩余按比例退。
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- === 底部 CTA === -->
+  <section class="final-cta">
+    <div class="final-cta-bg"></div>
+    <div class="final-cta-glow"></div>
+    <div class="wrap final-cta-inner">
+      <h2>还在等什么？<br><span style="color:var(--mint-bright)">让 AI 帮你做出第一条片</span></h2>
+      <p>下载安装，粘贴一段文案，剩下的交给 Storybound</p>
+      <div class="hero-ctas" style="margin-bottom: 0;">
+        <a href="/dl/win" data-dl="auto" class="btn btn-primary btn-lg">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"></path></svg>
+          立即下载 Storybound
+        </a>
+        <a href="https://www.bilibili.com/video/BV15QV965EFC/" target="_blank" rel="noopener" class="btn btn-ghost btn-lg">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          看演示视频
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- === Footer === -->
+  <footer>
+    <div class="wrap">
+      <div class="foot-grid">
+        <div class="foot-brand">
+          <div class="logo">
+            <div class="logo-mark">S</div>
+            <span>Storybound</span>
+          </div>
+          <p>把文案变成视频的桌面 AI 工具<br>从分镜到剪映草稿全自动</p>
+        </div>
+        <div class="foot-col">
+          <h5>产品</h5>
+          <ul>
+            <li><a href="/dl/win" data-dl="auto">下载</a></li>
+            <li><a href="#pricing">价格</a></li>
+            <li><a href="#features">功能</a></li>
+            <li><a href="#faq">常见问题</a></li>
+            <li><a href="https://qnc80j2zlx.feishu.cn/docx/UzIqd9RWJolRB4xl8Xxcmz8ZnEh" target="_blank" rel="noopener">使用文档</a></li>
+          </ul>
+        </div>
+        <div class="foot-col">
+          <h5>联系客服</h5>
+          <img class="foot-qr-img" src="users/qrcode-wechat.png" alt="Storybound 客服微信二维码" onerror="this.style.display='none'">
+          <p class="foot-qr-tip">扫码加客服微信<br>获取使用支持与答疑</p>
+        </div>
+      </div>
+      <div class="foot-bottom">
+        <span>© 2026 Storybound</span>
+      </div>
+    </div>
+  </footer>
+</div>
+<button class="back-to-top" aria-label="回到顶部" title="回到顶部">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+</button>
+`;
+
