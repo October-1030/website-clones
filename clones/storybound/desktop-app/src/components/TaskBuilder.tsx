@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { contentTracks, pipelineSteps, visualStyles } from "../data/app-data";
 import { minimaxVoices, volcengineVoices } from "../data/tts-data";
+import { runLlmPipelineStep } from "../lib/llm-api";
 import { synthesizeTts } from "../lib/tts-api";
 import type {
   ExecutionMode,
@@ -9,12 +10,16 @@ import type {
   TaskDraft,
   VideoForm,
 } from "../types/app";
+import type { LlmConfig, LlmCredentialStatus, LlmPipelineStep, PipelineLlmArtifacts } from "../types/llm";
 import type { TtsConfig, TtsCredentialStatus, TtsProvider } from "../types/tts";
 import "./TaskBuilder.css";
 
 type TaskBuilderProps = {
   config: TtsConfig;
   credentialStatus: TtsCredentialStatus;
+  llmConfig: LlmConfig;
+  llmCredentialStatus: LlmCredentialStatus;
+  onLlmConfigChange: (config: LlmConfig) => void;
   onTtsConfigChange: (config: TtsConfig) => void;
   onOpenPipeline: (taskDraft: TaskDraft) => void;
   onNavigateSettings: () => void;
@@ -61,6 +66,12 @@ const videoFormOptions: Array<{
 const visualModes = ["按分镜配图", "单图封面"] as const;
 const hostPairs = ["咪仔 × 大壹", "刘飞 × 潇磊"];
 const speedOptions = ["0.9×", "1.0×", "1.1×", "1.2×"];
+const llmStepMap: Partial<Record<number, LlmPipelineStep>> = {
+  0: "precheck",
+  1: "rewrite",
+  2: "storyboard",
+  3: "prompts",
+};
 
 const statusLabels: Record<PipelineStatus, string> = {
   pending: "等待中",
@@ -116,10 +127,12 @@ function initialStepStatuses(mode: ExecutionMode, startStep: number): PipelineSt
   });
 }
 
-export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpenPipeline, onNavigateSettings }: TaskBuilderProps) {
+export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredentialStatus, onLlmConfigChange: _onLlmConfigChange, onTtsConfigChange, onOpenPipeline, onNavigateSettings }: TaskBuilderProps) {
   const taskIdRef = useRef(createTaskId());
   const ttsControllerRef = useRef<AbortController | null>(null);
+  const llmControllerRef = useRef<AbortController | null>(null);
   const pipelineAudioUrlRef = useRef("");
+  const pipelineArtifactsRef = useRef<PipelineLlmArtifacts>({});
   const [title, setTitle] = useState("");
   const [inputText, setInputText] = useState("");
   const [sourceMode, setSourceMode] = useState<SourceMode>("paste");
@@ -140,6 +153,8 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
   );
   const [activeTask, setActiveTask] = useState<TaskDraft | null>(null);
   const [pipelineError, setPipelineError] = useState("");
+  const [pipelineArtifacts, setPipelineArtifacts] = useState<PipelineLlmArtifacts>({});
+  const [pipelineScript, setPipelineScript] = useState("");
   const [pipelineAudio, setPipelineAudio] = useState<{
     url: string;
     fileName: string;
@@ -165,6 +180,7 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
         (config.volcengine.appId.trim() && config.volcengine.accessToken.trim())
         || credentialStatus.volcengine.available,
       );
+  const hasLlmCredentials = Boolean(llmConfig.apiKey.trim() || llmCredentialStatus.available);
   const finishedCount = stepStatuses.filter(
     (status) => status === "done" || status === "skipped",
   ).length;
@@ -172,9 +188,61 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
   const pauseStepSet = useMemo(() => new Set(customPauseSteps), [customPauseSteps]);
 
   useEffect(() => () => {
+    llmControllerRef.current?.abort();
     ttsControllerRef.current?.abort();
     if (pipelineAudioUrlRef.current) URL.revokeObjectURL(pipelineAudioUrlRef.current);
   }, []);
+
+  useEffect(() => {
+    pipelineArtifactsRef.current = pipelineArtifacts;
+  }, [pipelineArtifacts]);
+
+  const finishCurrentStep = useCallback((): void => {
+    const isLastStep = currentStep === pipelineSteps.length - 1;
+    const shouldPause =
+      !isLastStep &&
+      (pausePreset === "every" ||
+        (pausePreset === "key" && [1, 3, 4].includes(currentStep)) ||
+        (pausePreset === "custom" && pauseStepSet.has(currentStep)));
+
+    if (isLastStep) {
+      setStepStatuses((statuses) =>
+        statuses.map((status, index) => (index === currentStep ? "done" : status)),
+      );
+      setRunState("completed");
+      setActiveTask((task) =>
+        task ? { ...task, status: "completed", currentStep } : task,
+      );
+      return;
+    }
+
+    const nextStep = currentStep + 1;
+    setStepStatuses((statuses) =>
+      statuses.map((status, index) => {
+        if (index === currentStep) {
+          return "done";
+        }
+        if (index === nextStep) {
+          return shouldPause ? "paused" : "running";
+        }
+        return status;
+      }),
+    );
+    setCurrentStep(nextStep);
+    setActiveTask((task) =>
+      task
+        ? {
+            ...task,
+            status: shouldPause ? "paused" : "running",
+            currentStep: nextStep,
+          }
+        : task,
+    );
+
+    if (shouldPause) {
+      setRunState("paused");
+    }
+  }, [currentStep, pausePreset, pauseStepSet]);
 
   useEffect(() => {
     if (activeTask) {
@@ -183,7 +251,7 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
   }, [activeTask]);
 
   useEffect(() => {
-    if (runState !== "running" || currentStep < 0 || currentStep === 5) {
+    if (runState !== "running" || currentStep < 0 || currentStep === 5 || (llmStepMap[currentStep] && hasLlmCredentials)) {
       return;
     }
 
@@ -235,7 +303,58 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
     }, 700);
 
     return () => window.clearTimeout(timer);
-  }, [currentStep, pausePreset, pauseStepSet, runState]);
+  }, [currentStep, hasLlmCredentials, pausePreset, pauseStepSet, runState]);
+
+  useEffect(() => {
+    const llmStep = llmStepMap[currentStep];
+    if (runState !== "running" || !llmStep) return;
+
+    if (!hasLlmCredentials) {
+      return;
+    }
+
+    const controller = new AbortController();
+    llmControllerRef.current = controller;
+    setPipelineError("");
+
+    void runLlmPipelineStep({
+      step: llmStep,
+      config: llmConfig,
+      context: {
+        title: activeTask?.title ?? title,
+        inputText,
+        track,
+        videoForm,
+        visualStyle,
+      },
+      artifacts: pipelineArtifactsRef.current,
+      signal: controller.signal,
+    }).then((result) => {
+      if (controller.signal.aborted) return;
+      setPipelineArtifacts((current) => ({ ...current, [result.step]: result.data }));
+      if (result.step === "precheck") {
+        setPipelineScript(result.data.cleanText);
+      }
+      if (result.step === "rewrite") {
+        setPipelineScript(result.data.narration);
+        if (!title.trim()) setTitle(result.data.title);
+      }
+      if (result.step === "storyboard") {
+        setPipelineScript(result.data.shots.map((shot) => shot.text).join("\n"));
+      }
+      finishCurrentStep();
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setPipelineError(error instanceof Error ? error.message : "LLM 处理失败");
+      setStepStatuses((statuses) => statuses.map((status, index) => (index === currentStep ? "failed" : status)));
+      setRunState("paused");
+      setActiveTask((task) => (task ? { ...task, status: "paused", currentStep } : task));
+    }).finally(() => {
+      if (llmControllerRef.current === controller) llmControllerRef.current = null;
+    });
+
+    return () => controller.abort();
+  }, [activeTask?.title, currentStep, finishCurrentStep, hasLlmCredentials, inputText, llmConfig, runState, title, track, videoForm, visualStyle]);
 
   useEffect(() => {
     if (runState !== "running" || currentStep !== 5) return;
@@ -252,10 +371,11 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
     ttsControllerRef.current = controller;
     setPipelineError("");
     const speedValue = Number(speed.replace("×", "")) || 1;
+    const ttsText = pipelineScript.trim() || inputText;
 
     void synthesizeTts({
       provider: ttsProvider,
-      text: inputText,
+      text: ttsText,
       voiceId: selectedVoice.id,
       speed: speedValue,
       config,
@@ -289,7 +409,7 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
     });
 
     return () => controller.abort();
-  }, [activeTask?.title, config, currentStep, hasTtsCredentials, inputText, runState, selectedVoice, speed, ttsProvider]);
+  }, [activeTask?.title, config, currentStep, hasTtsCredentials, inputText, pipelineScript, runState, selectedVoice, speed, ttsProvider]);
 
   function buildTaskDraft(status: TaskDraft["status"]): TaskDraft {
     const compactText = inputText.trim();
@@ -326,6 +446,9 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
     persistTask(taskDraft);
     setSaved(false);
     setPipelineError("");
+    setPipelineArtifacts({});
+    pipelineArtifactsRef.current = {};
+    setPipelineScript(inputText.trim());
     if (pipelineAudioUrlRef.current) URL.revokeObjectURL(pipelineAudioUrlRef.current);
     pipelineAudioUrlRef.current = "";
     setPipelineAudio(null);
@@ -349,7 +472,7 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
   function handleContinue(): void {
     setStepStatuses((statuses) =>
       statuses.map((status, index) =>
-        index === currentStep && status === "paused" ? "running" : status,
+        index === currentStep && (status === "paused" || status === "failed") ? "running" : status,
       ),
     );
     setActiveTask((task) => (task ? { ...task, status: "running" } : task));
@@ -357,6 +480,7 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
   }
 
   function handleCancel(): void {
+    llmControllerRef.current?.abort();
     ttsControllerRef.current?.abort();
     setRunState("cancelled");
     setStepStatuses((statuses) =>
@@ -370,8 +494,14 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
   }
 
   function runFromStep(stepId: number): void {
+    llmControllerRef.current?.abort();
     ttsControllerRef.current?.abort();
     setPipelineError("");
+    if (stepId <= 0) {
+      setPipelineArtifacts({});
+      pipelineArtifactsRef.current = {};
+    }
+    if (stepId <= 1) setPipelineScript(inputText.trim());
     if (stepId <= 5) {
       if (pipelineAudioUrlRef.current) URL.revokeObjectURL(pipelineAudioUrlRef.current);
       pipelineAudioUrlRef.current = "";
@@ -426,13 +556,21 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
           </div>
         </header>
 
-        <aside className={`credential-warning${hasTtsCredentials ? " credential-warning--partial" : ""}`} aria-label="凭证配置提醒">
+        <aside className={`credential-warning${hasTtsCredentials && hasLlmCredentials ? " credential-warning--ready" : hasTtsCredentials || hasLlmCredentials ? " credential-warning--partial" : ""}`} aria-label="凭证配置提醒">
           <span className="credential-warning__icon" aria-hidden="true">
             △
           </span>
           <div className="credential-warning__copy">
-            <strong>{hasTtsCredentials ? "TTS 已就绪，还有 1 项凭证未配置" : "还有 2 项凭证未配置"}</strong>
-            <span>{hasTtsCredentials ? `${ttsProvider === "minimax" ? "MiniMax" : "火山引擎"}可直接配音 · 仍需 LLM API Key` : "LLM API Key、TTS 凭证"}</span>
+            <strong>{hasTtsCredentials && hasLlmCredentials ? "LLM 与 TTS 均已就绪" : hasTtsCredentials || hasLlmCredentials ? "还有 1 项凭证未配置" : "还有 2 项凭证未配置"}</strong>
+            <span>
+              {hasTtsCredentials && hasLlmCredentials
+                ? `${llmCredentialStatus.model ?? llmConfig.model} 生成文案链路 · ${ttsProvider === "minimax" ? "MiniMax" : "火山引擎"} 配音`
+                : hasTtsCredentials
+                  ? `${ttsProvider === "minimax" ? "MiniMax" : "火山引擎"}可直接配音 · 仍需 LLM API Key`
+                  : hasLlmCredentials
+                    ? `${llmCredentialStatus.model ?? llmConfig.model} 可生成文案链路 · 仍需 TTS 凭证`
+                    : "LLM API Key、TTS 凭证"}
+            </span>
           </div>
           <button type="button" onClick={onNavigateSettings}>
             前往设置 <span aria-hidden="true">→</span>
@@ -754,7 +892,7 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
               <div>
                 <span className={`pipeline-state pipeline-state--${runState}`}>
                   {runState === "running" && "流水线执行中"}
-                  {runState === "paused" && (pipelineError ? "TTS 失败，等待处理" : "已暂停，等待确认")}
+                  {runState === "paused" && (pipelineError ? "处理失败，等待处理" : "已暂停，等待确认")}
                   {runState === "cancelled" && "任务已取消"}
                   {runState === "completed" && "全部完成"}
                 </span>
@@ -793,7 +931,7 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
               </div>
             </div>
 
-            {pipelineError ? <div className="pipeline-error"><span>配音失败：{pipelineError}</span><div><button type="button" onClick={onNavigateSettings}>检查设置</button><button type="button" onClick={handleContinue}>重试本步骤</button></div></div> : null}
+            {pipelineError ? <div className="pipeline-error"><span>步骤失败：{pipelineError}</span><div><button type="button" onClick={onNavigateSettings}>检查设置</button><button type="button" onClick={handleContinue}>重试本步骤</button></div></div> : null}
 
             <progress value={finishedCount} max={pipelineSteps.length}>
               {finishedCount} / {pipelineSteps.length}
@@ -828,6 +966,19 @@ export function TaskBuilder({ config, credentialStatus, onTtsConfigChange, onOpe
                 );
               })}
             </ol>
+            {(pipelineArtifacts.precheck || pipelineArtifacts.rewrite || pipelineArtifacts.storyboard || pipelineArtifacts.prompts) ? (
+              <div className="pipeline-artifacts">
+                <strong>真实 LLM 产物</strong>
+                <div>
+                  {pipelineArtifacts.precheck ? <span>预审：{pipelineArtifacts.precheck.warnings.length} 条提醒</span> : null}
+                  {pipelineArtifacts.rewrite ? <span>改写：{pipelineArtifacts.rewrite.title}</span> : null}
+                  {pipelineArtifacts.storyboard ? <span>分镜：{pipelineArtifacts.storyboard.shots.length} 镜</span> : null}
+                  {pipelineArtifacts.prompts ? <span>绘图 prompt：{pipelineArtifacts.prompts.prompts.length} 条</span> : null}
+                </div>
+              </div>
+            ) : !hasLlmCredentials ? (
+              <div className="pipeline-artifacts pipeline-artifacts--muted"><strong>LLM 未配置</strong><div><span>前 4 步以模拟方式通过；配置 LLM 后会生成真实改写、分镜和绘图 prompt。</span></div></div>
+            ) : null}
             {pipelineAudio ? <div className="pipeline-audio"><div><strong>真实 TTS 音频已生成</strong><span>{selectedVoice?.name ?? "当前音色"} · {pipelineAudio.segments} 段 · {(pipelineAudio.bytes / 1024).toFixed(1)} KB</span></div><audio controls src={pipelineAudio.url} /><button type="button" onClick={downloadPipelineAudio}>下载 MP3</button></div> : null}
           </section>
         )}

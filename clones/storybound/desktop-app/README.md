@@ -15,6 +15,7 @@
 - 10,000 字长文本自动分段、三路并发和 MP3 顺序合并
 - 图文任务流水线第 6 步真实生成 TTS 音频，支持失败重试、试听和下载
 - 服务端安全读取本机 MiniMax 凭据，浏览器页面不会接触密钥明文
+- OpenAI-compatible LLM 文案链路：文案预审、智能改写、分镜、绘图提示词
 - 本地草稿及历史记录（浏览器 localStorage）
 
 ## 运行
@@ -33,6 +34,17 @@ MINIMAX_API_KEY=sk-...
 ```
 
 可通过 `MINIMAX_SECRETS_FILE` 环境变量指定其他路径。服务端只向页面返回“凭据是否可用”和文件名，不返回密钥内容。
+
+LLM 可在“系统设置”手工填写，也可以从本机文本文件安全读取。默认查找 `C:\tmp\storybound-secrets.txt`，格式如下：
+
+```text
+STORYBOUND_LLM_PROVIDER=deepseek
+STORYBOUND_LLM_API_KEY=sk-...
+STORYBOUND_LLM_BASE_URL=https://api.deepseek.com/v1
+STORYBOUND_LLM_MODEL=deepseek-chat
+```
+
+`STORYBOUND_LLM_PROVIDER` 可选：`deepseek`、`openai`、`siliconflow`、`custom`。服务端只向页面返回“凭据是否可用”和 provider/model，不返回密钥内容。
 
 生产检查：
 

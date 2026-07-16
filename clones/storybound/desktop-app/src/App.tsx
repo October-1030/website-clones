@@ -8,9 +8,12 @@ import { SupportPage } from "./components/SupportPage";
 import { TaskBuilder } from "./components/TaskBuilder";
 import { TtsSettingsPage } from "./components/TtsSettingsPage";
 import { VoiceLabPage } from "./components/VoiceLabPage";
+import { defaultLlmConfig } from "./data/llm-data";
 import { defaultTtsConfig } from "./data/tts-data";
+import { fetchLlmStatus } from "./lib/llm-api";
 import { fetchTtsStatus } from "./lib/tts-api";
 import type { AppPage } from "./types/app";
+import type { LlmConfig, LlmCredentialStatus } from "./types/llm";
 import type { TtsConfig, TtsCredentialStatus } from "./types/tts";
 
 const emptyCredentialStatus: TtsCredentialStatus = {
@@ -18,11 +21,22 @@ const emptyCredentialStatus: TtsCredentialStatus = {
   volcengine: { available: false, source: null },
 };
 
+const emptyLlmCredentialStatus: LlmCredentialStatus = {
+  available: false,
+  source: null,
+  provider: null,
+  baseUrl: null,
+  model: null,
+};
+
 function App() {
   const [currentPage, setCurrentPage] = useState<AppPage>("create");
   const [ttsConfig, setTtsConfig] = useState<TtsConfig>(defaultTtsConfig);
+  const [llmConfig, setLlmConfig] = useState<LlmConfig>(defaultLlmConfig);
   const [credentialStatus, setCredentialStatus] = useState<TtsCredentialStatus>(emptyCredentialStatus);
+  const [llmCredentialStatus, setLlmCredentialStatus] = useState<LlmCredentialStatus>(emptyLlmCredentialStatus);
   const providerWasAutoSelected = useRef(false);
+  const llmProviderWasAutoSelected = useRef(false);
 
   useEffect(() => {
     void fetchTtsStatus().then((status) => {
@@ -34,6 +48,21 @@ function App() {
     }).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    void fetchLlmStatus().then((status) => {
+      setLlmCredentialStatus(status);
+      if (status.available && !llmProviderWasAutoSelected.current) {
+        llmProviderWasAutoSelected.current = true;
+        setLlmConfig((current) => ({
+          ...current,
+          provider: status.provider ?? current.provider,
+          baseUrl: status.baseUrl ?? current.baseUrl,
+          model: status.model ?? current.model,
+        }));
+      }
+    }).catch(() => undefined);
+  }, []);
+
   return (
     <AppShell currentPage={currentPage} onNavigate={setCurrentPage}>
       {currentPage === "create" ? <CreatePage onSelect={setCurrentPage} /> : null}
@@ -41,6 +70,9 @@ function App() {
         <TaskBuilder
           config={ttsConfig}
           credentialStatus={credentialStatus}
+          llmConfig={llmConfig}
+          llmCredentialStatus={llmCredentialStatus}
+          onLlmConfigChange={setLlmConfig}
           onTtsConfigChange={setTtsConfig}
           onOpenPipeline={() => undefined}
           onNavigateSettings={() => setCurrentPage("settings")}
@@ -57,7 +89,14 @@ function App() {
         />
       ) : null}
       {currentPage === "settings" ? (
-        <TtsSettingsPage config={ttsConfig} credentialStatus={credentialStatus} onChange={setTtsConfig} />
+        <TtsSettingsPage
+          config={ttsConfig}
+          credentialStatus={credentialStatus}
+          llmConfig={llmConfig}
+          llmCredentialStatus={llmCredentialStatus}
+          onChange={setTtsConfig}
+          onLlmChange={setLlmConfig}
+        />
       ) : null}
       {currentPage !== "create" &&
       currentPage !== "image-task" &&

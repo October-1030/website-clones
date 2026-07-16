@@ -1,19 +1,24 @@
 import { useMemo, useState } from "react";
 
+import { llmProviderOptions } from "../data/llm-data";
 import { minimaxVoices, volcengineVoices } from "../data/tts-data";
 import { cloneMinimaxVoice, fetchMinimaxVoices, testTts } from "../lib/tts-api";
+import type { LlmConfig, LlmCredentialStatus, LlmProvider } from "../types/llm";
 import type { MinimaxModel, TtsConfig, TtsCredentialStatus, TtsProvider, TtsVoice, VolcengineVersion } from "../types/tts";
 import "./TtsPages.css";
 
 interface TtsSettingsPageProps {
   config: TtsConfig;
   credentialStatus: TtsCredentialStatus;
+  llmConfig: LlmConfig;
+  llmCredentialStatus: LlmCredentialStatus;
   onChange: (config: TtsConfig) => void;
+  onLlmChange: (config: LlmConfig) => void;
 }
 
 type RequestState = { kind: "idle" | "busy" | "success" | "error"; message: string };
 
-export function TtsSettingsPage({ config, credentialStatus, onChange }: TtsSettingsPageProps) {
+export function TtsSettingsPage({ config, credentialStatus, llmConfig, llmCredentialStatus, onChange, onLlmChange }: TtsSettingsPageProps) {
   const [requestState, setRequestState] = useState<RequestState>({ kind: "idle", message: "" });
   const [showCloneForm, setShowCloneForm] = useState(false);
   const [cloneFile, setCloneFile] = useState<File | null>(null);
@@ -33,6 +38,17 @@ export function TtsSettingsPage({ config, credentialStatus, onChange }: TtsSetti
     onChange({ ...config, volcengine: { ...config.volcengine, ...patch } });
   const updateMinimax = (patch: Partial<TtsConfig["minimax"]>) =>
     onChange({ ...config, minimax: { ...config.minimax, ...patch } });
+  const updateLlm = (patch: Partial<LlmConfig>) => onLlmChange({ ...llmConfig, ...patch });
+
+  const setLlmProvider = (provider: LlmProvider) => {
+    const preset = llmProviderOptions.find((option) => option.value === provider);
+    onLlmChange({
+      ...llmConfig,
+      provider,
+      baseUrl: preset?.baseUrl ?? llmConfig.baseUrl,
+      model: preset?.model ?? llmConfig.model,
+    });
+  };
 
   const pickVolcengineVersion = (version: VolcengineVersion) => {
     const first = volcengineVoices.find((voice) => voice.version === version);
@@ -93,9 +109,32 @@ export function TtsSettingsPage({ config, credentialStatus, onChange }: TtsSetti
     <div className="tts-page tts-settings-page">
       <header className="tts-page-header">
         <div className="tts-heading-icon" aria-hidden="true">◖</div>
-        <div><h1>TTS 配置</h1><p>每镜语音生成 · 多 provider 支持</p></div>
+        <div><h1>系统设置</h1><p>LLM 文案链路 · TTS 配音 · 本地凭据</p></div>
         <span className="tts-memory-badge">仅当前会话保存</span>
       </header>
+
+      <section className="tts-card">
+        <label className="tts-label">LLM 引擎</label>
+        <div className="tts-provider-grid tts-provider-grid--four">
+          {llmProviderOptions.map((option) => (
+            <button className={llmConfig.provider === option.value ? "selected" : ""} key={option.value} onClick={() => setLlmProvider(option.value)} type="button">
+              <strong>{option.name}</strong>
+              <span>{option.description}</span>
+            </button>
+          ))}
+        </div>
+        <p className="tts-help">用于文案预审、改写、分镜和绘图提示词。支持 OpenAI-compatible `/chat/completions` 接口。</p>
+        <label className="tts-field">
+          <span>API Key <small>{llmCredentialStatus.available ? `已从 ${llmCredentialStatus.source ?? "本机"} 安全读取` : "必填"}</small></span>
+          <input type="password" value={llmConfig.apiKey} onChange={(event) => updateLlm({ apiKey: event.target.value })} placeholder={llmCredentialStatus.available ? "本地凭据已就绪；也可在此临时覆盖" : "粘贴 LLM API Key"} autoComplete="off" />
+        </label>
+        {llmCredentialStatus.available ? <div className="tts-local-credential"><span>✓</span><div><strong>本地 LLM 凭据可用</strong><small>{llmCredentialStatus.provider ?? llmConfig.provider} · {llmCredentialStatus.model ?? llmConfig.model} · 密钥不会传给页面</small></div></div> : null}
+        <div className="tts-two-column">
+          <label className="tts-field"><span>Base URL <small>OpenAI compatible</small></span><input value={llmConfig.baseUrl} onChange={(event) => updateLlm({ baseUrl: event.target.value })} placeholder="https://api.deepseek.com/v1" /></label>
+          <label className="tts-field"><span>模型 <small>model</small></span><input value={llmConfig.model} onChange={(event) => updateLlm({ model: event.target.value })} placeholder="deepseek-chat" /></label>
+        </div>
+        <p className="tts-help">也可以新建 `C:\tmp\storybound-secrets.txt`：`STORYBOUND_LLM_API_KEY=...`，可选 `STORYBOUND_LLM_PROVIDER`、`STORYBOUND_LLM_BASE_URL`、`STORYBOUND_LLM_MODEL`。</p>
+      </section>
 
       <section className="tts-card">
         <label className="tts-label">引擎</label>

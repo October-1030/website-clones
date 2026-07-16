@@ -10,10 +10,21 @@ const port = Number(process.env.PORT || 5173);
 const maxJsonBytes = 24 * 1024 * 1024;
 const volcengineEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
 const minimaxBase = "https://api.minimaxi.com";
+const llmProviderDefaults = {
+  openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
+  deepseek: { baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  siliconflow: { baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen3-32B" },
+  custom: { baseUrl: "", model: "" },
+};
 const minimaxSecretCandidates = [
   process.env.MINIMAX_SECRETS_FILE,
   "C:\\tmp\\minimax-secrets.txt",
   "D:\\projects\\MIMI\\coding\\Tbot\\MINIMAX.txt",
+].filter(Boolean);
+const llmSecretCandidates = [
+  process.env.STORYBOUND_LLM_SECRETS_FILE,
+  "C:\\tmp\\storybound-secrets.txt",
+  "C:\\tmp\\llm-secrets.txt",
 ].filter(Boolean);
 
 function parseMinimaxApiKey(contents) {
@@ -23,6 +34,17 @@ function parseMinimaxApiKey(contents) {
     if (labeled?.[1]?.trim()) return labeled[1].trim();
   }
   return lines.find((line) => /^sk-[A-Za-z0-9_.-]{40,}$/.test(line)) || "";
+}
+
+function parseKeyValueSecrets(contents) {
+  const values = {};
+  const lines = String(contents || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    if (line.startsWith("#")) continue;
+    const match = line.match(/^(?:export\s+)?([A-Z0-9_]+)\s*[:=]\s*["']?([^"']+?)["']?\s*$/i);
+    if (match?.[1]) values[match[1].toUpperCase()] = match[2].trim();
+  }
+  return values;
 }
 
 async function findLocalMinimaxCredential() {
@@ -54,6 +76,78 @@ async function getTtsStatus() {
       source: process.env.VOLCENGINE_APP_ID && process.env.VOLCENGINE_ACCESS_TOKEN ? "环境变量" : null,
     },
   };
+}
+
+function normalizeLlmProvider(value) {
+  const provider = String(value || "").trim().toLowerCase();
+  return Object.hasOwn(llmProviderDefaults, provider) ? provider : "deepseek";
+}
+
+async function findLocalLlmCredential() {
+  const envApiKey = process.env.STORYBOUND_LLM_API_KEY
+    || process.env.LLM_API_KEY
+    || process.env.DEEPSEEK_API_KEY
+    || process.env.OPENAI_API_KEY
+    || process.env.SILICONFLOW_API_KEY;
+  if (envApiKey) {
+    const provider = normalizeLlmProvider(process.env.STORYBOUND_LLM_PROVIDER || (process.env.OPENAI_API_KEY ? "openai" : "deepseek"));
+    const defaults = llmProviderDefaults[provider];
+    return {
+      apiKey: envApiKey,
+      provider,
+      baseUrl: process.env.STORYBOUND_LLM_BASE_URL || process.env.OPENAI_BASE_URL || defaults.baseUrl,
+      model: process.env.STORYBOUND_LLM_MODEL || defaults.model,
+      source: "环境变量",
+    };
+  }
+
+  for (const file of llmSecretCandidates) {
+    try {
+      const values = parseKeyValueSecrets(await readFile(file, "utf8"));
+      const apiKey = values.STORYBOUND_LLM_API_KEY
+        || values.LLM_API_KEY
+        || values.DEEPSEEK_API_KEY
+        || values.OPENAI_API_KEY
+        || values.SILICONFLOW_API_KEY;
+      if (!apiKey) continue;
+      const provider = normalizeLlmProvider(values.STORYBOUND_LLM_PROVIDER || values.LLM_PROVIDER || (values.OPENAI_API_KEY ? "openai" : "deepseek"));
+      const defaults = llmProviderDefaults[provider];
+      return {
+        apiKey,
+        provider,
+        baseUrl: values.STORYBOUND_LLM_BASE_URL || values.LLM_BASE_URL || values.OPENAI_BASE_URL || defaults.baseUrl,
+        model: values.STORYBOUND_LLM_MODEL || values.LLM_MODEL || defaults.model,
+        source: basename(file),
+      };
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  return null;
+}
+
+async function getLlmStatus() {
+  const local = await findLocalLlmCredential();
+  return {
+    available: Boolean(local),
+    source: local?.source || null,
+    provider: local?.provider || null,
+    baseUrl: local?.baseUrl || null,
+    model: local?.model || null,
+  };
+}
+
+async function resolveLlmConfig(input) {
+  const provider = normalizeLlmProvider(input?.provider);
+  const defaults = llmProviderDefaults[provider];
+  const local = await findLocalLlmCredential();
+  const apiKey = String(input?.apiKey || "").trim() || local?.apiKey;
+  const baseUrl = String(input?.baseUrl || "").trim() || local?.baseUrl || defaults.baseUrl;
+  const model = String(input?.model || "").trim() || local?.model || defaults.model;
+  if (!apiKey) throw new Error("请填写 LLM API Key，或在 C:\\tmp\\storybound-secrets.txt 配置 STORYBOUND_LLM_API_KEY");
+  if (!baseUrl) throw new Error("请填写 LLM Base URL");
+  if (!model) throw new Error("请填写 LLM 模型名");
+  return { provider, apiKey, baseUrl: baseUrl.replace(/\/+$/, ""), model };
 }
 
 function sendJson(response, status, value) {
@@ -283,6 +377,143 @@ async function cloneMinimaxVoice(body) {
   return { id: voiceId, name, tag: "我的克隆音色", provider: "minimax", cloned: true, demoAudio: payload.demo_audio || null };
 }
 
+function parseJsonObject(text) {
+  const raw = String(text || "").trim();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("LLM 未返回 JSON");
+    return JSON.parse(match[0]);
+  }
+}
+
+function clampString(value, fallback = "") {
+  return String(value || fallback).trim();
+}
+
+function normalizePipelineResult(step, payload, context, artifacts) {
+  if (step === "precheck") {
+    const cleanText = clampString(payload.cleanText, context.inputText).slice(0, 8000);
+    return {
+      step,
+      data: {
+        title: clampString(payload.title, context.title || cleanText.slice(0, 18)),
+        cleanText,
+        warnings: Array.isArray(payload.warnings) ? payload.warnings.map(String).slice(0, 8) : [],
+        sensitiveTerms: Array.isArray(payload.sensitiveTerms) ? payload.sensitiveTerms.map(String).slice(0, 12) : [],
+      },
+    };
+  }
+  if (step === "rewrite") {
+    const source = artifacts.precheck?.cleanText || context.inputText;
+    const narration = clampString(payload.narration, source).slice(0, 8000);
+    return {
+      step,
+      data: {
+        title: clampString(payload.title, artifacts.precheck?.title || context.title || narration.slice(0, 18)),
+        narration,
+        publishCopy: clampString(payload.publishCopy, narration.slice(0, 240)),
+        tags: Array.isArray(payload.tags) ? payload.tags.map(String).slice(0, 8) : [context.track].filter(Boolean),
+        pinnedComment: clampString(payload.pinnedComment, "你觉得这个故事最打动你的地方是什么？"),
+      },
+    };
+  }
+  if (step === "storyboard") {
+    const source = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
+    const fallbackShots = splitText(source, 85).slice(0, 12).map((text, index) => ({
+      id: index + 1,
+      text,
+      visual: "电影感人物叙事画面",
+      emotion: "克制、有悬念",
+      durationSec: Math.max(3, Math.min(8, Math.round(text.length / 12))),
+    }));
+    const shots = Array.isArray(payload.shots) ? payload.shots : fallbackShots;
+    return {
+      step,
+      data: {
+        shots: shots.slice(0, 18).map((shot, index) => ({
+          id: Number(shot.id || index + 1),
+          text: clampString(shot.text, fallbackShots[index]?.text || source.slice(0, 80)),
+          visual: clampString(shot.visual, "电影感人物叙事画面"),
+          emotion: clampString(shot.emotion, "克制、有悬念"),
+          durationSec: Math.max(2, Math.min(12, Number(shot.durationSec || 5))),
+        })),
+      },
+    };
+  }
+  const shots = artifacts.storyboard?.shots || [];
+  const prompts = Array.isArray(payload.prompts) ? payload.prompts : [];
+  return {
+    step: "prompts",
+    data: {
+      prompts: shots.map((shot, index) => {
+        const provided = prompts.find((item) => Number(item.shotId) === shot.id) || prompts[index] || {};
+        return {
+          shotId: shot.id,
+          prompt: clampString(provided.prompt, `${context.visualStyle}，${shot.visual}，${shot.emotion}，电影光影，细节丰富`),
+          negativePrompt: clampString(provided.negativePrompt, "低清晰度，畸形手指，文字水印，过曝，模糊"),
+        };
+      }),
+    },
+  };
+}
+
+function buildPipelineMessages(step, context, artifacts) {
+  const system = [
+    "你是短视频生产流水线的编导和提示词工程师。",
+    "只返回合法 JSON，不要输出 Markdown，不要解释。",
+    "内容面向中文短视频，要求节奏清楚、画面可执行、口播自然。",
+  ].join("\n");
+  const base = {
+    title: context.title,
+    track: context.track,
+    videoForm: context.videoForm,
+    visualStyle: context.visualStyle,
+    inputText: context.inputText,
+    artifacts,
+  };
+  const instructions = {
+    precheck: "清理输入文案中的广告、明显口误、重复空白和不适合配音的符号。返回 {title, cleanText, warnings, sensitiveTerms}。",
+    rewrite: "把 cleanText 改写成适合 60 秒内短视频的中文旁白，保留核心故事张力。返回 {title, narration, publishCopy, tags, pinnedComment}。",
+    storyboard: "把 narration 拆成 6 到 12 个可配图镜头。每镜头文本应适合 TTS。返回 {shots:[{id,text,visual,emotion,durationSec}]}。",
+    prompts: "根据 storyboard 为每个镜头写中文绘图 prompt，风格必须遵守 visualStyle。返回 {prompts:[{shotId,prompt,negativePrompt}]}。",
+  };
+  return [
+    { role: "system", content: system },
+    { role: "user", content: `${instructions[step]}\n\n上下文 JSON：\n${JSON.stringify(base)}` },
+  ];
+}
+
+async function runLlmPipeline(body) {
+  const step = String(body.step || "");
+  if (!["precheck", "rewrite", "storyboard", "prompts"].includes(step)) throw new Error("未知 LLM 流水线步骤");
+  const config = await resolveLlmConfig(body.config);
+  const context = body.context || {};
+  if (!String(context.inputText || "").trim()) throw new Error("缺少文案内容");
+  const artifacts = body.artifacts || {};
+  const response = await fetchWithTimeout(
+    `${config.baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: config.model,
+        messages: buildPipelineMessages(step, context, artifacts),
+        temperature: step === "prompts" ? 0.8 : 0.55,
+        response_format: { type: "json_object" },
+      }),
+    },
+    120000,
+  );
+  const text = await response.text();
+  if (!response.ok) throw new Error(`LLM HTTP ${response.status}: ${text.slice(0, 260)}`);
+  const payload = parseJsonObject(text);
+  const content = payload.choices?.[0]?.message?.content;
+  if (!content) throw new Error("LLM 响应缺少 message.content");
+  return normalizePipelineResult(step, parseJsonObject(content), context, artifacts);
+}
+
 async function handleTtsApi(request, response, pathname) {
   if (pathname === "/api/tts/status" && request.method === "GET") {
     try {
@@ -324,6 +555,31 @@ async function handleTtsApi(request, response, pathname) {
   }
 }
 
+async function handleLlmApi(request, response, pathname) {
+  if (pathname === "/api/llm/status" && request.method === "GET") {
+    try {
+      sendJson(response, 200, await getLlmStatus());
+    } catch (error) {
+      sendJson(response, 400, { error: providerMessage(error, "无法读取本地 LLM 凭据") });
+    }
+    return;
+  }
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "只支持 POST" });
+    return;
+  }
+  try {
+    const body = await readJson(request);
+    if (pathname === "/api/llm/pipeline") {
+      sendJson(response, 200, await runLlmPipeline(body));
+      return;
+    }
+    sendJson(response, 404, { error: "未知 LLM 接口" });
+  } catch (error) {
+    sendJson(response, 400, { error: providerMessage(error, "LLM 请求失败") });
+  }
+}
+
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -353,6 +609,10 @@ const server = createServer(async (request, response) => {
   const pathname = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`).pathname;
   if (pathname.startsWith("/api/tts/")) {
     await handleTtsApi(request, response, pathname);
+    return;
+  }
+  if (pathname.startsWith("/api/llm/")) {
+    await handleLlmApi(request, response, pathname);
     return;
   }
   if (vite) {
