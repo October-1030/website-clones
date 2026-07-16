@@ -27,6 +27,13 @@ export interface PipelineContext {
   videoForm: string;
   visualStyle: string;
   aspectRatio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
+  sourceMode?: "paste" | "ai";
+  rewriteIntensity?: string;
+  narrativePov?: string;
+  targetLength?: number | null;
+  targetScenes?: number | null;
+  fixedIntro?: string;
+  outroCta?: string;
 }
 
 export type LlmPipelineStep = "precheck" | "rewrite" | "storyboard" | "prompts";
@@ -40,10 +47,15 @@ export interface PrecheckResult {
 
 export interface RewriteResult {
   title: string;
+  subtitle?: string[];
   narration: string;
   publishCopy: string;
+  summary?: string;
   tags: string[];
   pinnedComment: string;
+  comments?: string[];
+  scores?: Record<string, number>;
+  totalScore?: number;
 }
 
 export interface StoryboardShot {

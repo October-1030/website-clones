@@ -6,12 +6,19 @@ interface TtsRequestOptions {
   voiceId: string;
   speed: number;
   config: TtsConfig;
+  taskId?: string;
+  shotId?: number;
+  fileName?: string;
   signal?: AbortSignal;
 }
 
 interface TtsAudioResponse {
   blob: Blob;
   segments: number;
+  durationSec: number;
+  assetUrl?: string;
+  assetPath?: string;
+  fileName?: string;
 }
 
 async function responseError(response: Response): Promise<string> {
@@ -40,6 +47,9 @@ async function requestAudio(path: string, options: TtsRequestOptions): Promise<T
       voiceId: options.voiceId,
       speed: options.speed,
       config: providerConfig(options.config, options.provider),
+      taskId: options.taskId,
+      shotId: options.shotId,
+      fileName: options.fileName,
     }),
     signal: options.signal,
   });
@@ -47,6 +57,10 @@ async function requestAudio(path: string, options: TtsRequestOptions): Promise<T
   return {
     blob: await response.blob(),
     segments: Number(response.headers.get("X-TTS-Segments") || 1),
+    durationSec: Number(response.headers.get("X-TTS-Duration") || 0),
+    assetUrl: decodeURIComponent(response.headers.get("X-Asset-Url") || "") || undefined,
+    assetPath: decodeURIComponent(response.headers.get("X-Asset-Path") || "") || undefined,
+    fileName: decodeURIComponent(response.headers.get("X-Asset-File") || "") || undefined,
   };
 }
 

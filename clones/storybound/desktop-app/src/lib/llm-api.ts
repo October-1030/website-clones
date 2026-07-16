@@ -50,3 +50,22 @@ export async function runLlmPipelineStep(options: LlmPipelineRequest): Promise<L
   if (!response.ok) throw new Error(await responseError(response));
   return response.json() as Promise<LlmPipelineResult>;
 }
+
+export async function createAiCopy(options: Omit<LlmPipelineRequest, "step" | "artifacts">): Promise<LlmPipelineResult & { step: "rewrite" }> {
+  const response = await fetch("/api/llm/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      config: {
+        provider: options.config.provider,
+        apiKey: options.config.apiKey,
+        baseUrl: options.config.baseUrl,
+        model: options.config.model,
+      },
+      context: options.context,
+    }),
+    signal: options.signal,
+  });
+  if (!response.ok) throw new Error(await responseError(response));
+  return response.json() as Promise<LlmPipelineResult & { step: "rewrite" }>;
+}

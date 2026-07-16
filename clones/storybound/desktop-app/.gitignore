@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.storybound-data/
+.draft-probe/
 
 # Editor directories and files
 .vscode/*

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import "./App.css";
 import { AppShell } from "./components/AppShell";
@@ -29,14 +29,98 @@ const emptyLlmCredentialStatus: LlmCredentialStatus = {
   model: null,
 };
 
+const appPages: AppPage[] = ["create", "image-task", "html-video", "music-mv", "queue", "history", "playground", "voice-lab", "person-assets", "prompt-templates", "draft-templates", "book-selection", "benchmark", "market", "settings", "account", "activation"];
+
+function readRoute(): { page: AppPage; taskId: string | null } {
+  const params = new URLSearchParams(window.location.search);
+  const taskId = params.get("task");
+  const pageValue = params.get("page");
+  const page = appPages.includes(pageValue as AppPage) ? pageValue as AppPage : taskId ? "image-task" : "create";
+  return { page, taskId: page === "image-task" ? taskId : null };
+}
+
+function writeRoute(page: AppPage, taskId: string | null): void {
+  const params = new URLSearchParams();
+  if (page !== "create") params.set("page", page);
+  if (page === "image-task" && taskId) params.set("task", taskId);
+  const query = params.toString();
+  window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}`);
+}
+
+function readQueue(): string[] {
+  try {
+    const value = JSON.parse(window.localStorage.getItem("storybound-active-queue") || "[]");
+    return Array.isArray(value) ? value.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
 function App() {
-  const [currentPage, setCurrentPage] = useState<AppPage>("create");
+  const initialRoute = useRef(readRoute());
+  const [currentPage, setCurrentPage] = useState<AppPage>(initialRoute.current.page);
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(initialRoute.current.taskId);
+  const [activeQueue, setActiveQueue] = useState<string[]>(readQueue);
+  const activeQueueRef = useRef(activeQueue);
   const [ttsConfig, setTtsConfig] = useState<TtsConfig>(defaultTtsConfig);
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(defaultLlmConfig);
   const [credentialStatus, setCredentialStatus] = useState<TtsCredentialStatus>(emptyCredentialStatus);
   const [llmCredentialStatus, setLlmCredentialStatus] = useState<LlmCredentialStatus>(emptyLlmCredentialStatus);
   const providerWasAutoSelected = useRef(false);
   const llmProviderWasAutoSelected = useRef(false);
+  const handleOpenPipeline = useCallback(() => undefined, []);
+  const handleNavigate = useCallback((page: AppPage) => {
+    if (page === "create") setCurrentTaskId(null);
+    setCurrentPage(page);
+  }, []);
+  const handleCreateSelect = useCallback((page: "image-task" | "html-video" | "music-mv") => {
+    if (page === "image-task") setCurrentTaskId(null);
+    setCurrentPage(page);
+  }, []);
+  const handleOpenTask = useCallback((taskId: string | null) => {
+    setCurrentTaskId(taskId);
+    setCurrentPage("image-task");
+  }, []);
+  const handleRunQueue = useCallback((taskIds: string[]) => {
+    const queue = [...new Set(taskIds)];
+    activeQueueRef.current = queue;
+    setActiveQueue(queue);
+    if (queue[0]) {
+      setCurrentTaskId(queue[0]);
+      setCurrentPage("image-task");
+    }
+  }, []);
+  const handleQueueAdvance = useCallback((taskId: string) => {
+    const remaining = activeQueueRef.current.filter((id) => id !== taskId);
+    activeQueueRef.current = remaining;
+    setActiveQueue(remaining);
+    if (remaining[0]) {
+      setCurrentTaskId(remaining[0]);
+      setCurrentPage("image-task");
+    } else {
+      setCurrentTaskId(null);
+      setCurrentPage("queue");
+    }
+  }, []);
+
+  useEffect(() => {
+    writeRoute(currentPage, currentTaskId);
+  }, [currentPage, currentTaskId]);
+
+  useEffect(() => {
+    activeQueueRef.current = activeQueue;
+    window.localStorage.setItem("storybound-active-queue", JSON.stringify(activeQueue));
+  }, [activeQueue]);
+
+  useEffect(() => {
+    const restoreRoute = () => {
+      const route = readRoute();
+      setCurrentPage(route.page);
+      setCurrentTaskId(route.taskId);
+    };
+    window.addEventListener("popstate", restoreRoute);
+    return () => window.removeEventListener("popstate", restoreRoute);
+  }, []);
 
   useEffect(() => {
     void fetchTtsStatus().then((status) => {
@@ -64,17 +148,21 @@ function App() {
   }, []);
 
   return (
-    <AppShell currentPage={currentPage} onNavigate={setCurrentPage}>
-      {currentPage === "create" ? <CreatePage onSelect={setCurrentPage} /> : null}
+    <AppShell currentPage={currentPage} onNavigate={handleNavigate}>
+      {currentPage === "create" ? <CreatePage onSelect={handleCreateSelect} /> : null}
       {currentPage === "image-task" ? (
         <TaskBuilder
           config={ttsConfig}
           credentialStatus={credentialStatus}
           llmConfig={llmConfig}
           llmCredentialStatus={llmCredentialStatus}
+          taskId={currentTaskId}
+          autoRun={Boolean(currentTaskId && activeQueue.includes(currentTaskId))}
+          onTaskIdChange={setCurrentTaskId}
           onLlmConfigChange={setLlmConfig}
           onTtsConfigChange={setTtsConfig}
-          onOpenPipeline={() => undefined}
+          onOpenPipeline={handleOpenPipeline}
+          onQueueAdvance={handleQueueAdvance}
           onNavigateSettings={() => setCurrentPage("settings")}
         />
       ) : null}
@@ -104,7 +192,7 @@ function App() {
       currentPage !== "music-mv" &&
       currentPage !== "voice-lab" &&
       currentPage !== "settings" ? (
-        <SupportPage page={currentPage} onOpenTask={() => setCurrentPage("image-task")} />
+        <SupportPage page={currentPage} onOpenTask={handleOpenTask} onRunQueue={handleRunQueue} activeQueue={activeQueue} />
       ) : null}
     </AppShell>
   );

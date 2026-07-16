@@ -1,51 +1,81 @@
-# TaskBuilder Specification
+# TaskBuilder 完整复刻规格
 
-## Overview
-- Target: `desktop-app/src/components/TaskBuilder.tsx`
-- Screenshot: `docs/design-references/app/home.png`
-- Interaction model: form controls, chip selectors, asynchronous pipeline execution with a real TTS step
+## 范围
 
-## Form Sections
-- Page header and missing-credentials warning.
-- 文案: title, source mode, textarea, video form, content track.
-- 高级选项: execution mode, pause preset, rewrite intensity, POV and length targets.
-- 出图: material source, dynamic storyboard, style, draft template, ratio, cover.
-- 配音: voice source/provider/speaker/speed/BGM.
-- Sticky footer action bar with draft/save/start actions.
+- 目标组件：`desktop-app/src/components/TaskBuilder.tsx` 及其任务 API、产物工作台和剪映打包器。
+- 对标版本：Storybound `1.13.1` 图文任务。
+- 本地替代：原站账户、积分、创作市场和私有计费接口不复制；使用本地任务数据、用户自有 LLM/MiniMax/TTS 凭据。
+- 目标不是流水线演示，而是从创建、断点恢复、逐步编辑到剪映草稿导出的完整闭环。
 
-## Verified choices
-- Execution modes:
-  - `auto`: 全自动 · AI 改写 + 智能分句.
-  - `semi_auto`: 半自动 · 不改写，AI 智能分句.
-  - `direct`: 直接出片 · 不改写，按空行机械切.
-- Pause presets: 不暂停、关键节点、每步确认、自定义.
-- Video forms: 旁白视频 and 双人播客.
-- Tracks include 人物故事、健康图书、传统文化、绘本故事、电商带货、心灵鸡汤、民间故事、通用故事、美食探店V2.
+## 创建表单
 
-## Pipeline Execution
-- Seven ordered steps: 文案预审、智能改写与封面生成、影视分镜分句、生成绘图提示词、批量生图、TTS配音、生成剪映草稿.
-- Auto starts at 0; semi-auto marks 0 and 1 skipped; direct marks 0, 1 skipped and labels step 2 mechanical split.
-- Non-provider steps advance every ~700ms for demo; pause stops at selected checkpoints.
-- Step 6 uses the configured MiniMax or Volcengine provider to synthesize the actual task copy.
-- A TTS failure pauses the pipeline on step 6 with “检查设置” and “重试本步骤” actions.
-- A successful response displays an audio player, segment count, byte size and MP3 download action before step 7.
-- Cancelling an in-flight TTS request aborts it; rerunning from step 6 replaces the old object URL.
-- User can cancel, continue, edit step output and rerun from a completed step.
-- Persist draft/task list in localStorage for this first implementation.
+### 文案
 
-## Visual Styles
-- Page max-width 1180px; 42px 44px bottom padding.
-- Cards use dark raised surface, subtle 1px border, 10–12px radius.
-- Chip selectors are 12–13px; selected state uses green border/background.
-- Warning banner uses amber border/background.
-- When TTS is ready, the warning banner switches to green and identifies only the safe credential source filename.
-- Bottom actions remain visible while scrolling.
+- 标题可选，留空从改写结果或正文提取。
+- `paste`：粘贴已有文案。
+- `ai`：输入主题、关键词和创作要求，调用 WriterAgent 生成原稿后进入流水线。
+- 视频形式：旁白视频、双人播客。
+- 内容赛道使用原包 1.13.1 的赛道映射和提示词库。
 
-## Podcast State
-- Show image mode and speaker pair controls.
-- Hide normal speaker and speed controls.
-- Semi/direct display the verified `[A]` / `[B]` dialogue-format warning.
+### 高级选项
 
-## Responsive
-- Two-column choice groups collapse under 760px.
-- Sticky footer becomes a wrapping row on narrow widths.
+- 执行模式：
+  - `auto`：Step 0 预审 → Step 1 改写 → Step 2 AI 分镜。
+  - `semi_auto`：跳过 Step 0/1，从 Step 2 AI 分镜开始。
+  - `direct`：跳过 Step 0/1，Step 2 按空行和标点机械切分，禁止调用 LLM。
+- 暂停策略：不暂停、关键节点（完成 Step 0/2/3 后）、每步、自定义。
+- 改写强度、叙事视角、目标字数、目标分镜数。
+- 固定开场、锁定开场、结尾 CTA、电商带货开关。
+
+### 出图
+
+- 素材来源：AI 绘图、本地素材、人物素材库；免版税网络素材保留适配入口。
+- AI 绘图：原版动态分镜、目标时长/分镜数、失败图自动使用相邻画面补位。
+- 画风、草稿模板、画面比例、BGM 卡点、人物参考图。
+- 封面：关闭、标题封面、纯画面封面；支持第二封面。
+- 每个分镜支持改提示词、单独重画、只修复失败项、上传替换、前后镜补位和裁切定位。
+
+### 配音
+
+- TTS：MiniMax/火山、音色、语速、逐镜生成。
+- 外部音频：本地上传；按已有分镜和音频时长生成可编辑字幕时间线。
+- 播客：严格解析 `[A]`/`[B]`，分别使用两个音色合成并按原顺序拼接；单图封面可铺满全片。
+- BGM 可上传并进入最终草稿。
+
+## 七步流水线
+
+| Step | 产物 | 可编辑/修复能力 |
+| --- | --- | --- |
+| 0 文案预审 | 清洗正文、提醒、敏感词 | 编辑清洗正文，保存后继续 |
+| 1 智能改写与封面 | 正文、标题、发布文案、标签、置顶评论 | 全字段编辑，从 Step 2 续跑 |
+| 2 影视分镜分句 | 分镜文本、画面描述、情绪、预计时长、人物卡 | 增删改排序分镜 |
+| 3 绘图提示词 | 每镜正/负提示词 | 逐条编辑，只重生后续图 |
+| 4 批量生图 | 分镜图片及状态 | 单镜重画、补失败、上传替换、相邻补位 |
+| 5 配音与字幕 | 逐镜音频、整篇播客、SRT 和时间线 | 单镜重配、双人声重配、外部音频重对齐 |
+| 6 剪映草稿 | `draft_info.json`、`draft_meta_info.json`、媒体目录、SRT、manifest | 只重新打包，不重跑 AI/图片/TTS |
+
+## 任务模型与恢复
+
+- 每个任务有独立目录：`tasks/<taskId>/task.json`、`images/`、`audio/`、`draft/`、`uploads/`。
+- 每次表单变更、步骤开始/完成/失败和产物编辑均写入任务快照。
+- 历史页能按任务 ID 打开真实任务；刷新或重启服务后恢复同一任务和产物。
+- 任务列表支持草稿、排队、运行、暂停、完成、失败和取消状态。
+- 从任一步重跑只清理该步及其下游产物；“只修复失败项”不覆盖成功项。
+
+## 剪映草稿
+
+- 以微秒为时间单位建立图片、主音频、字幕和可选 BGM 轨道。
+- 图片片段时长以对应音频时长为准；没有音频时使用分镜预计时长。
+- 字幕文本与每镜音频区间一一对应。
+- 生成可下载的草稿目录/压缩包，并提供“重新打包”入口。
+- UI 明确显示草稿目录、总时长、轨道数和媒体缺失项；缺少必要媒体时禁止假成功。
+
+## 验收
+
+- 三种模式在相同输入下从正确步骤开始，直接模式的 Step 2 不发送 LLM 请求。
+- 关键节点准确停在完成 Step 0、2、3 之后。
+- 刷新页面、重启 Node 服务后任务和所有已生成媒体仍存在。
+- Step 1/2/3 可编辑并续跑，单张图和单段音频可独立修复。
+- 播客任务实际包含两种音色，不只是界面标签。
+- Step 6 必须在磁盘产生剪映 JSON 和媒体，不允许用定时器模拟完成。
+- `npm run lint`、`npm run build` 和本地端到端 smoke 全部通过。

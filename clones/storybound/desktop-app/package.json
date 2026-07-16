@@ -9,7 +9,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "node server.mjs --production",
-    "start": "node server.mjs --production"
+    "start": "node server.mjs --production",
+    "smoke:task": "node scripts/smoke-task-lifecycle.mjs",
+    "smoke:pipeline": "node scripts/smoke-original-pipeline.mjs"
   },
   "dependencies": {
     "react": "^19.2.7",
