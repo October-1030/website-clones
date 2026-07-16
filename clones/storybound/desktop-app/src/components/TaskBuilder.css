@@ -785,6 +785,94 @@
   border-radius: 7px;
 }
 
+.pipeline-images {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  margin-top: 14px;
+  background: rgba(18, 214, 160, 0.045);
+  border: 1px solid rgba(18, 214, 160, 0.18);
+  border-radius: 9px;
+}
+
+.pipeline-images__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pipeline-images__head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.pipeline-images__head strong {
+  color: var(--builder-brand);
+  font-size: 13px;
+}
+
+.pipeline-images__head span {
+  color: var(--builder-muted);
+  font-size: 11px;
+}
+
+.pipeline-image-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pipeline-image-grid article {
+  min-width: 0;
+  overflow: hidden;
+  background: #0e1317;
+  border: 1px solid var(--builder-border-soft);
+  border-radius: 8px;
+}
+
+.pipeline-image-grid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: #070a0d;
+}
+
+.pipeline-image-grid article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 9px 0;
+}
+
+.pipeline-image-grid strong {
+  color: var(--builder-text);
+  font-size: 12px;
+}
+
+.pipeline-image-grid button {
+  padding: 4px 8px;
+  color: var(--builder-brand);
+  background: transparent;
+  border: 1px solid rgba(18, 214, 160, 0.24);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.pipeline-image-grid p {
+  display: -webkit-box;
+  min-height: 32px;
+  margin: 6px 9px 9px;
+  overflow: hidden;
+  color: var(--builder-muted);
+  font-size: 11px;
+  line-height: 16px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 .pipeline-panel progress::-webkit-progress-bar {
   background: #20262b;
 }
@@ -1057,6 +1145,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .pipeline-image-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .copy-textarea {
     min-height: 190px;
   }
@@ -1120,6 +1212,10 @@
 
   .footer-status {
     display: none;
+  }
+
+  .pipeline-image-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .footer-actions {

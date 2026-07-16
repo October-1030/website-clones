@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { contentTracks, pipelineSteps, visualStyles } from "../data/app-data";
 import { minimaxVoices, volcengineVoices } from "../data/tts-data";
+import { generateMinimaxImages } from "../lib/image-api";
 import { runLlmPipelineStep } from "../lib/llm-api";
 import { synthesizeTts } from "../lib/tts-api";
 import type {
@@ -12,6 +13,7 @@ import type {
 } from "../types/app";
 import type { LlmConfig, LlmCredentialStatus, LlmPipelineStep, PipelineLlmArtifacts } from "../types/llm";
 import type { TtsConfig, TtsCredentialStatus, TtsProvider } from "../types/tts";
+import type { GeneratedImage } from "../types/image";
 import "./TaskBuilder.css";
 
 type TaskBuilderProps = {
@@ -127,10 +129,22 @@ function initialStepStatuses(mode: ExecutionMode, startStep: number): PipelineSt
   });
 }
 
+function splitForFallbackPrompts(text: string): string[] {
+  const source = text.trim();
+  if (!source) return [];
+  const pieces = source
+    .split(/(?<=[。！？!?；;])|\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (pieces.length > 0) return pieces.slice(0, 6);
+  return [source.slice(0, 120)];
+}
+
 export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredentialStatus, onLlmConfigChange: _onLlmConfigChange, onTtsConfigChange, onOpenPipeline, onNavigateSettings }: TaskBuilderProps) {
   const taskIdRef = useRef(createTaskId());
   const ttsControllerRef = useRef<AbortController | null>(null);
   const llmControllerRef = useRef<AbortController | null>(null);
+  const imageControllerRef = useRef<AbortController | null>(null);
   const pipelineAudioUrlRef = useRef("");
   const pipelineArtifactsRef = useRef<PipelineLlmArtifacts>({});
   const [title, setTitle] = useState("");
@@ -155,6 +169,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const [pipelineError, setPipelineError] = useState("");
   const [pipelineArtifacts, setPipelineArtifacts] = useState<PipelineLlmArtifacts>({});
   const [pipelineScript, setPipelineScript] = useState("");
+  const [pipelineImages, setPipelineImages] = useState<GeneratedImage[]>([]);
   const [pipelineAudio, setPipelineAudio] = useState<{
     url: string;
     fileName: string;
@@ -190,6 +205,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   useEffect(() => () => {
     llmControllerRef.current?.abort();
     ttsControllerRef.current?.abort();
+    imageControllerRef.current?.abort();
     if (pipelineAudioUrlRef.current) URL.revokeObjectURL(pipelineAudioUrlRef.current);
   }, []);
 
@@ -251,7 +267,13 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }, [activeTask]);
 
   useEffect(() => {
-    if (runState !== "running" || currentStep < 0 || currentStep === 5 || (llmStepMap[currentStep] && hasLlmCredentials)) {
+    if (
+      runState !== "running"
+      || currentStep < 0
+      || currentStep === 4
+      || currentStep === 5
+      || (llmStepMap[currentStep] && hasLlmCredentials)
+    ) {
       return;
     }
 
@@ -304,6 +326,60 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
     return () => window.clearTimeout(timer);
   }, [currentStep, hasLlmCredentials, pausePreset, pauseStepSet, runState]);
+
+  useEffect(() => {
+    if (runState !== "running" || currentStep !== 4) return;
+
+    if (config.provider !== "minimax" && !credentialStatus.minimax.available && !config.minimax.apiKey.trim()) {
+      setPipelineError("MiniMax 图片生成需要 MiniMax API Key，请先切换或配置 MiniMax");
+      setStepStatuses((statuses) => statuses.map((status, index) => (index === 4 ? "failed" : status)));
+      setRunState("paused");
+      setActiveTask((task) => (task ? { ...task, status: "paused", currentStep: 4 } : task));
+      return;
+    }
+
+    const prompts = pipelineArtifactsRef.current.prompts?.prompts.length
+      ? pipelineArtifactsRef.current.prompts.prompts
+      : splitForFallbackPrompts(pipelineScript || inputText).map((text, index) => ({
+          shotId: index + 1,
+          prompt: `${visualStyle}，${text}，电影感构图，主体清晰，细节丰富，适合中文短视频配图`,
+          negativePrompt: "低清晰度，模糊，文字水印，畸形手指，过曝",
+        }));
+
+    if (prompts.length === 0) {
+      setPipelineError("没有可用于生图的 prompt");
+      setStepStatuses((statuses) => statuses.map((status, index) => (index === 4 ? "failed" : status)));
+      setRunState("paused");
+      setActiveTask((task) => (task ? { ...task, status: "paused", currentStep: 4 } : task));
+      return;
+    }
+
+    const controller = new AbortController();
+    imageControllerRef.current = controller;
+    setPipelineError("");
+    setPipelineImages([]);
+
+    void generateMinimaxImages({
+      prompts,
+      apiKey: config.minimax.apiKey,
+      aspectRatio: "16:9",
+      maxImages: 6,
+    }, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      setPipelineImages(result.images);
+      finishCurrentStep();
+    }).catch((error: unknown) => {
+      if (controller.signal.aborted) return;
+      setPipelineError(error instanceof Error ? error.message : "MiniMax 生图失败");
+      setStepStatuses((statuses) => statuses.map((status, index) => (index === 4 ? "failed" : status)));
+      setRunState("paused");
+      setActiveTask((task) => (task ? { ...task, status: "paused", currentStep: 4 } : task));
+    }).finally(() => {
+      if (imageControllerRef.current === controller) imageControllerRef.current = null;
+    });
+
+    return () => controller.abort();
+  }, [config.minimax.apiKey, config.provider, credentialStatus.minimax.available, currentStep, finishCurrentStep, inputText, pipelineScript, runState, visualStyle]);
 
   useEffect(() => {
     const llmStep = llmStepMap[currentStep];
@@ -449,6 +525,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     setPipelineArtifacts({});
     pipelineArtifactsRef.current = {};
     setPipelineScript(inputText.trim());
+    setPipelineImages([]);
     if (pipelineAudioUrlRef.current) URL.revokeObjectURL(pipelineAudioUrlRef.current);
     pipelineAudioUrlRef.current = "";
     setPipelineAudio(null);
@@ -481,6 +558,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   function handleCancel(): void {
     llmControllerRef.current?.abort();
+    imageControllerRef.current?.abort();
     ttsControllerRef.current?.abort();
     setRunState("cancelled");
     setStepStatuses((statuses) =>
@@ -495,6 +573,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   function runFromStep(stepId: number): void {
     llmControllerRef.current?.abort();
+    imageControllerRef.current?.abort();
     ttsControllerRef.current?.abort();
     setPipelineError("");
     if (stepId <= 0) {
@@ -502,6 +581,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       pipelineArtifactsRef.current = {};
     }
     if (stepId <= 1) setPipelineScript(inputText.trim());
+    if (stepId <= 4) setPipelineImages([]);
     if (stepId <= 5) {
       if (pipelineAudioUrlRef.current) URL.revokeObjectURL(pipelineAudioUrlRef.current);
       pipelineAudioUrlRef.current = "";
@@ -540,6 +620,13 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     const anchor = document.createElement("a");
     anchor.href = pipelineAudio.url;
     anchor.download = pipelineAudio.fileName;
+    anchor.click();
+  }
+
+  function downloadPipelineImage(image: GeneratedImage): void {
+    const anchor = document.createElement("a");
+    anchor.href = image.url;
+    anchor.download = `storybound-shot-${String(image.shotId).padStart(2, "0")}.jpg`;
     anchor.click();
   }
 
@@ -978,6 +1065,28 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
               </div>
             ) : !hasLlmCredentials ? (
               <div className="pipeline-artifacts pipeline-artifacts--muted"><strong>LLM 未配置</strong><div><span>前 4 步以模拟方式通过；配置 LLM 后会生成真实改写、分镜和绘图 prompt。</span></div></div>
+            ) : null}
+            {pipelineImages.length > 0 ? (
+              <div className="pipeline-images">
+                <div className="pipeline-images__head">
+                  <div>
+                    <strong>真实 MiniMax 图片已生成</strong>
+                    <span>{pipelineImages.length} 张 · image-01 · {visualStyle}</span>
+                  </div>
+                </div>
+                <div className="pipeline-image-grid">
+                  {pipelineImages.map((image) => (
+                    <article key={image.id}>
+                      <img src={image.url} alt={`第 ${image.shotId} 镜生成图`} />
+                      <div>
+                        <strong>第 {image.shotId} 镜</strong>
+                        <button type="button" onClick={() => downloadPipelineImage(image)}>下载</button>
+                      </div>
+                      <p title={image.prompt}>{image.prompt}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
             ) : null}
             {pipelineAudio ? <div className="pipeline-audio"><div><strong>真实 TTS 音频已生成</strong><span>{selectedVoice?.name ?? "当前音色"} · {pipelineAudio.segments} 段 · {(pipelineAudio.bytes / 1024).toFixed(1)} KB</span></div><audio controls src={pipelineAudio.url} /><button type="button" onClick={downloadPipelineAudio}>下载 MP3</button></div> : null}
           </section>

@@ -377,6 +377,49 @@ async function cloneMinimaxVoice(body) {
   return { id: voiceId, name, tag: "我的克隆音色", provider: "minimax", cloned: true, demoAudio: payload.demo_audio || null };
 }
 
+async function generateMinimaxImages(body) {
+  const prompts = Array.isArray(body.prompts) ? body.prompts : [];
+  if (prompts.length === 0) throw new Error("缺少绘图 prompt");
+  const maxImages = Math.max(1, Math.min(8, Number(body.maxImages || 6)));
+  const aspectRatio = ["16:9", "9:16", "1:1", "4:3", "3:4"].includes(body.aspectRatio)
+    ? body.aspectRatio
+    : "16:9";
+  const selectedPrompts = prompts.slice(0, maxImages);
+  const images = await mapLimit(selectedPrompts, 2, async (item, index) => {
+    const prompt = String(item.prompt || "").trim();
+    if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
+    const payload = await minimaxJson("v1/image_generation", body.apiKey, {
+      model: "image-01",
+      prompt,
+      aspect_ratio: aspectRatio,
+      response_format: "base64",
+      n: 1,
+      prompt_optimizer: true,
+    }, 180000);
+    const base64 = payload.data?.image_base64?.[0];
+    const imageUrl = payload.data?.image_urls?.[0];
+    if (typeof base64 === "string" && base64) {
+      return {
+        id: payload.id || `minimax-image-${Date.now()}-${index}`,
+        shotId: Number(item.shotId || index + 1),
+        prompt,
+        url: `data:image/jpeg;base64,${base64}`,
+        bytes: Math.round(base64.length * 0.75),
+      };
+    }
+    if (typeof imageUrl === "string" && imageUrl) {
+      return {
+        id: payload.id || `minimax-image-${Date.now()}-${index}`,
+        shotId: Number(item.shotId || index + 1),
+        prompt,
+        url: imageUrl,
+      };
+    }
+    throw new Error("MiniMax 未返回图片数据");
+  });
+  return { images };
+}
+
 function parseJsonObject(text) {
   const raw = String(text || "").trim();
   try {
@@ -580,6 +623,23 @@ async function handleLlmApi(request, response, pathname) {
   }
 }
 
+async function handleImageApi(request, response, pathname) {
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "只支持 POST" });
+    return;
+  }
+  try {
+    const body = await readJson(request);
+    if (pathname === "/api/images/minimax/generate") {
+      sendJson(response, 200, await generateMinimaxImages(body));
+      return;
+    }
+    sendJson(response, 404, { error: "未知图片接口" });
+  } catch (error) {
+    sendJson(response, 400, { error: providerMessage(error, "图片生成失败") });
+  }
+}
+
 const mimeTypes = {
   ".html": "text/html; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
@@ -613,6 +673,10 @@ const server = createServer(async (request, response) => {
   }
   if (pathname.startsWith("/api/llm/")) {
     await handleLlmApi(request, response, pathname);
+    return;
+  }
+  if (pathname.startsWith("/api/images/")) {
+    await handleImageApi(request, response, pathname);
     return;
   }
   if (vite) {
