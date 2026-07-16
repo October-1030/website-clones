@@ -45,8 +45,18 @@ export const contentTracks = [
   "心灵鸡汤",
   "民间故事",
   "通用故事",
-  "美食探店V2",
 ];
+
+export const originalDefaultStyleByTrack: Record<string, string> = {
+  人物故事: "黑白摄影",
+  健康图书: "油画风格",
+  传统文化: "古风电影",
+  绘本故事: "皮克斯 3D",
+  电商带货: "写实彩色",
+  心灵鸡汤: "现代电影",
+  民间故事: "民间故事工笔风",
+  通用故事: "写实彩色",
+};
 
 export const visualStyles = [
   "黑白摄影",

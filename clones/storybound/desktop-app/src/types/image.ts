@@ -6,6 +6,7 @@ export interface GeneratedImage {
   prompt: string;
   url: string;
   bytes?: number;
+  retryLevel?: number;
 }
 
 export interface ImageGenerationRequest {
@@ -13,6 +14,8 @@ export interface ImageGenerationRequest {
   apiKey: string;
   aspectRatio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
   maxImages: number;
+  track: string;
+  visualStyle: string;
 }
 
 export interface ImageGenerationResponse {

@@ -5,12 +5,16 @@ import { basename, dirname, extname, join, normalize, resolve } from "node:path"
 import { fileURLToPath } from "node:url";
 
 const root = dirname(fileURLToPath(import.meta.url));
+const originalPromptLibrary = JSON.parse(
+  await readFile(join(root, "original-prompt-library.json"), "utf8"),
+);
 const production = process.argv.includes("--production");
 const port = Number(process.env.PORT || 5173);
 const maxJsonBytes = 24 * 1024 * 1024;
 const volcengineEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
 const minimaxBase = "https://api.minimaxi.com";
 const llmProviderDefaults = {
+  minimax: { baseUrl: "https://api.minimaxi.com/v1", model: "MiniMax-M2.7" },
   openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
   deepseek: { baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   siliconflow: { baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen3-32B" },
@@ -80,17 +84,21 @@ async function getTtsStatus() {
 
 function normalizeLlmProvider(value) {
   const provider = String(value || "").trim().toLowerCase();
-  return Object.hasOwn(llmProviderDefaults, provider) ? provider : "deepseek";
+  return Object.hasOwn(llmProviderDefaults, provider) ? provider : "minimax";
 }
 
 async function findLocalLlmCredential() {
   const envApiKey = process.env.STORYBOUND_LLM_API_KEY
     || process.env.LLM_API_KEY
+    || process.env.MINIMAX_API_KEY
     || process.env.DEEPSEEK_API_KEY
     || process.env.OPENAI_API_KEY
     || process.env.SILICONFLOW_API_KEY;
   if (envApiKey) {
-    const provider = normalizeLlmProvider(process.env.STORYBOUND_LLM_PROVIDER || (process.env.OPENAI_API_KEY ? "openai" : "deepseek"));
+    const provider = normalizeLlmProvider(
+      process.env.STORYBOUND_LLM_PROVIDER
+      || (process.env.MINIMAX_API_KEY ? "minimax" : process.env.OPENAI_API_KEY ? "openai" : "deepseek"),
+    );
     const defaults = llmProviderDefaults[provider];
     return {
       apiKey: envApiKey,
@@ -106,11 +114,16 @@ async function findLocalLlmCredential() {
       const values = parseKeyValueSecrets(await readFile(file, "utf8"));
       const apiKey = values.STORYBOUND_LLM_API_KEY
         || values.LLM_API_KEY
+        || values.MINIMAX_API_KEY
         || values.DEEPSEEK_API_KEY
         || values.OPENAI_API_KEY
         || values.SILICONFLOW_API_KEY;
       if (!apiKey) continue;
-      const provider = normalizeLlmProvider(values.STORYBOUND_LLM_PROVIDER || values.LLM_PROVIDER || (values.OPENAI_API_KEY ? "openai" : "deepseek"));
+      const provider = normalizeLlmProvider(
+        values.STORYBOUND_LLM_PROVIDER
+        || values.LLM_PROVIDER
+        || (values.MINIMAX_API_KEY ? "minimax" : values.OPENAI_API_KEY ? "openai" : "deepseek"),
+      );
       const defaults = llmProviderDefaults[provider];
       return {
         apiKey,
@@ -123,7 +136,14 @@ async function findLocalLlmCredential() {
       if (error?.code !== "ENOENT") throw error;
     }
   }
-  return null;
+  const minimax = await findLocalMinimaxCredential();
+  if (!minimax) return null;
+  return {
+    apiKey: minimax.apiKey,
+    provider: "minimax",
+    ...llmProviderDefaults.minimax,
+    source: minimax.source,
+  };
 }
 
 async function getLlmStatus() {
@@ -134,16 +154,26 @@ async function getLlmStatus() {
     provider: local?.provider || null,
     baseUrl: local?.baseUrl || null,
     model: local?.model || null,
+    promptLibrary: {
+      sourceVersion: originalPromptLibrary.sourceVersion,
+      trackCount: originalPromptLibrary.tracks.length,
+      styleCount: originalPromptLibrary.styles.length,
+    },
   };
 }
 
 async function resolveLlmConfig(input) {
-  const provider = normalizeLlmProvider(input?.provider);
-  const defaults = llmProviderDefaults[provider];
   const local = await findLocalLlmCredential();
-  const apiKey = String(input?.apiKey || "").trim() || local?.apiKey;
-  const baseUrl = String(input?.baseUrl || "").trim() || local?.baseUrl || defaults.baseUrl;
-  const model = String(input?.model || "").trim() || local?.model || defaults.model;
+  const providedApiKey = String(input?.apiKey || "").trim();
+  const provider = normalizeLlmProvider(providedApiKey ? input?.provider : local?.provider || input?.provider);
+  const defaults = llmProviderDefaults[provider];
+  const apiKey = providedApiKey || local?.apiKey;
+  const baseUrl = providedApiKey
+    ? String(input?.baseUrl || "").trim() || defaults.baseUrl
+    : local?.baseUrl || String(input?.baseUrl || "").trim() || defaults.baseUrl;
+  const model = providedApiKey
+    ? String(input?.model || "").trim() || defaults.model
+    : local?.model || String(input?.model || "").trim() || defaults.model;
   if (!apiKey) throw new Error("请填写 LLM API Key，或在 C:\\tmp\\storybound-secrets.txt 配置 STORYBOUND_LLM_API_KEY");
   if (!baseUrl) throw new Error("请填写 LLM Base URL");
   if (!model) throw new Error("请填写 LLM 模型名");
@@ -377,125 +407,225 @@ async function cloneMinimaxVoice(body) {
   return { id: voiceId, name, tag: "我的克隆音色", provider: "minimax", cloned: true, demoAudio: payload.demo_audio || null };
 }
 
+function originalTrack(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return originalPromptLibrary.tracks.find((track) => (
+    track.id.toLowerCase() === normalized || track.name === value
+  )) || originalPromptLibrary.tracks.find((track) => track.id === "general");
+}
+
+function originalStyle(value, track) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return originalPromptLibrary.styles.find((style) => (
+    style.id.toLowerCase() === normalized || style.name === value
+  )) || originalPromptLibrary.styles.find((style) => style.id === track?.defaultStyleId)
+    || originalPromptLibrary.styles.find((style) => style.id === "realistic");
+}
+
+function composeOriginalImagePrompt(corePrompt, style, negativePrompt = "") {
+  const positive = [style?.prefix, corePrompt, style?.suffix]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join("，");
+  const negative = String(negativePrompt || "").trim();
+  return `${positive}${negative ? `。画面中避免出现：${negative}` : ""}`.slice(0, 1500);
+}
+
 async function generateMinimaxImages(body) {
   const prompts = Array.isArray(body.prompts) ? body.prompts : [];
   if (prompts.length === 0) throw new Error("缺少绘图 prompt");
-  const maxImages = Math.max(1, Math.min(8, Number(body.maxImages || 6)));
+  const maxImages = Math.max(1, Math.min(18, Number(body.maxImages || prompts.length)));
   const aspectRatio = ["16:9", "9:16", "1:1", "4:3", "3:4"].includes(body.aspectRatio)
     ? body.aspectRatio
-    : "16:9";
+    : "9:16";
+  const track = originalTrack(body.track);
+  const style = originalStyle(body.visualStyle, track);
   const selectedPrompts = prompts.slice(0, maxImages);
-  const images = await mapLimit(selectedPrompts, 2, async (item, index) => {
-    const prompt = String(item.prompt || "").trim();
+  const images = await mapLimit(selectedPrompts, 3, async (item, index) => {
+    const prompt = String(item.prompt || "").trim().slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
-    const payload = await minimaxJson("v1/image_generation", body.apiKey, {
-      model: "image-01",
+    const retryPrompts = [
       prompt,
-      aspect_ratio: aspectRatio,
-      response_format: "base64",
-      n: 1,
-      prompt_optimizer: true,
-    }, 180000);
-    const base64 = payload.data?.image_base64?.[0];
-    const imageUrl = payload.data?.image_urls?.[0];
-    if (typeof base64 === "string" && base64) {
-      return {
-        id: payload.id || `minimax-image-${Date.now()}-${index}`,
-        shotId: Number(item.shotId || index + 1),
-        prompt,
-        url: `data:image/jpeg;base64,${base64}`,
-        bytes: Math.round(base64.length * 0.75),
-      };
+      composeOriginalImagePrompt(track?.fallbackScenes?.l2, style, style?.negativePrompt),
+      composeOriginalImagePrompt(track?.fallbackScenes?.l3, style, style?.negativePrompt),
+    ].filter(Boolean);
+    let lastError;
+    for (let attempt = 0; attempt < retryPrompts.length; attempt += 1) {
+      const activePrompt = retryPrompts[attempt];
+      try {
+        const payload = await minimaxJson("v1/image_generation", body.apiKey, {
+          model: "image-01",
+          prompt: activePrompt,
+          aspect_ratio: aspectRatio,
+          response_format: "base64",
+          n: 1,
+          prompt_optimizer: true,
+        }, 180000);
+        const base64 = payload.data?.image_base64?.[0];
+        const imageUrl = payload.data?.image_urls?.[0];
+        if (typeof base64 === "string" && base64) {
+          return {
+            id: payload.id || `minimax-image-${Date.now()}-${index}`,
+            shotId: Number(item.shotId || index + 1),
+            prompt: activePrompt,
+            retryLevel: attempt,
+            url: `data:image/jpeg;base64,${base64}`,
+            bytes: Math.round(base64.length * 0.75),
+          };
+        }
+        if (typeof imageUrl === "string" && imageUrl) {
+          return {
+            id: payload.id || `minimax-image-${Date.now()}-${index}`,
+            shotId: Number(item.shotId || index + 1),
+            prompt: activePrompt,
+            retryLevel: attempt,
+            url: imageUrl,
+          };
+        }
+        throw new Error("MiniMax 未返回图片数据");
+      } catch (error) {
+        lastError = error;
+      }
     }
-    if (typeof imageUrl === "string" && imageUrl) {
-      return {
-        id: payload.id || `minimax-image-${Date.now()}-${index}`,
-        shotId: Number(item.shotId || index + 1),
-        prompt,
-        url: imageUrl,
-      };
-    }
-    throw new Error("MiniMax 未返回图片数据");
+    throw new Error(`第 ${index + 1} 镜生图重试失败：${providerMessage(lastError, "MiniMax 生图失败")}`);
   });
   return { images };
 }
 
 function parseJsonObject(text) {
   const raw = String(text || "").trim();
-  try {
-    return JSON.parse(raw);
-  } catch {
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("LLM 未返回 JSON");
-    return JSON.parse(match[0]);
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const source = fenced || raw;
+  const start = source.indexOf("{");
+  const end = source.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new Error("LLM 未返回 JSON");
+  const candidate = source.slice(start, end + 1);
+  const repaired = candidate
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3')
+    .replace(/,\s*([}\]])/g, "$1");
+  let lastError;
+  for (const value of [raw, candidate, repaired]) {
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      lastError = error;
+    }
   }
+  throw lastError || new Error("LLM 未返回合法 JSON");
 }
 
 function clampString(value, fallback = "") {
   return String(value || fallback).trim();
 }
 
+function normalizeCharacterCard(value) {
+  if (!value || typeof value !== "object") return undefined;
+  const card = {
+    name: clampString(value.name || value.characterName || value.character),
+    identity: clampString(value.identity || value.role),
+    age: clampString(value.age || value.ageRange),
+    gender: clampString(value.gender),
+    appearance: clampString(value.appearance || value.face || value.look),
+    clothing: clampString(value.clothing || value.costume || value.outfit),
+  };
+  return Object.values(card).some(Boolean) ? card : undefined;
+}
+
+function characterCardPrompt(card) {
+  if (!card) return "";
+  return [card.name, card.identity, card.age, card.gender, card.appearance, card.clothing]
+    .map((part) => clampString(part))
+    .filter(Boolean)
+    .join("，");
+}
+
 function normalizePipelineResult(step, payload, context, artifacts) {
+  const track = originalTrack(context.track);
+  const style = originalStyle(context.visualStyle, track);
   if (step === "precheck") {
-    const cleanText = clampString(payload.cleanText, context.inputText).slice(0, 8000);
+    const cleanText = clampString(payload.cleanText || payload.cleaned_text || payload.content, context.inputText).slice(0, 10000);
     return {
       step,
       data: {
         title: clampString(payload.title, context.title || cleanText.slice(0, 18)),
         cleanText,
-        warnings: Array.isArray(payload.warnings) ? payload.warnings.map(String).slice(0, 8) : [],
-        sensitiveTerms: Array.isArray(payload.sensitiveTerms) ? payload.sensitiveTerms.map(String).slice(0, 12) : [],
+        warnings: Array.isArray(payload.warnings) ? payload.warnings.map(String).slice(0, 12) : [],
+        sensitiveTerms: Array.isArray(payload.sensitiveTerms || payload.sensitive_terms)
+          ? (payload.sensitiveTerms || payload.sensitive_terms).map(String).slice(0, 16)
+          : [],
       },
     };
   }
   if (step === "rewrite") {
     const source = artifacts.precheck?.cleanText || context.inputText;
-    const narration = clampString(payload.narration, source).slice(0, 8000);
+    const narration = clampString(payload.narration || payload.rewrittenText || payload.content || payload.text, source).slice(0, 10000);
     return {
       step,
       data: {
         title: clampString(payload.title, artifacts.precheck?.title || context.title || narration.slice(0, 18)),
         narration,
-        publishCopy: clampString(payload.publishCopy, narration.slice(0, 240)),
-        tags: Array.isArray(payload.tags) ? payload.tags.map(String).slice(0, 8) : [context.track].filter(Boolean),
-        pinnedComment: clampString(payload.pinnedComment, "你觉得这个故事最打动你的地方是什么？"),
+        publishCopy: clampString(payload.publishCopy || payload.publish_copy || payload.description, narration.slice(0, 240)),
+        tags: Array.isArray(payload.tags) ? payload.tags.map(String).slice(0, 10) : [track?.name].filter(Boolean),
+        pinnedComment: clampString(payload.pinnedComment || payload.pinned_comment || payload.comment, "你觉得这个故事最打动你的地方是什么？"),
       },
     };
   }
   if (step === "storyboard") {
     const source = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
-    const fallbackShots = splitText(source, 85).slice(0, 12).map((text, index) => ({
+    const fallbackShots = splitText(source, 85).slice(0, 18).map((text, index) => ({
       id: index + 1,
       text,
-      visual: "电影感人物叙事画面",
-      emotion: "克制、有悬念",
+      visual: track?.skeletonScenes?.[index % Math.max(1, track.skeletonScenes.length)] || "与字幕内容对应的可执行画面",
+      emotion: "克制、自然",
       durationSec: Math.max(3, Math.min(8, Math.round(text.length / 12))),
     }));
-    const shots = Array.isArray(payload.shots) ? payload.shots : fallbackShots;
+    const suppliedShots = payload.shots || payload.sentences || payload.storyboard;
+    const shots = Array.isArray(suppliedShots) && suppliedShots.length ? suppliedShots : fallbackShots;
     return {
       step,
       data: {
         shots: shots.slice(0, 18).map((shot, index) => ({
-          id: Number(shot.id || index + 1),
-          text: clampString(shot.text, fallbackShots[index]?.text || source.slice(0, 80)),
-          visual: clampString(shot.visual, "电影感人物叙事画面"),
-          emotion: clampString(shot.emotion, "克制、有悬念"),
-          durationSec: Math.max(2, Math.min(12, Number(shot.durationSec || 5))),
+          id: Number(shot.id || shot.shotId || index + 1),
+          text: clampString(shot.text || shot.cap || shot.caption || shot.narration || shot.content, fallbackShots[index]?.text || source.slice(0, 80)),
+          visual: clampString(shot.visual || shot.desc_prompt || shot.scene || shot.prompt, fallbackShots[index]?.visual || "与字幕内容对应的可执行画面"),
+          emotion: clampString(shot.emotion || shot.mood, "克制、自然"),
+          durationSec: Math.max(2, Math.min(12, Number(shot.durationSec || shot.duration_sec || shot.duration || 5))),
         })),
+        characterCard: track?.needsCharacterCard
+          ? normalizeCharacterCard(payload.characterCard || payload.character_card || payload.character)
+          : undefined,
       },
     };
   }
   const shots = artifacts.storyboard?.shots || [];
-  const prompts = Array.isArray(payload.prompts) ? payload.prompts : [];
+  const suppliedPrompts = payload.prompts || payload.sentences || payload.images;
+  const prompts = Array.isArray(suppliedPrompts) ? suppliedPrompts : [];
   return {
     step: "prompts",
     data: {
+      templateVersion: originalPromptLibrary.sourceVersion,
+      trackId: track?.id || "general",
+      styleId: style?.id || "realistic",
       prompts: shots.map((shot, index) => {
-        const provided = prompts.find((item) => Number(item.shotId) === shot.id) || prompts[index] || {};
+        const provided = prompts.find((item) => Number(item.shotId || item.id) === shot.id) || prompts[index] || {};
+        const fixedCharacter = track?.needsCharacterCard ? characterCardPrompt(artifacts.storyboard?.characterCard) : "";
+        const fallbackCore = `${shot.visual}，${shot.emotion}`;
+        const suppliedCore = clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore);
+        const corePrompt = fixedCharacter && !suppliedCore.includes(fixedCharacter.slice(0, 12))
+          ? `固定主角设定：${fixedCharacter}。当前画面：${suppliedCore}`
+          : suppliedCore;
+        const prefixMarker = clampString(style?.prefix).slice(0, 14);
+        const negativePrompt = clampString(provided.negativePrompt || provided.negative_prompt, style?.negativePrompt);
+        const positivePrompt = prefixMarker && corePrompt.includes(prefixMarker)
+          ? corePrompt
+          : composeOriginalImagePrompt(corePrompt, style);
+        const prompt = composeOriginalImagePrompt(positivePrompt, undefined, negativePrompt);
         return {
           shotId: shot.id,
-          prompt: clampString(provided.prompt, `${context.visualStyle}，${shot.visual}，${shot.emotion}，电影光影，细节丰富`),
-          negativePrompt: clampString(provided.negativePrompt, "低清晰度，畸形手指，文字水印，过曝，模糊"),
+          prompt,
+          negativePrompt,
         };
       }),
     },
@@ -503,28 +633,52 @@ function normalizePipelineResult(step, payload, context, artifacts) {
 }
 
 function buildPipelineMessages(step, context, artifacts) {
-  const system = [
-    "你是短视频生产流水线的编导和提示词工程师。",
-    "只返回合法 JSON，不要输出 Markdown，不要解释。",
-    "内容面向中文短视频，要求节奏清楚、画面可执行、口播自然。",
-  ].join("\n");
+  const track = originalTrack(context.track);
+  const style = originalStyle(context.visualStyle, track);
+  const sourceText = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
+  const originalTemplates = {
+    precheck: [originalPromptLibrary.precheckPrompt],
+    rewrite: [originalPromptLibrary.writerAgentPrompt, track?.rewritePrompt, track?.metadataPrompt],
+    storyboard: [originalPromptLibrary.sentenceSplitPrompt, originalPromptLibrary.storyboardAgentPrompt],
+    prompts: [originalPromptLibrary.producerAgentPrompt, track?.imagePrompt],
+  };
+  const outputContracts = {
+    precheck: `严格只返回 JSON：${JSON.stringify({ title: "", cleanText: "", warnings: [], sensitiveTerms: [] })}`,
+    rewrite: `严格只返回 JSON：${JSON.stringify({ title: "", narration: "", publishCopy: "", tags: [], pinnedComment: "" })}`,
+    storyboard: `严格只返回 JSON：${JSON.stringify({
+      shots: [{ id: 1, text: "", visual: "", emotion: "", durationSec: 5 }],
+      ...(track?.needsCharacterCard ? { characterCard: { name: "", identity: "", age: "", gender: "", appearance: "", clothing: "" } } : {}),
+    })}`,
+    prompts: `严格只返回 JSON：${JSON.stringify({ prompts: [{ shotId: 1, prompt: "只写画面主体、环境、动作与构图", negativePrompt: "" }] })}。prompt 不要重复画风前后缀，系统会按原版逻辑统一拼接。`,
+  };
   const base = {
     title: context.title,
-    track: context.track,
+    track: { id: track?.id, name: track?.name, needsCharacterCard: track?.needsCharacterCard },
     videoForm: context.videoForm,
-    visualStyle: context.visualStyle,
-    inputText: context.inputText,
-    artifacts,
-  };
-  const instructions = {
-    precheck: "清理输入文案中的广告、明显口误、重复空白和不适合配音的符号。返回 {title, cleanText, warnings, sensitiveTerms}。",
-    rewrite: "把 cleanText 改写成适合 60 秒内短视频的中文旁白，保留核心故事张力。返回 {title, narration, publishCopy, tags, pinnedComment}。",
-    storyboard: "把 narration 拆成 6 到 12 个可配图镜头。每镜头文本应适合 TTS。返回 {shots:[{id,text,visual,emotion,durationSec}]}。",
-    prompts: "根据 storyboard 为每个镜头写中文绘图 prompt，风格必须遵守 visualStyle。返回 {prompts:[{shotId,prompt,negativePrompt}]}。",
+    aspectRatio: context.aspectRatio || "9:16",
+    style: {
+      id: style?.id,
+      name: style?.name,
+      prefix: style?.prefix,
+      suffix: style?.suffix,
+      negativePrompt: style?.negativePrompt,
+    },
+    sourceText,
+    precheck: artifacts.precheck,
+    rewrite: artifacts.rewrite,
+    storyboard: artifacts.storyboard,
   };
   return [
-    { role: "system", content: system },
-    { role: "user", content: `${instructions[step]}\n\n上下文 JSON：\n${JSON.stringify(base)}` },
+    {
+      role: "system",
+      content: [
+        `以下是 ${originalPromptLibrary.sourceVersion} 客户端内置的原版提示词。必须按其规则执行。`,
+        ...originalTemplates[step].filter(Boolean),
+        outputContracts[step],
+        "不要输出 Markdown、解释或思考过程。",
+      ].join("\n\n"),
+    },
+    { role: "user", content: `请处理以下任务上下文：\n${JSON.stringify(base)}` },
   ];
 }
 
@@ -535,26 +689,44 @@ async function runLlmPipeline(body) {
   const context = body.context || {};
   if (!String(context.inputText || "").trim()) throw new Error("缺少文案内容");
   const artifacts = body.artifacts || {};
-  const response = await fetchWithTimeout(
-    `${config.baseUrl}/chat/completions`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: config.model,
-        messages: buildPipelineMessages(step, context, artifacts),
-        temperature: step === "prompts" ? 0.8 : 0.55,
-        response_format: { type: "json_object" },
-      }),
-    },
-    120000,
-  );
-  const text = await response.text();
-  if (!response.ok) throw new Error(`LLM HTTP ${response.status}: ${text.slice(0, 260)}`);
-  const payload = parseJsonObject(text);
-  const content = payload.choices?.[0]?.message?.content;
-  if (!content) throw new Error("LLM 响应缺少 message.content");
-  return normalizePipelineResult(step, parseJsonObject(content), context, artifacts);
+  const messages = buildPipelineMessages(step, context, artifacts);
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const requestBody = {
+      model: config.model,
+      messages: attempt === 0 ? messages : [
+        ...messages,
+        { role: "user", content: "上一次输出无法解析。请重新执行，只返回使用双引号、属性名完整加引号、无尾逗号的严格 JSON。" },
+      ],
+      temperature: attempt === 0 ? (step === "prompts" ? 0.72 : 0.45) : 0.1,
+      ...(config.provider === "minimax" ? { max_completion_tokens: 8192 } : { max_tokens: 8192, response_format: { type: "json_object" } }),
+    };
+    try {
+      const response = await fetchWithTimeout(
+        `${config.baseUrl}/chat/completions`,
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+        },
+        180000,
+      );
+      const text = await response.text();
+      if (!response.ok) {
+        const httpError = new Error(`LLM HTTP ${response.status}: ${text.slice(0, 260)}`);
+        if (response.status !== 429 && response.status < 500) throw httpError;
+        lastError = httpError;
+        continue;
+      }
+      const payload = parseJsonObject(text);
+      const content = payload.choices?.[0]?.message?.content;
+      if (!content) throw new Error("LLM 响应缺少 message.content");
+      return normalizePipelineResult(step, parseJsonObject(content), context, artifacts);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw new Error(`LLM 连续三次调用失败：${providerMessage(lastError, "解析失败")}`);
 }
 
 async function handleTtsApi(request, response, pathname) {

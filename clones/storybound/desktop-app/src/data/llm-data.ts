@@ -8,6 +8,13 @@ export const llmProviderOptions: Array<{
   model: string;
 }> = [
   {
+    value: "minimax",
+    name: "MiniMax",
+    description: "同一 API 可用于文案、出图和配音",
+    baseUrl: "https://api.minimaxi.com/v1",
+    model: "MiniMax-M2.7",
+  },
+  {
     value: "deepseek",
     name: "DeepSeek",
     description: "中文改写性价比高",
@@ -38,8 +45,8 @@ export const llmProviderOptions: Array<{
 ];
 
 export const defaultLlmConfig: LlmConfig = {
-  provider: "deepseek",
+  provider: "minimax",
   apiKey: "",
-  baseUrl: "https://api.deepseek.com/v1",
-  model: "deepseek-chat",
+  baseUrl: "https://api.minimaxi.com/v1",
+  model: "MiniMax-M2.7",
 };

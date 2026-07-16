@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { contentTracks, pipelineSteps, visualStyles } from "../data/app-data";
+import { contentTracks, originalDefaultStyleByTrack, pipelineSteps, visualStyles } from "../data/app-data";
 import { minimaxVoices, volcengineVoices } from "../data/tts-data";
 import { generateMinimaxImages } from "../lib/image-api";
 import { runLlmPipelineStep } from "../lib/llm-api";
@@ -13,7 +13,7 @@ import type {
 } from "../types/app";
 import type { LlmConfig, LlmCredentialStatus, LlmPipelineStep, PipelineLlmArtifacts } from "../types/llm";
 import type { TtsConfig, TtsCredentialStatus, TtsProvider } from "../types/tts";
-import type { GeneratedImage } from "../types/image";
+import type { GeneratedImage, ImageGenerationRequest } from "../types/image";
 import "./TaskBuilder.css";
 
 type TaskBuilderProps = {
@@ -68,6 +68,13 @@ const videoFormOptions: Array<{
 const visualModes = ["按分镜配图", "单图封面"] as const;
 const hostPairs = ["咪仔 × 大壹", "刘飞 × 潇磊"];
 const speedOptions = ["0.9×", "1.0×", "1.1×", "1.2×"];
+const aspectRatioOptions: Array<{ value: ImageGenerationRequest["aspectRatio"]; label: string; description: string }> = [
+  { value: "9:16", label: "9:16", description: "竖屏短视频 · 原版默认" },
+  { value: "16:9", label: "16:9", description: "横屏视频" },
+  { value: "1:1", label: "1:1", description: "方形封面" },
+  { value: "3:4", label: "3:4", description: "竖版图文" },
+  { value: "4:3", label: "4:3", description: "横版图文" },
+];
 const llmStepMap: Partial<Record<number, LlmPipelineStep>> = {
   0: "precheck",
   1: "rewrite",
@@ -154,7 +161,8 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const [pausePreset, setPausePreset] = useState<PausePreset>("key");
   const [videoForm, setVideoForm] = useState<VideoForm>("narration");
   const [track, setTrack] = useState(contentTracks[0] ?? "通用故事");
-  const [visualStyle, setVisualStyle] = useState(visualStyles[3] ?? visualStyles[0] ?? "现代电影");
+  const [visualStyle, setVisualStyle] = useState(originalDefaultStyleByTrack[contentTracks[0] ?? ""] ?? visualStyles[0] ?? "黑白摄影");
+  const [aspectRatio, setAspectRatio] = useState<ImageGenerationRequest["aspectRatio"]>("9:16");
   const [visualMode, setVisualMode] = useState<(typeof visualModes)[number]>(visualModes[0]);
   const [hostPair, setHostPair] = useState(hostPairs[0] ?? "");
   const [speed, setSpeed] = useState(speedOptions[1] ?? "1.0×");
@@ -362,8 +370,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     void generateMinimaxImages({
       prompts,
       apiKey: config.minimax.apiKey,
-      aspectRatio: "16:9",
-      maxImages: 6,
+      aspectRatio,
+      maxImages: prompts.length,
+      track,
+      visualStyle,
     }, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       setPipelineImages(result.images);
@@ -379,7 +389,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     });
 
     return () => controller.abort();
-  }, [config.minimax.apiKey, config.provider, credentialStatus.minimax.available, currentStep, finishCurrentStep, inputText, pipelineScript, runState, visualStyle]);
+  }, [aspectRatio, config.minimax.apiKey, config.provider, credentialStatus.minimax.available, currentStep, finishCurrentStep, inputText, pipelineScript, runState, track, visualStyle]);
 
   useEffect(() => {
     const llmStep = llmStepMap[currentStep];
@@ -402,6 +412,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         track,
         videoForm,
         visualStyle,
+        aspectRatio,
       },
       artifacts: pipelineArtifactsRef.current,
       signal: controller.signal,
@@ -430,7 +441,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     });
 
     return () => controller.abort();
-  }, [activeTask?.title, currentStep, finishCurrentStep, hasLlmCredentials, inputText, llmConfig, runState, title, track, videoForm, visualStyle]);
+  }, [activeTask?.title, aspectRatio, currentStep, finishCurrentStep, hasLlmCredentials, inputText, llmConfig, runState, title, track, videoForm, visualStyle]);
 
   useEffect(() => {
     if (runState !== "running" || currentStep !== 5) return;
@@ -762,7 +773,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
                   type="button"
                   className={track === item ? "chip is-selected" : "chip"}
                   aria-pressed={track === item}
-                  onClick={() => setTrack(item)}
+                  onClick={() => {
+                    setTrack(item);
+                    setVisualStyle(originalDefaultStyleByTrack[item] ?? "写实彩色");
+                  }}
                 >
                   {item}
                 </button>
@@ -866,6 +880,27 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
                   onClick={() => setVisualStyle(item)}
                 >
                   {item}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field-group">
+            <span className="field-label field-label--standalone">画面比例</span>
+            <div className="choice-grid choice-grid--ratio">
+              {aspectRatioOptions.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`choice-card choice-card--compact ${aspectRatio === option.value ? "is-selected" : ""}`}
+                  aria-pressed={aspectRatio === option.value}
+                  onClick={() => setAspectRatio(option.value)}
+                >
+                  <span className="choice-card__radio" aria-hidden="true" />
+                  <span>
+                    <strong>{option.label}</strong>
+                    <small>{option.description}</small>
+                  </span>
                 </button>
               ))}
             </div>
@@ -1055,13 +1090,39 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
             </ol>
             {(pipelineArtifacts.precheck || pipelineArtifacts.rewrite || pipelineArtifacts.storyboard || pipelineArtifacts.prompts) ? (
               <div className="pipeline-artifacts">
-                <strong>真实 LLM 产物</strong>
+                <strong>{pipelineArtifacts.prompts?.templateVersion ?? llmCredentialStatus.promptLibrary?.sourceVersion ?? "Storybound 1.13.1"} 原版逻辑产物</strong>
                 <div>
                   {pipelineArtifacts.precheck ? <span>预审：{pipelineArtifacts.precheck.warnings.length} 条提醒</span> : null}
                   {pipelineArtifacts.rewrite ? <span>改写：{pipelineArtifacts.rewrite.title}</span> : null}
                   {pipelineArtifacts.storyboard ? <span>分镜：{pipelineArtifacts.storyboard.shots.length} 镜</span> : null}
                   {pipelineArtifacts.prompts ? <span>绘图 prompt：{pipelineArtifacts.prompts.prompts.length} 条</span> : null}
                 </div>
+                {pipelineArtifacts.storyboard?.characterCard ? (
+                  <details className="pipeline-artifacts__details">
+                    <summary>人物一致性卡：{pipelineArtifacts.storyboard.characterCard.name || "主角"}</summary>
+                    <p>{[
+                      pipelineArtifacts.storyboard.characterCard.identity,
+                      pipelineArtifacts.storyboard.characterCard.age,
+                      pipelineArtifacts.storyboard.characterCard.gender,
+                      pipelineArtifacts.storyboard.characterCard.appearance,
+                      pipelineArtifacts.storyboard.characterCard.clothing,
+                    ].filter(Boolean).join(" · ")}</p>
+                  </details>
+                ) : null}
+                {pipelineArtifacts.prompts?.prompts.length ? (
+                  <details className="pipeline-artifacts__details">
+                    <summary>查看传给 MiniMax 的完整生图提示词</summary>
+                    <ol>
+                      {pipelineArtifacts.prompts.prompts.map((item) => (
+                        <li key={item.shotId}>
+                          <strong>第 {item.shotId} 镜</strong>
+                          <p>{item.prompt}</p>
+                          {item.negativePrompt ? <small>负面提示：{item.negativePrompt}</small> : null}
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                ) : null}
               </div>
             ) : !hasLlmCredentials ? (
               <div className="pipeline-artifacts pipeline-artifacts--muted"><strong>LLM 未配置</strong><div><span>前 4 步以模拟方式通过；配置 LLM 后会生成真实改写、分镜和绘图 prompt。</span></div></div>
@@ -1071,7 +1132,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
                 <div className="pipeline-images__head">
                   <div>
                     <strong>真实 MiniMax 图片已生成</strong>
-                    <span>{pipelineImages.length} 张 · image-01 · {visualStyle}</span>
+                    <span>{pipelineImages.length} 张 · image-01 · {visualStyle} · {aspectRatio}</span>
                   </div>
                 </div>
                 <div className="pipeline-image-grid">
@@ -1080,6 +1141,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
                       <img src={image.url} alt={`第 ${image.shotId} 镜生成图`} />
                       <div>
                         <strong>第 {image.shotId} 镜</strong>
+                        {image.retryLevel ? <span>降级重试 L{image.retryLevel}</span> : null}
                         <button type="button" onClick={() => downloadPipelineImage(image)}>下载</button>
                       </div>
                       <p title={image.prompt}>{image.prompt}</p>

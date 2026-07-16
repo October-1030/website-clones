@@ -1,4 +1,4 @@
-export type LlmProvider = "openai" | "deepseek" | "siliconflow" | "custom";
+export type LlmProvider = "minimax" | "openai" | "deepseek" | "siliconflow" | "custom";
 
 export interface LlmConfig {
   provider: LlmProvider;
@@ -13,6 +13,11 @@ export interface LlmCredentialStatus {
   provider: LlmProvider | null;
   baseUrl: string | null;
   model: string | null;
+  promptLibrary?: {
+    sourceVersion: string;
+    trackCount: number;
+    styleCount: number;
+  };
 }
 
 export interface PipelineContext {
@@ -21,6 +26,7 @@ export interface PipelineContext {
   track: string;
   videoForm: string;
   visualStyle: string;
+  aspectRatio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
 }
 
 export type LlmPipelineStep = "precheck" | "rewrite" | "storyboard" | "prompts";
@@ -50,6 +56,14 @@ export interface StoryboardShot {
 
 export interface StoryboardResult {
   shots: StoryboardShot[];
+  characterCard?: {
+    name: string;
+    identity: string;
+    age: string;
+    gender: string;
+    appearance: string;
+    clothing: string;
+  };
 }
 
 export interface ImagePrompt {
@@ -60,6 +74,9 @@ export interface ImagePrompt {
 
 export interface PromptResult {
   prompts: ImagePrompt[];
+  templateVersion?: string;
+  trackId?: string;
+  styleId?: string;
 }
 
 export interface PipelineLlmArtifacts {
