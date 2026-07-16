@@ -120,11 +120,11 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
           </nav>
 
           <div className="app-shell-sidebar-footer">
-            <div className="app-shell-points-card" title="积分余额 0.00">
+            <div className="app-shell-points-card" title="本地模式：不连接原版积分系统">
               <div className="app-shell-points-icon" aria-hidden="true">◆</div>
               <div className="app-shell-points-copy">
-                <span>积分余额</span>
-                <strong>0.00</strong>
+                <span>本地模式</span>
+                <strong>自有 API</strong>
               </div>
               <span className="app-shell-points-arrow" aria-hidden="true">›</span>
             </div>
