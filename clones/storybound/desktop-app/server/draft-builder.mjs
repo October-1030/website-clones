@@ -332,6 +332,58 @@ function buildSrt(timeline) {
   return `${timeline.map((item, index) => `${index + 1}\n${time(item.startSec)} --> ${time(item.endSec)}\n${item.text}`).join("\n\n")}\n`;
 }
 
+function subtitleLength(value) {
+  return [...String(value || "").replace(/\s/g, "")].length;
+}
+
+function splitSubtitleText(value, maxChars = 18) {
+  const normalized = String(value || "")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n+/g, "")
+    .trim();
+  if (!normalized) return [];
+  const clauses = normalized.match(/[^，,。！？!?；;：:、]+[，,。！？!?；;：:、]?/g) || [normalized];
+  const chunks = [];
+  let current = "";
+  const flush = () => {
+    if (current.trim()) chunks.push(current.trim());
+    current = "";
+  };
+  for (const clause of clauses) {
+    if (subtitleLength(current + clause) <= maxChars) {
+      current += clause;
+      continue;
+    }
+    flush();
+    const characters = [...clause];
+    while (subtitleLength(characters.join("")) > maxChars) {
+      let splitAt = maxChars;
+      while (splitAt < characters.length && /^[，,。！？!?；;：:、”’》）】]$/.test(characters[splitAt])) splitAt += 1;
+      chunks.push(characters.splice(0, splitAt).join("").trim());
+    }
+    current = characters.join("");
+  }
+  flush();
+  return chunks.filter(Boolean);
+}
+
+function splitSubtitleTimeline(item) {
+  const chunks = splitSubtitleText(item.text);
+  if (!chunks.length) return [];
+  const weights = chunks.map((text) => Math.max(1, subtitleLength(text)));
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  let consumedWeight = 0;
+  return chunks.map((text, index) => {
+    const startSec = item.startSec + item.durationSec * (consumedWeight / totalWeight);
+    consumedWeight += weights[index];
+    const endSec = index === chunks.length - 1
+      ? item.endSec
+      : item.startSec + item.durationSec * (consumedWeight / totalWeight);
+    return { shotId: item.shotId, text, startSec, endSec, durationSec: endSec - startSec };
+  });
+}
+
 export async function buildJianyingDraft(taskStore, task) {
   const shots = resolveShots(task);
   if (!shots.length) throw new Error("没有分镜，无法生成剪映草稿");
@@ -390,6 +442,7 @@ export async function buildJianyingDraft(taskStore, task) {
   const videoSegments = [];
   const narrationSegments = [];
   const subtitleSegments = [];
+  const subtitleTimeline = [];
   const animationRefs = [];
   const speedRefs = [];
 
@@ -418,9 +471,14 @@ export async function buildJianyingDraft(taskStore, task) {
     const crop = image.crop || { x: 0, y: 0, scale: 1 };
     videoSegments.push(trackSegment(material.id, start, duration, "video", { x: crop.x, y: crop.y, scale: crop.scale, extraMaterialRefs: [speedId, animationId] }));
 
-    const subtitle = textMaterial(shot.text, { type: "subtitle", color: template.subtitleColor, fontSize: template.subtitleSize });
-    materials.texts.push(subtitle);
-    subtitleSegments.push(trackSegment(subtitle.id, start, duration, "text", { y: template.subtitleY, renderIndex: 15999 }));
+    for (const cue of splitSubtitleTimeline(item)) {
+      const subtitle = textMaterial(cue.text, { type: "subtitle", color: template.subtitleColor, fontSize: template.subtitleSize });
+      const cueStart = Math.round(cue.startSec * microseconds);
+      const cueDuration = Math.round(cue.durationSec * microseconds);
+      materials.texts.push(subtitle);
+      subtitleSegments.push(trackSegment(subtitle.id, cueStart, cueDuration, "text", { y: template.subtitleY, renderIndex: 15999 }));
+      subtitleTimeline.push(cue);
+    }
   }
 
   const audioInputSegments = externalAudio
@@ -451,7 +509,7 @@ export async function buildJianyingDraft(taskStore, task) {
   ];
 
   const titleText = task.artifacts?.rewrite?.title || task.title;
-  if (titleText) {
+  if (task.options?.coverMode === "titled" && titleText) {
     const material = textMaterial(titleText, { color: "#FFDE00", fontSize: template.titleSize, bold: true, underline: true });
     materials.texts.push(material);
     tracks.push({
@@ -600,7 +658,7 @@ export async function buildJianyingDraft(taskStore, task) {
     writeFile(join(projectDir, "draft_biz_config.json"), "{}\n", "utf8"),
     writeFile(join(projectDir, "draft_agency_config.json"), "{}\n", "utf8"),
     writeFile(join(projectDir, "attachment_pc_common.json"), "{}\n", "utf8"),
-    writeFile(join(projectDir, "timeline.srt"), buildSrt(timeline), "utf8"),
+    writeFile(join(projectDir, "timeline.srt"), buildSrt(subtitleTimeline), "utf8"),
     writeFile(join(projectDir, "storybound-manifest.json"), `${JSON.stringify({
       schemaVersion: 1,
       taskId: task.id,

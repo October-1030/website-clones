@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const baseUrl = process.env.STORYBOUND_URL || "http://127.0.0.1:5193";
 const taskId = randomUUID();
+const longSubtitle = "第一句测试字幕需要自动拆成适合手机阅读的短句，不能整段铺满屏幕。";
 
 function silentWav(seconds = 2, sampleRate = 8000) {
   const samples = seconds * sampleRate;
@@ -53,7 +54,7 @@ try {
     body: JSON.stringify({
       id: taskId,
       title: "Storybound 草稿闭环测试",
-      inputText: "第一句测试字幕。第二句测试字幕。",
+      inputText: `${longSubtitle}第二句测试字幕。`,
       mode: "direct",
       videoForm: "narration",
       track: "通用故事",
@@ -65,7 +66,7 @@ try {
       stepStatuses: ["skipped", "skipped", "done", "done", "done", "done", "pending"],
       artifacts: {
         storyboard: { shots: [
-          { id: 1, text: "第一句测试字幕。", visual: "夜晚城市", emotion: "安静", durationSec: 2 },
+          { id: 1, text: longSubtitle, visual: "夜晚城市", emotion: "安静", durationSec: 2 },
           { id: 2, text: "第二句测试字幕。", visual: "清晨窗边", emotion: "温暖", durationSec: 2 },
         ] },
         prompts: { templateVersion: "Storybound 1.13.1", prompts: [
@@ -93,7 +94,7 @@ try {
       ],
       coverImages: [],
       audioSegments: [
-        { id: "audio-1", shotId: 1, text: "第一句测试字幕。", voiceId: "smoke", durationSec: 2, status: "ready", ...audio1 },
+        { id: "audio-1", shotId: 1, text: longSubtitle, voiceId: "smoke", durationSec: 2, status: "ready", ...audio1 },
         { id: "audio-2", shotId: 2, text: "第二句测试字幕。", voiceId: "smoke", durationSec: 2, status: "ready", ...audio2 },
       ],
       podcast: null,
@@ -113,6 +114,13 @@ try {
   const draftInfo = JSON.parse(await readFile(join(result.draft.projectDir, "draft_info.json"), "utf8"));
   const firstImageSegment = draftInfo.tracks?.find((track) => track.name === "image_main")?.segments?.[0];
   if (firstImageSegment?.clip?.transform?.x !== 0.1 || firstImageSegment?.clip?.scale?.x !== 1.2) throw new Error("图片裁切参数未写入剪映草稿");
+  const subtitleTrack = draftInfo.tracks?.find((track) => track.name === "subtitle");
+  const textById = new Map((draftInfo.materials?.texts || []).map((item) => [item.id, JSON.parse(item.content).text]));
+  const subtitleTexts = (subtitleTrack?.segments || []).map((segment) => textById.get(segment.material_id) || "");
+  if (subtitleTexts.length <= 2 || subtitleTexts.some((text) => [...text.replace(/\s/g, "")].length > 20 || /^[，,。！？!?；;：:、]/.test(text))) {
+    throw new Error(`长字幕未正确拆分：${subtitleTexts.join(" | ")}`);
+  }
+  if (draftInfo.tracks?.some((track) => track.name === "cover_title")) throw new Error("关闭标题封面时仍生成了标题轨");
   const zip = Buffer.from(await (await request(`/api/tasks/${taskId}/draft.zip`)).arrayBuffer());
   if (zip.subarray(0, 2).toString("ascii") !== "PK") throw new Error("下载结果不是 ZIP");
   process.stdout.write(JSON.stringify({ ok: true, taskId, projectName: result.draft.projectName, tracks: result.draft.trackCount, files: result.draft.fileCount, zipBytes: zip.length }) + "\n");
