@@ -17,6 +17,7 @@ const originalPromptLibrary = JSON.parse(
 );
 const production = process.argv.includes("--production");
 const port = Number(process.env.PORT || 5173);
+const publicAccessToken = String(process.env.STORYBOUND_PUBLIC_ACCESS_TOKEN || "").trim();
 const maxJsonBytes = 24 * 1024 * 1024;
 const volcengineEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
 const minimaxBase = "https://api.minimaxi.com";
@@ -1146,12 +1147,37 @@ async function serveProduction(response, pathname) {
   createReadStream(file).pipe(response);
 }
 
+function authorizePublicTunnel(request, response, url) {
+  const host = String(request.headers.host || "").split(":")[0].toLowerCase();
+  if (!host.endsWith(".trycloudflare.com") || !publicAccessToken) return false;
+  const cookies = Object.fromEntries(String(request.headers.cookie || "").split(";").map((item) => item.trim().split("=")).filter(([key, value]) => key && value));
+  const queryToken = url.searchParams.get("access") || "";
+  const bearerToken = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (queryToken === publicAccessToken) {
+    url.searchParams.delete("access");
+    const search = url.searchParams.toString();
+    response.writeHead(302, {
+      "Set-Cookie": `storybound_access=${encodeURIComponent(publicAccessToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`,
+      Location: `${url.pathname}${search ? `?${search}` : ""}`,
+      "Cache-Control": "no-store",
+    });
+    response.end();
+    return true;
+  }
+  if (decodeURIComponent(cookies.storybound_access || "") === publicAccessToken || bearerToken === publicAccessToken) return false;
+  response.writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+  response.end("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>需要访问链接</title><body style=\"font-family:system-ui;background:#090d10;color:#e8f0ee;display:grid;place-items:center;min-height:100vh;margin:0\"><main><h1>此检查地址需要访问令牌</h1><p>请使用 Codex 提供的完整链接重新打开。</p></main></body></html>");
+  return true;
+}
+
 const vite = production
   ? null
   : await (await import("vite")).createServer({ root, server: { middlewareMode: true }, appType: "spa" });
 
 const server = createServer(async (request, response) => {
-  const pathname = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`).pathname;
+  const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
+  if (authorizePublicTunnel(request, response, url)) return;
+  const pathname = url.pathname;
   if (pathname.startsWith("/api/tts/")) {
     await handleTtsApi(request, response, pathname);
     return;
