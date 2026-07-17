@@ -26,8 +26,9 @@ export interface BuilderFormState {
   materialSource: NonNullable<TaskOptions["materialSource"]>;
   autoBorrowImage: boolean;
   dynamicStoryboard: boolean;
-  targetDurationSec: number | null;
   draftTemplateId: string;
+  videoIntro: boolean;
+  videoIntroDuration: number;
   bgmSync: boolean;
   coverMode: NonNullable<TaskOptions["coverMode"]>;
   coverTemplateId: string;
@@ -66,8 +67,9 @@ export const defaultBuilderForm: BuilderFormState = {
   materialSource: "ai",
   autoBorrowImage: true,
   dynamicStoryboard: true,
-  targetDurationSec: null,
   draftTemplateId: "default-portrait-9-16",
+  videoIntro: false,
+  videoIntroDuration: 3,
   bgmSync: false,
   coverMode: "off",
   coverTemplateId: "cinematic-poster",
@@ -106,8 +108,9 @@ export function formFromTask(task: StoryboundTask): BuilderFormState {
     materialSource: task.options.materialSource ?? "ai",
     autoBorrowImage: task.options.autoBorrowImage ?? true,
     dynamicStoryboard: task.options.dynamicStoryboard ?? true,
-    targetDurationSec: task.options.targetDurationSec ?? null,
     draftTemplateId: task.options.draftTemplateId ?? "default-portrait-9-16",
+    videoIntro: task.options.videoIntro ?? false,
+    videoIntroDuration: task.options.videoIntroDuration ?? 3,
     bgmSync: task.options.bgmSync ?? false,
     coverMode: task.options.coverMode ?? "off",
     coverTemplateId: task.options.coverTemplateId ?? "cinematic-poster",
@@ -147,8 +150,9 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       materialSource: form.materialSource,
       autoBorrowImage: form.autoBorrowImage,
       dynamicStoryboard: form.dynamicStoryboard,
-      targetDurationSec: form.targetDurationSec,
       draftTemplateId: form.draftTemplateId,
+      videoIntro: form.videoIntro,
+      videoIntroDuration: form.videoIntro ? form.videoIntroDuration : 0,
       bgmSync: form.bgmSync,
       coverMode: form.coverMode,
       coverTemplateId: form.coverTemplateId,

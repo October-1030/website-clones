@@ -14,6 +14,7 @@
     "smoke:pipeline": "node scripts/smoke-original-pipeline.mjs"
   },
   "dependencies": {
+    "@node-rs/jieba": "^2.0.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

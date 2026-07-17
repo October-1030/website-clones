@@ -1,10 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
+import { deflateSync } from "node:zlib";
+
+import { Jieba } from "@node-rs/jieba";
+import { dict as jiebaDict } from "@node-rs/jieba/dict.js";
 
 import { writeStoredZip } from "./zip-store.mjs";
 
 const microseconds = 1_000_000;
+const jieba = Jieba.withDict(jiebaDict);
+const draftTemplates = JSON.parse(await readFile(new URL("../original-draft-templates.json", import.meta.url), "utf8"));
+
+function resolveDraftTemplate(templateId) {
+  return draftTemplates.find((template) => template.id === templateId) || draftTemplates[0];
+}
 
 function id() {
   return randomUUID().replaceAll("-", "").toLowerCase();
@@ -30,20 +40,128 @@ function colorFromHex(hex) {
   return [0, 2, 4].map((index) => Number.parseInt(value.slice(index, index + 2), 16) / 255);
 }
 
+function rgbFromHex(hex) {
+  return colorFromHex(hex).map((value) => Math.round(value * 255));
+}
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunk(type, data) {
+  const name = Buffer.from(type, "ascii");
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  name.copy(chunk, 4);
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE(crc32(Buffer.concat([name, data])), 8 + data.length);
+  return chunk;
+}
+
+function rgbaPng(width, height, paint) {
+  const stride = width * 4 + 1;
+  const raw = Buffer.alloc(stride * height);
+  for (let y = 0; y < height; y += 1) {
+    const row = y * stride;
+    raw[row] = 0;
+    for (let x = 0; x < width; x += 1) {
+      const offset = row + 1 + x * 4;
+      const [red, green, blue, alpha] = paint(x, y);
+      raw[offset] = red;
+      raw[offset + 1] = green;
+      raw[offset + 2] = blue;
+      raw[offset + 3] = alpha;
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8;
+  header[9] = 6;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    pngChunk("IHDR", header),
+    pngChunk("IDAT", deflateSync(raw, { level: 9 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function mixColor(start, end, amount) {
+  return start.map((value, index) => Math.round(value + (end[index] - value) * amount));
+}
+
+async function writeTemplateFrameAssets(template, imageDirectory) {
+  if (!template.frame.enabled) return null;
+  const { width, height } = template.canvas;
+  const image = imageGeometry(template);
+  const imageLeft = Math.round((width - image.width) / 2);
+  const imageTop = Math.round(template.image.top * height);
+  const borderWidth = Math.max(1, Math.round(template.frame.imageBorderWidth || 0));
+  const canvasColor = rgbFromHex(template.canvas.backgroundColor);
+  const headerStart = rgbFromHex(template.frame.headerColor || template.canvas.backgroundColor);
+  const headerEnd = rgbFromHex(template.frame.headerColorEnd || template.frame.headerColor || template.canvas.backgroundColor);
+  const footerStart = rgbFromHex(template.frame.footerColor || template.canvas.backgroundColor);
+  const footerEnd = rgbFromHex(template.frame.footerColorEnd || template.frame.footerColor || template.canvas.backgroundColor);
+  const borderColor = rgbFromHex(template.frame.imageBorderColor || "#ffffff");
+  const backgroundPath = join(imageDirectory, "template-frame-background.png");
+  const borderPath = join(imageDirectory, "template-frame-border.png");
+  const background = rgbaPng(width, height, (_x, y) => {
+    if (y < imageTop) return [...mixColor(headerStart, headerEnd, y / Math.max(1, imageTop)), 255];
+    if (y >= imageTop + image.height) return [...mixColor(footerStart, footerEnd, (y - imageTop - image.height) / Math.max(1, height - imageTop - image.height)), 255];
+    return [...canvasColor, 255];
+  });
+  const border = rgbaPng(width, height, (x, y) => {
+    const insideHorizontal = x >= imageLeft && x < imageLeft + image.width;
+    const insideVertical = y >= imageTop && y < imageTop + image.height;
+    const horizontalEdge = insideHorizontal && (Math.abs(y - imageTop) < borderWidth || Math.abs(y - (imageTop + image.height - 1)) < borderWidth);
+    const verticalEdge = insideVertical && (Math.abs(x - imageLeft) < borderWidth || Math.abs(x - (imageLeft + image.width - 1)) < borderWidth);
+    return horizontalEdge || verticalEdge ? [...borderColor, 255] : [0, 0, 0, 0];
+  });
+  await Promise.all([writeFile(backgroundPath, background), writeFile(borderPath, border)]);
+  return { backgroundPath, borderPath };
+}
+
+function textLayerOptions(layer, extra = {}) {
+  return {
+    color: layer.color,
+    alpha: layer.alpha,
+    fontSize: layer.fontSize,
+    bold: layer.bold,
+    underline: layer.underline,
+    alignment: layer.align,
+    letterSpacing: Number(layer.letterSpacing || 0) * 0.05,
+    lineSpacing: 0.02 + Number(layer.lineSpacing || 0) * 0.05,
+    hasBorder: Boolean(layer.border),
+    strokeColor: layer.border?.color,
+    strokeAlpha: layer.border?.alpha,
+    strokeWidth: Number(layer.border?.width || 0) / 100 * 0.2,
+    ...extra,
+  };
+}
+
 function textMaterial(text, options = {}) {
   const materialId = id();
   const fontSize = options.fontSize ?? 12;
+  const value = String(text);
+  const strokes = options.hasBorder
+    ? [{ content: { solid: { alpha: options.strokeAlpha, color: colorFromHex(options.strokeColor || "#000000") } }, width: options.strokeWidth }]
+    : [];
   const content = {
     styles: [{
-      fill: { alpha: 1, content: { render_type: "solid", solid: { alpha: 1, color: colorFromHex(options.color) } } },
-      range: [0, String(text).length],
+      fill: { alpha: 1, content: { render_type: "solid", solid: { alpha: options.alpha ?? 1, color: colorFromHex(options.color) } } },
+      range: [0, value.length],
       size: fontSize,
       bold: Boolean(options.bold),
       italic: false,
       underline: Boolean(options.underline),
-      strokes: [{ content: { solid: { alpha: options.strokeAlpha ?? 0.72, color: [0, 0, 0] } }, width: options.strokeWidth ?? 0.08 }],
+      strokes,
     }],
-    text: String(text).replace(/[。！？!?]$/, ""),
+    text: value,
   };
   return {
     id: materialId,
@@ -51,11 +169,11 @@ function textMaterial(text, options = {}) {
     typesetting: 0,
     alignment: options.alignment ?? 1,
     letter_spacing: options.letterSpacing ?? 0,
-    line_spacing: 0.02,
+    line_spacing: options.lineSpacing ?? 0,
     line_feed: 1,
-    line_max_width: options.maxWidth ?? 0.86,
+    line_max_width: options.type === "subtitle" ? 1 : 0.82,
     force_apply_line_max_width: false,
-    check_flag: options.type === "subtitle" ? 31 : 15,
+    check_flag: 7 | (options.hasBorder ? 8 : 0) | (options.type === "subtitle" ? 16 : 0),
     type: options.type || "text",
     fixed_width: -1,
     fixed_height: -1,
@@ -71,11 +189,12 @@ function textMaterial(text, options = {}) {
     font_title: "none",
     font_url: "",
     fonts: [],
+    ...(options.globalAlpha == null ? {} : { global_alpha: options.globalAlpha }),
     ...(options.type === "subtitle" ? {
       background_style: 0,
       background_color: options.backgroundColor || "#000000",
       background_alpha: options.backgroundAlpha ?? 0.5,
-      background_round_radius: 0.3,
+      background_round_radius: options.backgroundRoundRadius ?? 0.3,
       background_height: 0.14,
       background_width: 0.14,
       background_horizontal_offset: 0,
@@ -123,7 +242,7 @@ function trackSegment(materialId, start, duration, type, options = {}) {
     source_timerange: type === "text" ? null : { start: options.sourceStart || 0, duration },
     speed: type === "video" ? null : 1,
     volume: type === "audio" ? options.volume ?? 10 : 1,
-    extra_material_refs: options.extraMaterialRefs || [],
+    extra_material_refs: options.extraMaterialRefs ?? (type === "text" ? [id()] : []),
     clip: type === "audio" ? null : {
       alpha: options.alpha ?? 1,
       flip: { horizontal: false, vertical: false },
@@ -182,6 +301,29 @@ function emptyMaterials() {
     video_trackings: [],
     videos: [],
   };
+}
+
+function audioFadeMaterial(fadeOutMs) {
+  return {
+    fade_in_duration: 0,
+    fade_out_duration: Math.max(0, Math.round(Number(fadeOutMs || 0) * 1000)),
+    fade_type: 0,
+    id: id(),
+    type: "audio_fade",
+  };
+}
+
+function ratioNumbers(value) {
+  const [width, height] = String(value || "1:1").split(":").map(Number);
+  return width > 0 && height > 0 ? [width, height] : [1, 1];
+}
+
+function imageGeometry(template) {
+  const [ratioWidth, ratioHeight] = ratioNumbers(template.image.ratio);
+  const height = Math.max(1, Math.round(template.canvas.height * template.image.height));
+  const width = Math.max(1, Math.round(height * ratioWidth / ratioHeight));
+  const center = template.image.top + template.image.height / 2;
+  return { width, height, x: 0, y: 1 - center * 2 };
 }
 
 function videoMaterial(file, duration, width, height) {
@@ -321,15 +463,15 @@ function normalizedTimeline(task, shots) {
 }
 
 function buildSrt(timeline) {
-  function time(value) {
-    const milliseconds = Math.max(0, Math.round(value * 1000));
+  function time(valueUs) {
+    const milliseconds = Math.max(0, Math.floor(valueUs / 1000));
     const hours = Math.floor(milliseconds / 3_600_000);
     const minutes = Math.floor((milliseconds % 3_600_000) / 60_000);
     const seconds = Math.floor((milliseconds % 60_000) / 1000);
     const remainder = milliseconds % 1000;
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")},${String(remainder).padStart(3, "0")}`;
   }
-  return `${timeline.map((item, index) => `${index + 1}\n${time(item.startSec)} --> ${time(item.endSec)}\n${item.text}`).join("\n\n")}\n`;
+  return `${timeline.map((item, index) => `${index + 1}\n${time(item.startUs)} --> ${time(item.endUs)}\n${item.text}`).join("\n\n")}\n`;
 }
 
 function subtitleLength(value) {
@@ -337,51 +479,87 @@ function subtitleLength(value) {
 }
 
 function splitSubtitleText(value, maxChars = 18) {
-  const normalized = String(value || "")
-    .replace(/\r/g, "")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n+/g, "")
-    .trim();
-  if (!normalized) return [];
-  const clauses = normalized.match(/[^，,。！？!?；;：:、]+[，,。！？!?；;：:、]?/g) || [normalized];
+  const splitPunctuation = /[，。、；：？！''（）【】《》…]|——/u;
+  const punctuation = /[，。、；：？！''（）【】《》——…·.,!?;:"'()[\]]/gu;
   const chunks = [];
-  let current = "";
-  const flush = () => {
-    if (current.trim()) chunks.push(current.trim());
-    current = "";
-  };
-  for (const clause of clauses) {
-    if (subtitleLength(current + clause) <= maxChars) {
-      current += clause;
-      continue;
+
+  function packWords(words) {
+    let current = "";
+    for (let word of words) {
+      if (subtitleLength(word) > maxChars) {
+        if (current) chunks.push(current);
+        current = "";
+        while (subtitleLength(word) > maxChars) {
+          const characters = [...word];
+          chunks.push(characters.slice(0, maxChars).join(""));
+          word = characters.slice(maxChars).join("");
+        }
+        current = word;
+        continue;
+      }
+      if (subtitleLength(current + word) <= maxChars) current += word;
+      else {
+        if (current) chunks.push(current);
+        current = word;
+      }
     }
-    flush();
-    const characters = [...clause];
-    while (subtitleLength(characters.join("")) > maxChars) {
-      let splitAt = maxChars;
-      while (splitAt < characters.length && /^[，,。！？!?；;：:、”’》）】]$/.test(characters[splitAt])) splitAt += 1;
-      chunks.push(characters.splice(0, splitAt).join("").trim());
-    }
-    current = characters.join("");
+    if (current) chunks.push(current);
   }
-  flush();
-  return chunks.filter(Boolean);
+
+  for (const part of String(value || "").split(splitPunctuation)) {
+    const clean = part
+      .replace(punctuation, "")
+      .replaceAll("\n", " ")
+      .replaceAll("\r", " ")
+      .replaceAll("\t", " ")
+      .trim();
+    if (!clean) continue;
+    if (subtitleLength(clean) <= maxChars) chunks.push(clean);
+    else packWords(jieba.cut(clean, true));
+  }
+  return chunks;
 }
 
-function splitSubtitleTimeline(item) {
-  const chunks = splitSubtitleText(item.text);
+function splitSubtitleTimeline(item, maxChars) {
+  const chunks = splitSubtitleText(item.text, maxChars);
   if (!chunks.length) return [];
   const weights = chunks.map((text) => Math.max(1, subtitleLength(text)));
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
-  let consumedWeight = 0;
+  let currentUs = item.startUs;
   return chunks.map((text, index) => {
-    const startSec = item.startSec + item.durationSec * (consumedWeight / totalWeight);
-    consumedWeight += weights[index];
-    const endSec = index === chunks.length - 1
-      ? item.endSec
-      : item.startSec + item.durationSec * (consumedWeight / totalWeight);
-    return { shotId: item.shotId, text, startSec, endSec, durationSec: endSec - startSec };
+    const rawDurationUs = Math.trunc(item.durationUs * weights[index] / totalWeight);
+    const startUs = Math.floor(currentUs / 1000) * 1000;
+    const endUs = Math.floor((currentUs + rawDurationUs) / 1000) * 1000;
+    currentUs += rawDurationUs;
+    return { shotId: item.shotId, text, startUs, endUs, durationUs: endUs - startUs };
   });
+}
+
+function timelineInMicroseconds(timeline) {
+  let cursorUs = 0;
+  return timeline.map((item) => {
+    const durationUs = Math.max(1, Math.trunc(Number(item.durationSec) * microseconds));
+    const startUs = cursorUs;
+    cursorUs += durationUs;
+    return {
+      ...item,
+      startUs,
+      endUs: cursorUs,
+      durationUs,
+      startSec: startUs / microseconds,
+      endSec: cursorUs / microseconds,
+      durationSec: durationUs / microseconds,
+    };
+  });
+}
+
+function displayWidth(value) {
+  return [...String(value || "")].reduce((sum, character) => sum + (character.codePointAt(0) < 4352 ? 0.5 : 1), 0);
+}
+
+function fittedFontSize(configuredSize, value, budget, minimum) {
+  const longestLine = Math.max(1, ...String(value || "").split("\n").map(displayWidth));
+  return Math.max(minimum, Math.min(Number(configuredSize), budget / longestLine));
 }
 
 export async function buildJianyingDraft(taskStore, task) {
@@ -425,19 +603,11 @@ export async function buildJianyingDraft(taskStore, task) {
   }
 
   const templateId = task.options?.draftTemplateId || "default-portrait-9-16";
-  const ratio = task.aspectRatio || "9:16";
-  const selectedSize = templateId === "builtin-portrait-4-3"
-    ? [1080, 1440]
-    : templateId === "builtin-landscape-16-9"
-      ? [1920, 1080]
-      : ratio === "16:9" ? [1920, 1080] : ratio === "1:1" ? [1080, 1080] : ratio === "4:3" ? [1440, 1080] : ratio === "3:4" ? [1080, 1440] : [1080, 1920];
-  const [width, height] = selectedSize;
-  const template = templateId === "builtin-knowledge-card"
-    ? { subtitleY: -0.12, subtitleSize: 10, titleY: 0.28, titleSize: 22, subtitleColor: "#FFFFFF" }
-    : templateId === "builtin-landscape-16-9"
-      ? { subtitleY: -0.32, subtitleSize: 10, titleY: 0.24, titleSize: 21, subtitleColor: "#FFDE00" }
-      : { subtitleY: -0.215, subtitleSize: 12, titleY: 0.047, titleSize: 25, subtitleColor: "#FFDE00" };
-  const timeline = normalizedTimeline(task, shots);
+  const templateDefinition = resolveDraftTemplate(templateId);
+  const template = templateDefinition.config;
+  const { width, height } = template.canvas;
+  const imageLayout = imageGeometry(template);
+  const timeline = timelineInMicroseconds(normalizedTimeline(task, shots));
   const materials = emptyMaterials();
   const videoSegments = [];
   const narrationSegments = [];
@@ -453,9 +623,9 @@ export async function buildJianyingDraft(taskStore, task) {
     const target = existing || await copyAsset(image.path, imageDir, `${shot.id}${extname(image.path) || ".png"}`);
     copiedImageByShot.set(image.path, target);
     const item = timeline.find((entry) => entry.shotId === shot.id);
-    const start = Math.round(item.startSec * microseconds);
-    const duration = Math.round(item.durationSec * microseconds);
-    const material = videoMaterial(target, duration, width, height);
+    const start = item.startUs;
+    const duration = item.durationUs;
+    const material = videoMaterial(target, duration, imageLayout.width, imageLayout.height);
     materials.videos.push(material);
     const speedId = id();
     const animationId = id();
@@ -464,53 +634,84 @@ export async function buildJianyingDraft(taskStore, task) {
       id: animationId,
       type: "sticker_animation",
       multi_language_current: "none",
-      animations: [{ anim_adjust_params: null, platform: "all", panel: "video", material_type: "video", name: "缩放", id: "446078", type: "group", resource_id: "6759078592740594184", start: 0, duration }],
+      animations: template.image.animation || template.image.motion
+        ? [{ anim_adjust_params: null, platform: "all", panel: "video", material_type: "video", name: template.image.animation || "缩放", id: "446078", type: "group", resource_id: "6759078592740594184", start: 0, duration }]
+        : [],
     });
     speedRefs.push(speedId);
     animationRefs.push(animationId);
     const crop = image.crop || { x: 0, y: 0, scale: 1 };
-    videoSegments.push(trackSegment(material.id, start, duration, "video", { x: crop.x, y: crop.y, scale: crop.scale, extraMaterialRefs: [speedId, animationId] }));
+    videoSegments.push(trackSegment(material.id, start, duration, "video", {
+      x: imageLayout.x + Number(crop.x || 0),
+      y: imageLayout.y + Number(crop.y || 0),
+      scale: Number(crop.scale || 1),
+      extraMaterialRefs: [speedId, animationId],
+    }));
 
-    for (const cue of splitSubtitleTimeline(item)) {
-      const subtitle = textMaterial(cue.text, { type: "subtitle", color: template.subtitleColor, fontSize: template.subtitleSize });
-      const cueStart = Math.round(cue.startSec * microseconds);
-      const cueDuration = Math.round(cue.durationSec * microseconds);
+    for (const cue of splitSubtitleTimeline(item, template.caption.maxCharsPerLine)) {
+      if (!template.caption.visible) continue;
+      const subtitle = textMaterial(cue.text, textLayerOptions(template.caption, {
+        type: "subtitle",
+        backgroundColor: template.caption.background.color,
+        backgroundAlpha: template.caption.background.alpha,
+        backgroundRoundRadius: template.caption.background.roundRadius,
+      }));
       materials.texts.push(subtitle);
-      subtitleSegments.push(trackSegment(subtitle.id, cueStart, cueDuration, "text", { y: template.subtitleY, renderIndex: 15999 }));
+      subtitleSegments.push(trackSegment(subtitle.id, cue.startUs, cue.durationUs, "text", { x: template.caption.x, y: template.caption.y, alpha: template.caption.alpha, renderIndex: 15999 }));
       subtitleTimeline.push(cue);
     }
   }
 
   const audioInputSegments = externalAudio
-    ? [{ shotId: 0, path: externalAudio.path, durationSec: timeline.at(-1)?.endSec || 1, startSec: 0 }]
-    : task.videoForm === "podcast" ? podcastSegments : audioSegments;
+    ? [{ shotId: 0, path: externalAudio.path, startUs: 0, durationUs: timeline.at(-1)?.endUs || microseconds }]
+    : task.videoForm === "podcast"
+      ? podcastSegments.map((source, index) => ({ ...source, startUs: timeline[index]?.startUs, durationUs: timeline[index]?.durationUs }))
+      : shots.map((shot, index) => ({
+        ...audioSegments.find((source) => Number(source.shotId) === Number(shot.id)),
+        startUs: timeline[index].startUs,
+        durationUs: timeline[index].durationUs,
+      }));
   let audioCursor = 0;
   for (const [index, source] of audioInputSegments.entries()) {
     const target = await copyAsset(source.path, audioDir, `${index + 1}${extname(source.path) || ".mp3"}`);
-    const durationSec = Number(source.durationSec || textDuration(source.text));
-    const startSec = Number.isFinite(source.startSec) ? source.startSec : audioCursor;
-    audioCursor = Math.max(audioCursor, startSec + durationSec);
-    const duration = Math.round(durationSec * microseconds);
+    const duration = Number.isFinite(source.durationUs)
+      ? source.durationUs
+      : Math.max(1, Math.trunc(Number(source.durationSec || textDuration(source.text)) * microseconds));
+    const start = Number.isFinite(source.startUs) ? source.startUs : audioCursor;
+    audioCursor = Math.max(audioCursor, start + duration);
     const material = audioMaterial(target, duration);
     materials.audios.push(material);
     const speedId = id();
     materials.speeds.push({ curve_speed: null, id: speedId, mode: 0, speed: 1, type: "speed" });
-    narrationSegments.push(trackSegment(material.id, Math.round(startSec * microseconds), duration, "audio", { volume: task.options?.narrationVolume ?? 10, extraMaterialRefs: [speedId] }));
+    narrationSegments.push(trackSegment(material.id, start, duration, "audio", { volume: task.options?.narrationVolume ?? template.audio.narrationVolume, extraMaterialRefs: [speedId] }));
   }
 
   const totalDuration = Math.max(
-    Math.round((timeline.at(-1)?.endSec || audioCursor || 1) * microseconds),
+    timeline.at(-1)?.endUs || audioCursor || microseconds,
     ...narrationSegments.map((segment) => segment.target_timerange.start + segment.target_timerange.duration),
   );
-  const tracks = [
+  const frameAssets = await writeTemplateFrameAssets(template, imageDir);
+  const tracks = [];
+  if (frameAssets) {
+    const backgroundMaterial = videoMaterial(frameAssets.backgroundPath, totalDuration, width, height);
+    materials.videos.push(backgroundMaterial);
+    tracks.push({ attribute: 0, flag: 0, id: id(), is_default_name: false, name: "template_frame_background", segments: [trackSegment(backgroundMaterial.id, 0, totalDuration, "video", { renderIndex: -100 })], type: "video" });
+  }
+  tracks.push(
     { attribute: 0, flag: 0, id: id(), is_default_name: false, name: "image_main", segments: videoSegments, type: "video" },
     { attribute: 0, flag: 0, id: id(), is_default_name: false, name: "audio_main", segments: narrationSegments, type: "audio" },
-    { attribute: 0, flag: 0, id: id(), is_default_name: false, name: "subtitle", segments: subtitleSegments, type: "text" },
-  ];
+  );
+  if (frameAssets) {
+    const borderMaterial = videoMaterial(frameAssets.borderPath, totalDuration, width, height);
+    materials.videos.push(borderMaterial);
+    tracks.push({ attribute: 0, flag: 0, id: id(), is_default_name: false, name: "template_frame_border", segments: [trackSegment(borderMaterial.id, 0, totalDuration, "video", { renderIndex: 1000 })], type: "video" });
+  }
 
   const titleText = task.artifacts?.rewrite?.title || task.title;
-  if (task.options?.coverMode === "titled" && titleText) {
-    const material = textMaterial(titleText, { color: "#FFDE00", fontSize: template.titleSize, bold: true, underline: true });
+  if (template.title.visible && titleText) {
+    const material = textMaterial(titleText, textLayerOptions(template.title, {
+      fontSize: fittedFontSize(template.title.fontSize, titleText, 200, 14),
+    }));
     materials.texts.push(material);
     tracks.push({
       attribute: 0,
@@ -518,9 +719,48 @@ export async function buildJianyingDraft(taskStore, task) {
       id: id(),
       is_default_name: false,
       name: "cover_title",
-      segments: [trackSegment(material.id, 0, totalDuration, "text", { y: template.titleY, renderIndex: 15000 })],
+      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.title.x, y: template.title.y, alpha: template.title.alpha, renderIndex: 15000 })],
       type: "text",
     });
+  }
+
+  const subtitleText = Array.isArray(task.artifacts?.rewrite?.subtitle)
+    ? task.artifacts.rewrite.subtitle.filter(Boolean).slice(0, 2).join("\n")
+    : "";
+  if (template.subtitle.visible && subtitleText) {
+    const material = textMaterial(subtitleText, textLayerOptions(template.subtitle, {
+      fontSize: fittedFontSize(template.subtitle.fontSize, subtitleText, 168, 8),
+    }));
+    materials.texts.push(material);
+    tracks.push({
+      attribute: 0,
+      flag: 0,
+      id: id(),
+      is_default_name: false,
+      name: "cover_subtitle",
+      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.subtitle.x, y: template.subtitle.y, alpha: template.subtitle.alpha, renderIndex: 15000 })],
+      type: "text",
+    });
+  }
+
+  if (template.disclaimer.visible && template.disclaimer.text) {
+    const material = textMaterial(template.disclaimer.text, textLayerOptions(template.disclaimer, {
+      globalAlpha: template.disclaimer.alpha,
+    }));
+    materials.texts.push(material);
+    tracks.push({
+      attribute: 0,
+      flag: 0,
+      id: id(),
+      is_default_name: false,
+      name: "cover_disclaimer",
+      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.disclaimer.x, y: template.disclaimer.y, alpha: template.disclaimer.alpha, renderIndex: 15000 })],
+      type: "text",
+    });
+  }
+
+  if (template.caption.visible && subtitleSegments.length) {
+    tracks.push({ attribute: 0, flag: 0, id: id(), is_default_name: false, name: "subtitle", segments: subtitleSegments, type: "text" });
   }
 
   if (task.media?.bgm?.path) {
@@ -532,9 +772,14 @@ export async function buildJianyingDraft(taskStore, task) {
     let bgmCursor = 0;
     while (bgmCursor < totalDuration) {
       const duration = task.options?.bgmSync ? Math.min(sourceDuration, totalDuration - bgmCursor) : totalDuration - bgmCursor;
-      segments.push(trackSegment(material.id, bgmCursor, duration, "audio", { volume: task.options?.bgmVolume ?? 3 }));
+      segments.push(trackSegment(material.id, bgmCursor, duration, "audio", { volume: task.options?.bgmVolume ?? template.audio.bgmVolume }));
       bgmCursor += duration;
       if (!task.options?.bgmSync || sourceDuration <= 0) break;
+    }
+    if (segments.length && template.audio.bgmFadeOutMs > 0) {
+      const fade = audioFadeMaterial(template.audio.bgmFadeOutMs);
+      materials.audio_fades.push(fade);
+      segments.at(-1).extra_material_refs.push(fade.id);
     }
     tracks.push({
       attribute: 0,

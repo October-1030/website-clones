@@ -50,10 +50,38 @@ function fallbackTitle(text: string): string {
 
 function mechanicalShots(text: string, targetScenes: number | null): StoryboardShot[] {
   const paragraphs = text.split(/\n\s*\n+/).map((item) => item.trim()).filter(Boolean);
-  const pieces = (paragraphs.length > 1 ? paragraphs : text.split(/(?<=[。！？!?；;])|\n+/))
+  const rawPieces = (paragraphs.length > 1 ? paragraphs : text.split(/(?<=[。！？!?；;])|\n+/))
     .map((item) => item.trim()).filter(Boolean);
-  const limit = Math.max(1, Math.min(60, targetScenes || pieces.length));
-  return pieces.slice(0, limit).map((item, index) => ({
+  const pieces = rawPieces.flatMap((piece) => {
+    const chunks: string[] = [];
+    let remaining = piece;
+    while (remaining.length > 55) {
+      const window = remaining.slice(0, 56);
+      const candidates = ["。", "！", "？", "；", "，", ".", "!", "?", ";", ","];
+      let splitAt = candidates.reduce((best, marker) => Math.max(best, window.lastIndexOf(marker)), -1);
+      if (splitAt < 24) splitAt = 44;
+      chunks.push(remaining.slice(0, splitAt + 1).trim());
+      remaining = remaining.slice(splitAt + 1).trim();
+    }
+    if (remaining) chunks.push(remaining);
+    return chunks;
+  });
+  const requested = targetScenes && targetScenes > 0 ? Math.min(60, targetScenes) : pieces.length;
+  const merged = [...pieces];
+  while (merged.length > requested) {
+    let mergeAt = -1;
+    let shortest = Number.POSITIVE_INFINITY;
+    for (let index = 0; index < merged.length - 1; index += 1) {
+      const combinedLength = merged[index].length + merged[index + 1].length;
+      if (combinedLength <= 55 && combinedLength < shortest) {
+        shortest = combinedLength;
+        mergeAt = index;
+      }
+    }
+    if (mergeAt < 0) break;
+    merged.splice(mergeAt, 2, `${merged[mergeAt]}${merged[mergeAt + 1]}`);
+  }
+  return merged.slice(0, 60).map((item, index) => ({
     id: index + 1,
     text: item,
     visual: "按当前字幕匹配主体、环境和动作明确的画面",

@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
-const baseUrl = process.env.STORYBOUND_URL || "http://127.0.0.1:5193";
+const baseUrl = process.env.STORYBOUND_URL || "http://127.0.0.1:5173";
 const taskId = randomUUID();
 const longSubtitle = "第一句测试字幕需要自动拆成适合手机阅读的短句，不能整段铺满屏幕。";
 
@@ -64,7 +64,9 @@ try {
       runState: "paused",
       currentStep: 6,
       stepStatuses: ["skipped", "skipped", "done", "done", "done", "done", "pending"],
+      options: { draftTemplateId: "default-portrait-9-16", videoIntro: false, videoIntroDuration: 3, bgmSync: true },
       artifacts: {
+        rewrite: { title: "测试片头标题", subtitle: ["第一行副标题", "第二行副标题"], narration: `${longSubtitle}第二句测试字幕。`, tags: [], pinnedComment: "", comments: [], publishCopy: "", summary: "" },
         storyboard: { shots: [
           { id: 1, text: longSubtitle, visual: "夜晚城市", emotion: "安静", durationSec: 2 },
           { id: 2, text: "第二句测试字幕。", visual: "清晨窗边", emotion: "温暖", durationSec: 2 },
@@ -99,7 +101,7 @@ try {
       ],
       podcast: null,
       externalAudio: null,
-      bgm: null,
+      bgm: audio1,
     },
   };
   await json(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
@@ -117,10 +119,37 @@ try {
   const subtitleTrack = draftInfo.tracks?.find((track) => track.name === "subtitle");
   const textById = new Map((draftInfo.materials?.texts || []).map((item) => [item.id, JSON.parse(item.content).text]));
   const subtitleTexts = (subtitleTrack?.segments || []).map((segment) => textById.get(segment.material_id) || "");
-  if (subtitleTexts.length <= 2 || subtitleTexts.some((text) => [...text.replace(/\s/g, "")].length > 20 || /^[，,。！？!?；;：:、]/.test(text))) {
+  if (subtitleTexts.length <= 2 || subtitleTexts.some((text) => [...text.replace(/\s/g, "")].length > 12 || /[，,。！？!?；;：:、]/.test(text))) {
     throw new Error(`长字幕未正确拆分：${subtitleTexts.join(" | ")}`);
   }
-  if (draftInfo.tracks?.some((track) => track.name === "cover_title")) throw new Error("关闭标题封面时仍生成了标题轨");
+  const firstCaptionMaterial = draftInfo.materials?.texts?.find((item) => item.id === subtitleTrack?.segments?.[0]?.material_id);
+  const firstCaptionStyle = firstCaptionMaterial && JSON.parse(firstCaptionMaterial.content).styles?.[0];
+  if (!firstCaptionMaterial || firstCaptionMaterial.background_alpha !== 0.5 || firstCaptionMaterial.font_size !== 15 || firstCaptionMaterial.line_max_width !== 1 || firstCaptionStyle?.size !== 12 || firstCaptionStyle?.strokes?.length !== 1) {
+    throw new Error("默认模板没有按原版 subtitle 素材结构写入");
+  }
+  const disclaimerTrack = draftInfo.tracks?.find((track) => track.name === "cover_disclaimer");
+  if (!disclaimerTrack || disclaimerTrack.segments?.[0]?.target_timerange?.duration !== draftInfo.duration) throw new Error("免责声明轨未覆盖完整时间线");
+  for (const trackName of ["cover_title", "cover_subtitle"]) {
+    const track = draftInfo.tracks?.find((item) => item.name === trackName);
+    if (!track || track.segments?.[0]?.target_timerange?.duration !== draftInfo.duration || track.segments?.[0]?.render_index !== 15000) {
+      throw new Error(`${trackName} 没有按原版覆盖完整时间线`);
+    }
+  }
+  if (draftInfo.materials?.canvases?.length) throw new Error("原版默认草稿不应额外写入 canvas 素材");
+  if (!draftInfo.materials?.audio_fades?.length || !draftInfo.tracks?.find((track) => track.name === "bgm")) throw new Error("BGM 音轨或淡出未写入");
+
+  await json(`/api/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ options: { draftTemplateId: "builtin-knowledge-card", videoIntro: false, videoIntroDuration: 0 } }),
+  });
+  const frameResult = await json(`/api/tasks/${taskId}/draft`, { method: "POST" });
+  const frameDraftInfo = JSON.parse(await readFile(join(frameResult.draft.projectDir, "draft_info.json"), "utf8"));
+  if (frameDraftInfo.canvas_config?.width !== 1080 || frameDraftInfo.canvas_config?.height !== 1920) throw new Error("知识卡画布尺寸错误");
+  for (const trackName of ["template_frame_background", "template_frame_border"]) {
+    if (!frameDraftInfo.tracks?.some((track) => track.name === trackName)) throw new Error(`知识卡缺少 ${trackName}`);
+  }
+  if (frameDraftInfo.tracks?.some((track) => track.name === "cover_disclaimer")) throw new Error("知识卡模板应关闭免责声明");
   const zip = Buffer.from(await (await request(`/api/tasks/${taskId}/draft.zip`)).arrayBuffer());
   if (zip.subarray(0, 2).toString("ascii") !== "PK") throw new Error("下载结果不是 ZIP");
   process.stdout.write(JSON.stringify({ ok: true, taskId, projectName: result.draft.projectName, tracks: result.draft.trackCount, files: result.draft.fileCount, zipBytes: zip.length }) + "\n");

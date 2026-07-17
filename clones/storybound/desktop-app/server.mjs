@@ -648,25 +648,31 @@ function normalizePipelineResult(step, payload, context, artifacts) {
   }
   if (step === "storyboard") {
     const source = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
-    const fallbackShots = splitText(source, 85).slice(0, 18).map((text, index) => ({
+    const fallbackShots = splitText(source, 45).slice(0, 60).map((text, index) => ({
       id: index + 1,
       text,
       visual: track?.skeletonScenes?.[index % Math.max(1, track.skeletonScenes.length)] || "与字幕内容对应的可执行画面",
       emotion: "克制、自然",
-      durationSec: Math.max(3, Math.min(8, Math.round(text.length / 12))),
+      durationSec: Math.max(2, Math.min(12, Number((text.length / 4.2).toFixed(1)))),
     }));
     const suppliedShots = payload.shots || payload.sentences || payload.storyboard;
     const shots = Array.isArray(suppliedShots) && suppliedShots.length ? suppliedShots : fallbackShots;
     return {
       step,
       data: {
-        shots: shots.slice(0, 18).map((shot, index) => ({
-          id: Number(shot.id || shot.shotId || index + 1),
-          text: clampString(shot.text || shot.cap || shot.caption || shot.narration || shot.content, fallbackShots[index]?.text || source.slice(0, 80)),
-          visual: clampString(shot.visual || shot.desc_prompt || shot.scene || shot.prompt, fallbackShots[index]?.visual || "与字幕内容对应的可执行画面"),
-          emotion: clampString(shot.emotion || shot.mood, "克制、自然"),
-          durationSec: Math.max(2, Math.min(12, Number(shot.durationSec || shot.duration_sec || shot.duration || 5))),
-        })),
+        shots: shots.flatMap((shot, index) => {
+          const text = clampString(shot.text || shot.cap || shot.caption || shot.narration || shot.content, fallbackShots[index]?.text || source.slice(0, 55));
+          const parts = splitText(text, 55);
+          const suppliedDuration = Number(shot.durationSec || shot.duration_sec || shot.duration);
+          const totalLength = Math.max(1, parts.reduce((sum, part) => sum + part.length, 0));
+          return parts.map((part) => ({
+            id: 0,
+            text: part,
+            visual: clampString(shot.visual || shot.desc_prompt || shot.scene || shot.prompt, fallbackShots[index]?.visual || "与字幕内容对应的可执行画面"),
+            emotion: clampString(shot.emotion || shot.mood, "克制、自然"),
+            durationSec: Math.max(2, Math.min(12, Number.isFinite(suppliedDuration) ? suppliedDuration * part.length / totalLength : part.length / 4.2)),
+          }));
+        }).slice(0, 60).map((shot, index) => ({ ...shot, id: index + 1 })),
         characterCard: track?.needsCharacterCard
           ? normalizeCharacterCard(payload.characterCard || payload.character_card || payload.character)
           : undefined,
@@ -806,13 +812,16 @@ function splitShotsFromAnchors(sourceText, anchors, track) {
     const end = position + anchor.length;
     const text = source.slice(cursor, end);
     if (!text.trim()) return [];
-    shots.push({
-      id: shots.length + 1,
-      text,
-      visual: track?.skeletonScenes?.[shots.length % Math.max(1, track?.skeletonScenes?.length || 1)] || "与字幕内容对应的可执行画面",
-      emotion: "克制、自然",
-      durationSec: Math.max(2, Math.min(12, Number((text.length / 4.2).toFixed(1)))),
-    });
+    for (const part of splitText(text, 55)) {
+      shots.push({
+        id: shots.length + 1,
+        text: part,
+        visual: track?.skeletonScenes?.[shots.length % Math.max(1, track?.skeletonScenes?.length || 1)] || "与字幕内容对应的可执行画面",
+        emotion: "克制、自然",
+        durationSec: Math.max(2, Math.min(12, Number((part.length / 4.2).toFixed(1)))),
+      });
+      if (shots.length >= 60) break;
+    }
     cursor = end;
   }
   if (source.slice(cursor).trim()) return [];
@@ -862,7 +871,7 @@ async function runLlmPipeline(body) {
     ), 0.2, "影视分镜锚点拆分");
     let shots = splitShotsFromAnchors(source, splitPayload.anchors || splitPayload.endAnchors || splitPayload.boundaries, track);
     if (!shots.length) {
-      shots = splitText(String(source).replace(/[“”]/g, ""), 85).slice(0, 18).map((text, index) => ({
+      shots = splitText(String(source).replace(/[“”]/g, ""), 45).slice(0, 60).map((text, index) => ({
         id: index + 1,
         text,
         visual: track?.skeletonScenes?.[index % Math.max(1, track?.skeletonScenes?.length || 1)] || "与字幕内容对应的可执行画面",

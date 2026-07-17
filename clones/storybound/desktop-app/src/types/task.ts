@@ -20,8 +20,9 @@ export interface TaskOptions {
   materialSource?: MaterialSource;
   autoBorrowImage?: boolean;
   dynamicStoryboard?: boolean;
-  targetDurationSec?: number | null;
   draftTemplateId?: string;
+  videoIntro?: boolean;
+  videoIntroDuration?: number;
   bgmSync?: boolean;
   referenceImage?: StoredAsset | null;
   coverMode?: CoverMode;
