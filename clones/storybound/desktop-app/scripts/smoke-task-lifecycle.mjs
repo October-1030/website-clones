@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
 const baseUrl = process.env.STORYBOUND_URL || "http://127.0.0.1:5193";
@@ -104,6 +104,12 @@ try {
   await json(`/api/tasks/${taskId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
   const result = await json(`/api/tasks/${taskId}/draft`, { method: "POST" });
   if (!result.draft?.ready || result.draft.trackCount < 3 || result.draft.fileCount < 8) throw new Error("草稿产物不完整");
+  const [imageFiles, audioFiles] = await Promise.all([
+    readdir(join(result.draft.projectDir, "assets", "image")),
+    readdir(join(result.draft.projectDir, "assets", "audio")),
+  ]);
+  if (!imageFiles.every((file) => file.endsWith(".png"))) throw new Error(`图片扩展名丢失：${imageFiles.join(", ")}`);
+  if (!audioFiles.every((file) => file.endsWith(".wav"))) throw new Error(`音频扩展名丢失：${audioFiles.join(", ")}`);
   const draftInfo = JSON.parse(await readFile(join(result.draft.projectDir, "draft_info.json"), "utf8"));
   const firstImageSegment = draftInfo.tracks?.find((track) => track.name === "image_main")?.segments?.[0];
   if (firstImageSegment?.clip?.transform?.x !== 0.1 || firstImageSegment?.clip?.scale?.x !== 1.2) throw new Error("图片裁切参数未写入剪映草稿");

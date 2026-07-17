@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
 
 import { writeStoredZip } from "./zip-store.mjs";
@@ -263,8 +263,11 @@ function audioMaterial(file, duration) {
 
 async function copyAsset(source, targetDirectory, preferredName) {
   const sourcePath = resolve(source);
-  const extension = extname(preferredName || sourcePath) || extname(sourcePath) || ".bin";
-  const name = `${String(preferredName || basename(sourcePath, extname(sourcePath))).replace(/[^A-Za-z0-9_-]/g, "-")}${preferredName && extname(preferredName) ? "" : extension}`;
+  const requestedName = String(preferredName || basename(sourcePath));
+  const requestedExtension = extname(requestedName);
+  const extension = requestedExtension || extname(sourcePath) || ".bin";
+  const stem = basename(requestedName, requestedExtension).replace(/[^A-Za-z0-9_-]/g, "-") || "asset";
+  const name = `${stem}${extension.toLowerCase()}`;
   const target = join(targetDirectory, name);
   await copyFile(sourcePath, target);
   return target;
@@ -354,7 +357,6 @@ export async function buildJianyingDraft(taskStore, task) {
 
   const base = taskStore.taskDir(task.id);
   const draftRoot = join(base, "draft");
-  await rm(draftRoot, { recursive: true, force: true });
   await mkdir(draftRoot, { recursive: true });
   const projectName = `${sanitizeTitle(task.title)}_${randomUUID().slice(0, 8)}`;
   const projectDir = join(draftRoot, projectName);
