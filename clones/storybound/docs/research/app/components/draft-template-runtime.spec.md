@@ -53,11 +53,14 @@
 ## Track behavior
 
 - Image segment durations follow real TTS segment durations.
-- Caption text is split using `caption.maxCharsPerLine`, keeps punctuation attached to the previous chunk, and divides each source audio interval proportionally without gaps.
-- Intro title and intro subtitle exist only when `videoIntro` is enabled and end after `videoIntroDuration` seconds.
-- A titled cover controls the separate draft cover artwork; it does not create a full-duration title track.
+- Caption text is split using `caption.maxCharsPerLine`, removes split punctuation, uses Jieba for overlong clauses, and divides each source-audio interval proportionally by visible character count without gaps.
+- The original draft contains four text tracks: `cover_title`, `cover_subtitle`, `subtitle`, and `cover_disclaimer`.
+- `cover_title`, `cover_subtitle`, and `cover_disclaimer` span the complete narration duration when enabled by the template.
+- `videoIntro` is the original dynamic-storyboard option (image-to-video for the first N shots). It is not a title-card duration control.
+- Without an AI cover poster, `cover_title` and `cover_subtitle` remain visible so the user can create a Jianying cover from a chosen frame; the official workflow then asks the user to hide those two tracks before export.
+- With a valid AI cover poster, the poster becomes the Jianying draft cover and the title/subtitle track alpha is forced to zero. The tracks still exist for later editing.
 - Disclaimer follows template visibility and spans the narration duration.
-- BGM uses the template volume and configured fade-out.
+- BGM uses the template volume, fills the full narration duration, and applies the configured fade-out.
 - Text material uses template color, alpha, bold, underline, alignment, letter spacing, line spacing, border, and background values.
 
 ## Storyboard behavior
@@ -71,16 +74,18 @@
 
 - Expose target text length and target scene count as original controls.
 - Explain that final duration follows text length, TTS speed, and real audio.
-- Expose optional video intro and intro duration independently from cover mode.
+- Label the original `videoIntro` field as dynamic storyboard, with a count and duration policy, rather than presenting it as a title card.
+- Expose AI-cover mode independently from dynamic storyboard mode.
 - Display the selected template’s actual caption maximum, size, color, position, and background alpha so the user can inspect what will enter Jianying.
 - Do not show a fake target-duration control that the runtime ignores.
 
 ## Acceptance
 
 - Default portrait tasks produce captions of at most 12 visible characters plus terminal punctuation.
-- Cover mode alone does not create a `cover_title` timeline track.
-- Enabling a 3-second intro creates title/subtitle segments with exactly 3 seconds duration.
-- Disabling intro creates no title/subtitle timeline tracks.
+- A draft always contains title/subtitle tracks when those template layers are enabled.
+- Without an AI cover poster, enabled title/subtitle tracks span the full draft and retain template alpha.
+- With an AI cover poster, enabled title/subtitle tracks span the full draft but have clip alpha zero.
+- Dynamic storyboard replaces only the configured first N image segments with generated video while preserving the narration-aligned target ranges.
 - Default template output has a disclaimer track and uses real audio duration.
 - Fallback storyboard output respects 45-character chunks and up to 60 shots.
 - Build, lint, and task smoke tests pass.

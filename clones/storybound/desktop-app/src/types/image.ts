@@ -20,6 +20,7 @@ export interface ImageGenerationRequest {
   maxImages: number;
   track: string;
   visualStyle: string;
+  coverBackgroundOnly?: boolean;
 }
 
 export interface ImageGenerationResponse {

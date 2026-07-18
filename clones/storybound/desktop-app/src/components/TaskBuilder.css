@@ -60,6 +60,12 @@
 .template-summary{grid-template-columns:repeat(3,minmax(0,1fr))}
 .template-summary>div{display:grid;gap:3px}
 .template-hint{margin:-4px 0 0}
+.template-editor{padding:14px;border:1px solid var(--border);border-radius:10px;background:#0c1115}
+.template-editor>summary,.template-editor__layer>summary{cursor:pointer;color:var(--text-primary);font-weight:700}
+.template-editor[open]>summary{margin-bottom:14px;color:var(--accent)}
+.template-editor__layer{margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(255,255,255,.015)}
+.template-editor__layer[open]>summary{margin-bottom:12px}
+.template-editor .template-catalog__notice{margin-bottom:14px}
 .artifact-editor,.audio-workbench,.draft-result { padding:16px;margin-top:14px;background:rgba(85,133,255,.045);border:1px solid rgba(85,133,255,.2);border-radius:10px; }
 .artifact-editor__head,.draft-result { display:flex;align-items:center;justify-content:space-between;gap:16px; }
 .artifact-editor__head>div:first-child,.draft-result>div:first-child { display:flex;min-width:0;flex-direction:column;gap:3px; }

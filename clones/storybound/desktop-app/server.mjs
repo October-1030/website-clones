@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { buildJianyingDraft } from "./server/draft-builder.mjs";
+import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { createTaskStore } from "./server/task-store.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -459,9 +460,10 @@ async function generateMinimaxImages(body) {
   const track = originalTrack(body.track);
   const style = originalStyle(body.visualStyle, track);
   let subjectReference = null;
+  let generationTask = null;
   if (body.taskId) {
-    const task = await taskStore.readTask(body.taskId);
-    const reference = task?.options?.referenceImage;
+    generationTask = await taskStore.readTask(body.taskId);
+    const reference = generationTask?.options?.referenceImage;
     if (reference?.path && existsSync(reference.path)) {
       const extension = extname(reference.path).toLowerCase();
       const mime = extension === ".png" ? "image/png" : "image/jpeg";
@@ -472,8 +474,29 @@ async function generateMinimaxImages(body) {
     }
   }
   const selectedPrompts = prompts.slice(0, maxImages);
+  function coverBackgroundPrompt(value, shotId) {
+    if (!body.coverBackgroundOnly || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return value;
+    const marker = /[，。；]?(?:整体按电影海报式排版|极简排版|情感海报排版|冲击式排版|国风题字排版|人物传奇式排版)[:：][\s\S]*$/u;
+    const visualPrompt = String(value).replace(marker, "").replace(/。画面中避免出现[:：][\s\S]*$/u, "").trim();
+    return `${visualPrompt}，只生成干净的封面视觉底图，中部构图简洁并预留标题区；画面中不得出现任何文字、字母、数字、水印、标志、招牌或乱码`;
+  }
+  async function finalizeCover(saved, shotId) {
+    if (!saved || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return saved;
+    try {
+      const rendered = await renderTitledCover({
+        sourcePath: saved.path,
+        title: generationTask.artifacts?.rewrite?.title || generationTask.title,
+        subtitles: generationTask.artifacts?.rewrite?.subtitle || [],
+      });
+      return rendered ? { ...saved, bytes: rendered.bytes, width: rendered.width, height: rendered.height, sourceBackupPath: rendered.backupPath, textComposited: true } : saved;
+    } catch (error) {
+      console.warn("[cover] 精确标题合成失败，保留 AI 原图:", error);
+      return saved;
+    }
+  }
   const images = await mapLimit(selectedPrompts, 3, async (item, index) => {
-    const prompt = String(item.prompt || "").trim().slice(0, 1500);
+    const shotId = Number(item.shotId || index + 1);
+    const prompt = coverBackgroundPrompt(String(item.prompt || "").trim(), shotId).slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
     const retryPrompts = [
       prompt,
@@ -497,10 +520,10 @@ async function generateMinimaxImages(body) {
         const base64 = payload.data?.image_base64?.[0];
         const imageUrl = payload.data?.image_urls?.[0];
         if (typeof base64 === "string" && base64) {
-          const shotId = Number(item.shotId || index + 1);
-          const saved = body.taskId
+          let saved = body.taskId
             ? await taskStore.saveBuffer(body.taskId, "images", `${shotId}.jpg`, Buffer.from(base64, "base64"))
             : null;
+          saved = await finalizeCover(saved, shotId);
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
@@ -513,10 +536,10 @@ async function generateMinimaxImages(body) {
           };
         }
         if (typeof imageUrl === "string" && imageUrl) {
-          const shotId = Number(item.shotId || index + 1);
-          const saved = body.taskId
+          let saved = body.taskId
             ? await taskStore.saveRemoteAsset(body.taskId, "images", `${shotId}.jpg`, imageUrl)
             : null;
+          saved = await finalizeCover(saved, shotId);
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
@@ -1082,7 +1105,7 @@ async function handleTaskApi(request, response, pathname) {
       const buffer = Buffer.from(String(body.base64 || ""), "base64");
       if (!buffer.length) throw new Error("上传资源为空");
       const asset = await taskStore.saveBuffer(taskId, body.kind || "uploads", body.fileName, buffer);
-      const durationSec = body.kind === "audio" ? await probeMediaDuration(asset.path) : undefined;
+      const durationSec = ["audio", "videos"].includes(body.kind) ? await probeMediaDuration(asset.path) : undefined;
       sendJson(response, 201, { asset: durationSec ? { ...asset, durationSec } : asset });
       return;
     }
@@ -1143,6 +1166,9 @@ const mimeTypes = {
   ".webp": "image/webp",
   ".mp3": "audio/mpeg",
   ".wav": "audio/wav",
+  ".mp4": "video/mp4",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
   ".zip": "application/zip",
   ".srt": "application/x-subrip; charset=utf-8",
 };

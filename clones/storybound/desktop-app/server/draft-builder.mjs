@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { deflateSync } from "node:zlib";
 
 import { Jieba } from "@node-rs/jieba";
@@ -11,9 +13,51 @@ import { writeStoredZip } from "./zip-store.mjs";
 const microseconds = 1_000_000;
 const jieba = Jieba.withDict(jiebaDict);
 const draftTemplates = JSON.parse(await readFile(new URL("../original-draft-templates.json", import.meta.url), "utf8"));
+const execFileAsync = promisify(execFile);
+const ffmpegCandidates = [
+  process.env.FFMPEG_PATH,
+  "C:\\Users\\pdb12\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-7.1.1-full_build\\bin\\ffmpeg.exe",
+  "ffmpeg",
+].filter(Boolean);
 
-function resolveDraftTemplate(templateId) {
-  return draftTemplates.find((template) => template.id === templateId) || draftTemplates[0];
+const animationMetadata = {
+  "缩放": ["446078", "6759078592740594184"],
+  "缩放_II": ["493000", "6779083172429697544"],
+  "左拉镜": ["471345", "6772415248973435395"],
+  "右拉镜": ["471347", "6772415374165021191"],
+  "向左缩小": ["471343", "6772415148423385607"],
+  "向右缩小": ["471341", "6772415063216099848"],
+  "形变左缩": ["813140", "6851395726937690637"],
+  "形变右缩": ["813139", "6851395907804467720"],
+  "上下分割": ["931224", "6875935836177699335"],
+  "左右分割": ["948476", "6886282872680878599"],
+  "向左下降": ["447588", "6760223716392571395"],
+  "向右下降": ["503138", "6781683438396117517"],
+  "旋转缩小": ["445858", "6759046644462785037"],
+  "旋转上升": ["691843", "6813965670716281352"],
+  "翻转": ["872838", "6843309964732142094"],
+  "形变缩小": ["487587", "6777260789263766030"],
+  "回弹伸缩": ["530249", "6795425591014199822"],
+  "滑滑梯": ["741020", "6828829568879563271"],
+  "四格滑动": ["945730", "6883727868451361293"],
+  "百叶窗": ["467361", "6771299961171612174"],
+  "抖入放大": ["450264", "6761360765925462536"],
+};
+
+function deepMerge(target, patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return patch;
+  const output = target && typeof target === "object" && !Array.isArray(target) ? { ...target } : {};
+  for (const [key, value] of Object.entries(patch)) {
+    output[key] = value && typeof value === "object" && !Array.isArray(value)
+      ? deepMerge(output[key], value)
+      : value;
+  }
+  return output;
+}
+
+function resolveDraftTemplate(templateId, customConfig) {
+  const definition = draftTemplates.find((template) => template.id === templateId) || draftTemplates[0];
+  return customConfig ? { ...definition, config: deepMerge(definition.config, customConfig) } : definition;
 }
 
 function id() {
@@ -96,11 +140,14 @@ function mixColor(start, end, amount) {
 }
 
 async function writeTemplateFrameAssets(template, imageDirectory) {
-  if (!template.frame.enabled) return null;
+  const backgroundSource = String(template.canvas.backgroundImage || "").trim();
+  if (!template.frame.enabled && !backgroundSource) return null;
   const { width, height } = template.canvas;
   const image = imageGeometry(template);
-  const imageLeft = Math.round((width - image.width) / 2);
-  const imageTop = Math.round(template.image.top * height);
+  const imageTop = Math.max(0, Math.min(height, Math.round(template.image.top * height)));
+  const imageBottom = Math.max(imageTop, Math.min(height, imageTop + image.height));
+  const topHeight = imageTop;
+  const bottomHeight = height - imageBottom;
   const borderWidth = Math.max(1, Math.round(template.frame.imageBorderWidth || 0));
   const canvasColor = rgbFromHex(template.canvas.backgroundColor);
   const headerStart = rgbFromHex(template.frame.headerColor || template.canvas.backgroundColor);
@@ -108,22 +155,33 @@ async function writeTemplateFrameAssets(template, imageDirectory) {
   const footerStart = rgbFromHex(template.frame.footerColor || template.canvas.backgroundColor);
   const footerEnd = rgbFromHex(template.frame.footerColorEnd || template.frame.footerColor || template.canvas.backgroundColor);
   const borderColor = rgbFromHex(template.frame.imageBorderColor || "#ffffff");
-  const backgroundPath = join(imageDirectory, "template-frame-background.png");
-  const borderPath = join(imageDirectory, "template-frame-border.png");
-  const background = rgbaPng(width, height, (_x, y) => {
-    if (y < imageTop) return [...mixColor(headerStart, headerEnd, y / Math.max(1, imageTop)), 255];
-    if (y >= imageTop + image.height) return [...mixColor(footerStart, footerEnd, (y - imageTop - image.height) / Math.max(1, height - imageTop - image.height)), 255];
-    return [...canvasColor, 255];
-  });
-  const border = rgbaPng(width, height, (x, y) => {
-    const insideHorizontal = x >= imageLeft && x < imageLeft + image.width;
-    const insideVertical = y >= imageTop && y < imageTop + image.height;
-    const horizontalEdge = insideHorizontal && (Math.abs(y - imageTop) < borderWidth || Math.abs(y - (imageTop + image.height - 1)) < borderWidth);
-    const verticalEdge = insideVertical && (Math.abs(x - imageLeft) < borderWidth || Math.abs(x - (imageLeft + image.width - 1)) < borderWidth);
-    return horizontalEdge || verticalEdge ? [...borderColor, 255] : [0, 0, 0, 0];
-  });
-  await Promise.all([writeFile(backgroundPath, background), writeFile(borderPath, border)]);
-  return { backgroundPath, borderPath };
+  const sides = String(template.frame.imageBorderSides || "all").toLowerCase();
+  const drawTopBorder = template.frame.enabled && borderWidth > 0 && ["all", "tb", "top", "horizontal"].includes(sides);
+  const drawBottomBorder = template.frame.enabled && borderWidth > 0 && ["all", "tb", "bottom", "horizontal"].includes(sides);
+  const result = { backgroundPath: null, topPath: null, bottomPath: null, topHeight, bottomHeight };
+
+  const backgroundPath = join(imageDirectory, "background.png");
+  if (backgroundSource) await copyFile(resolve(backgroundSource), backgroundPath);
+  else await writeFile(backgroundPath, rgbaPng(width, height, () => [...canvasColor, 255]));
+  result.backgroundPath = backgroundPath;
+
+  if (template.frame.enabled && topHeight > 0 && template.frame.headerVisible !== false) {
+    const topPath = join(imageDirectory, "mask_top.png");
+    await writeFile(topPath, rgbaPng(width, topHeight, (_x, y) => {
+      if (drawTopBorder && y >= topHeight - borderWidth) return [...borderColor, 255];
+      return [...mixColor(headerStart, headerEnd, y / Math.max(1, topHeight - 1)), 255];
+    }));
+    result.topPath = topPath;
+  }
+  if (template.frame.enabled && bottomHeight > 0 && template.frame.footerVisible !== false) {
+    const bottomPath = join(imageDirectory, "mask_bottom.png");
+    await writeFile(bottomPath, rgbaPng(width, bottomHeight, (_x, y) => {
+      if (drawBottomBorder && y < borderWidth) return [...borderColor, 255];
+      return [...mixColor(footerStart, footerEnd, y / Math.max(1, bottomHeight - 1)), 255];
+    }));
+    result.bottomPath = bottomPath;
+  }
+  return result;
 }
 
 function textLayerOptions(layer, extra = {}) {
@@ -237,11 +295,11 @@ function trackSegment(materialId, start, duration, type, options = {}) {
     id: id(),
     material_id: materialId,
     target_timerange: { start, duration },
-    common_keyframes: [],
+    common_keyframes: options.commonKeyframes || [],
     keyframe_refs: [],
-    source_timerange: type === "text" ? null : { start: options.sourceStart || 0, duration },
-    speed: type === "video" ? null : 1,
-    volume: type === "audio" ? options.volume ?? 10 : 1,
+    source_timerange: type === "text" ? null : { start: options.sourceStart || 0, duration: options.sourceDuration ?? duration },
+    speed: type === "video" ? options.speed ?? null : 1,
+    volume: type === "audio" ? options.volume ?? 10 : options.volume ?? 1,
     extra_material_refs: options.extraMaterialRefs ?? (type === "text" ? [id()] : []),
     clip: type === "audio" ? null : {
       alpha: options.alpha ?? 1,
@@ -303,16 +361,6 @@ function emptyMaterials() {
   };
 }
 
-function audioFadeMaterial(fadeOutMs) {
-  return {
-    fade_in_duration: 0,
-    fade_out_duration: Math.max(0, Math.round(Number(fadeOutMs || 0) * 1000)),
-    fade_type: 0,
-    id: id(),
-    type: "audio_fade",
-  };
-}
-
 function ratioNumbers(value) {
   const [width, height] = String(value || "1:1").split(":").map(Number);
   return width > 0 && height > 0 ? [width, height] : [1, 1];
@@ -326,7 +374,7 @@ function imageGeometry(template) {
   return { width, height, x: 0, y: 1 - center * 2 };
 }
 
-function videoMaterial(file, duration, width, height) {
+function videoMaterial(file, duration, width, height, type = "photo") {
   const materialId = id();
   return {
     audio_fade: null,
@@ -345,7 +393,7 @@ function videoMaterial(file, duration, width, height) {
     },
     crop_ratio: "free",
     crop_scale: 1,
-    duration: Math.max(duration, 10_800 * microseconds),
+    duration: type === "video" ? duration : Math.max(duration, 10_800 * microseconds),
     height,
     id: materialId,
     local_material_id: "",
@@ -354,9 +402,92 @@ function videoMaterial(file, duration, width, height) {
     media_path: "",
     path: file,
     remote_url: null,
-    type: "photo",
+    type,
     width,
   };
+}
+
+function normalizePool(value) {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => String(item || "").trim()).filter((item) => item && item !== "none");
+}
+
+function animationMaterial(name, duration) {
+  const metadata = animationMetadata[name];
+  if (!metadata) return null;
+  return {
+    id: id(),
+    type: "sticker_animation",
+    multi_language_current: "none",
+    animations: [{
+      anim_adjust_params: null,
+      platform: "all",
+      panel: "video",
+      material_type: "video",
+      name,
+      id: metadata[0],
+      type: "group",
+      resource_id: metadata[1],
+      start: 0,
+      duration,
+    }],
+  };
+}
+
+function keyframe(propertyType, startTime, startValue, endTime, endValue) {
+  const point = (time_offset, value) => ({
+    curveType: "Line",
+    graphID: "",
+    left_control: { x: 0, y: 0 },
+    right_control: { x: 0, y: 0 },
+    id: id(),
+    time_offset,
+    values: [value],
+  });
+  return {
+    id: id(),
+    keyframe_list: [point(startTime, startValue), point(endTime, endValue)],
+    material_id: "",
+    property_type: propertyType,
+  };
+}
+
+function applyMotion(segment, motionName, duration, strength = 1) {
+  const name = String(motionName || "").trim().toLowerCase();
+  if (!name || name === "none") return false;
+  const amount = Math.max(0.1, Number(strength) || 1);
+  const zoom = 0.15 * amount;
+  const kenBurnsZoom = 0.2 * amount;
+  const position = 0.06 * amount;
+  const panScale = 1 + 0.15 * amount;
+  const add = (property, start, end) => segment.common_keyframes.push(keyframe(property, 0, start, duration, end));
+  if (name === "zoom_in") add("KFTypeScaleX", 1, 1 + zoom);
+  else if (name === "zoom_out") add("KFTypeScaleX", 1 + zoom, 1);
+  else if (name === "kenburns_up") {
+    add("KFTypeScaleX", 1, 1 + kenBurnsZoom);
+    add("KFTypePositionY", 0, position);
+  } else if (name === "kenburns_down") {
+    add("KFTypeScaleX", 1, 1 + kenBurnsZoom);
+    add("KFTypePositionY", 0, -position);
+  } else if (name === "pan_left") {
+    add("KFTypeScaleX", panScale, panScale);
+    add("KFTypePositionX", position, -position);
+  } else if (name === "pan_right") {
+    add("KFTypeScaleX", panScale, panScale);
+    add("KFTypePositionX", -position, position);
+  } else return false;
+  return true;
+}
+
+function applyEdgeFade(segment, duration, isFirst, isLast) {
+  if (isFirst) {
+    const fadeIn = Math.min(800_000, Math.floor(duration / 3));
+    segment.common_keyframes.push(keyframe("KFTypeAlpha", 0, 0, fadeIn, 1));
+  }
+  if (isLast) {
+    const fadeOut = Math.min(1_800_000, Math.floor(duration / 3));
+    segment.common_keyframes.push(keyframe("KFTypeAlpha", Math.max(0, duration - fadeOut), 1, duration, 0));
+  }
 }
 
 function audioMaterial(file, duration) {
@@ -413,6 +544,28 @@ async function copyAsset(source, targetDirectory, preferredName) {
   const target = join(targetDirectory, name);
   await copyFile(sourcePath, target);
   return target;
+}
+
+async function prepareBgm(source, audioDirectory, totalDuration, fadeOutMs) {
+  const output = join(audioDirectory, "bgm.mp3");
+  const totalSeconds = Math.max(0.3, totalDuration / microseconds);
+  const fadeSeconds = Math.min(totalSeconds, Math.max(0, Number(fadeOutMs || 0) / 1000));
+  const filter = fadeSeconds > 0
+    ? `afade=t=out:st=${Math.max(0, totalSeconds - fadeSeconds).toFixed(6)}:d=${fadeSeconds.toFixed(6)}`
+    : null;
+  const args = ["-y", "-stream_loop", "-1", "-i", resolve(source), "-t", totalSeconds.toFixed(6), "-vn"];
+  if (filter) args.push("-af", filter);
+  args.push("-codec:a", "libmp3lame", "-q:a", "2", output);
+  for (const executable of ffmpegCandidates) {
+    try {
+      await execFileAsync(executable, args, { timeout: 120_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      return { path: output, duration: totalDuration, preRendered: true };
+    } catch {
+      // Try the next configured ffmpeg. A valid source copy remains a safe fallback.
+    }
+  }
+  const fallback = await copyAsset(source, audioDirectory, `bgm${extname(source) || ".mp3"}`);
+  return { path: fallback, duration: totalDuration, preRendered: false };
 }
 
 function resolveShots(task) {
@@ -566,11 +719,12 @@ export async function buildJianyingDraft(taskStore, task) {
   const shots = resolveShots(task);
   if (!shots.length) throw new Error("没有分镜，无法生成剪映草稿");
   const readyImages = new Map((task.media?.images || []).filter((item) => item.status === "ready" && item.path).map((item) => [item.shotId, item]));
+  const readyVideos = new Map((task.media?.videos || []).filter((item) => item.status === "ready" && item.path).map((item) => [item.shotId, item]));
   const firstImage = [...readyImages.values()][0];
   const singleImage = task.videoForm === "podcast" && task.options?.podcastImageMode === "single";
   const missingImages = singleImage
     ? (firstImage ? [] : [shots[0].id])
-    : shots.filter((shot) => !readyImages.has(shot.id)).map((shot) => shot.id);
+    : shots.filter((shot) => !readyImages.has(shot.id) && !readyVideos.has(shot.id)).map((shot) => shot.id);
   if (missingImages.length) throw new Error(`以下分镜缺少图片：#${missingImages.join("、#")}`);
 
   const audioSegments = (task.media?.audioSegments || []).filter((item) => item.status === "ready" && item.path);
@@ -592,7 +746,8 @@ export async function buildJianyingDraft(taskStore, task) {
   const projectDir = join(draftRoot, projectName);
   const imageDir = join(projectDir, "assets", "image");
   const audioDir = join(projectDir, "assets", "audio");
-  await Promise.all([mkdir(imageDir, { recursive: true }), mkdir(audioDir, { recursive: true })]);
+  const videoDir = join(projectDir, "assets", "video");
+  await Promise.all([mkdir(imageDir, { recursive: true }), mkdir(audioDir, { recursive: true }), mkdir(videoDir, { recursive: true })]);
   let draftCover = "";
   const coverSource = task.media?.coverImages?.find((image) => image.status === "ready" && image.path)?.path;
   if (coverSource) {
@@ -603,7 +758,7 @@ export async function buildJianyingDraft(taskStore, task) {
   }
 
   const templateId = task.options?.draftTemplateId || "default-portrait-9-16";
-  const templateDefinition = resolveDraftTemplate(templateId);
+  const templateDefinition = resolveDraftTemplate(templateId, task.options?.draftTemplateConfig);
   const template = templateDefinition.config;
   const { width, height } = template.canvas;
   const imageLayout = imageGeometry(template);
@@ -613,40 +768,53 @@ export async function buildJianyingDraft(taskStore, task) {
   const narrationSegments = [];
   const subtitleSegments = [];
   const subtitleTimeline = [];
-  const animationRefs = [];
-  const speedRefs = [];
+  const animationPool = normalizePool(template.image.animation);
+  const motionPool = normalizePool(template.image.motion);
+  const motionStrength = Number(template.image.motionStrength || 1);
 
   const copiedImageByShot = new Map();
-  for (const shot of shots) {
+  for (const [shotIndex, shot] of shots.entries()) {
     const image = singleImage ? firstImage : readyImages.get(shot.id);
-    const existing = copiedImageByShot.get(image.path);
-    const target = existing || await copyAsset(image.path, imageDir, `${shot.id}${extname(image.path) || ".png"}`);
-    copiedImageByShot.set(image.path, target);
+    const dynamicVideo = singleImage ? null : readyVideos.get(shot.id);
     const item = timeline.find((entry) => entry.shotId === shot.id);
     const start = item.startUs;
     const duration = item.durationUs;
-    const material = videoMaterial(target, duration, imageLayout.width, imageLayout.height);
+    let material;
+    let sourceDuration = duration;
+    if (dynamicVideo) {
+      const target = await copyAsset(dynamicVideo.path, videoDir, `${shot.id}${extname(dynamicVideo.path) || ".mp4"}`);
+      sourceDuration = Math.max(1, Math.round(Number(dynamicVideo.durationSec || item.durationSec) * microseconds));
+      material = videoMaterial(target, sourceDuration, Number(dynamicVideo.width || width), Number(dynamicVideo.height || height), "video");
+    } else {
+      const existing = copiedImageByShot.get(image.path);
+      const target = existing || await copyAsset(image.path, imageDir, `${shot.id}${extname(image.path) || ".png"}`);
+      copiedImageByShot.set(image.path, target);
+      material = videoMaterial(target, duration, Number(image.width || imageLayout.width), Number(image.height || imageLayout.height));
+    }
     materials.videos.push(material);
     const speedId = id();
-    const animationId = id();
-    materials.speeds.push({ curve_speed: null, id: speedId, mode: 0, speed: null, type: "speed" });
-    materials.material_animations.push({
-      id: animationId,
-      type: "sticker_animation",
-      multi_language_current: "none",
-      animations: template.image.animation || template.image.motion
-        ? [{ anim_adjust_params: null, platform: "all", panel: "video", material_type: "video", name: template.image.animation || "缩放", id: "446078", type: "group", resource_id: "6759078592740594184", start: 0, duration }]
-        : [],
-    });
-    speedRefs.push(speedId);
-    animationRefs.push(animationId);
-    const crop = image.crop || { x: 0, y: 0, scale: 1 };
-    videoSegments.push(trackSegment(material.id, start, duration, "video", {
+    materials.speeds.push({ curve_speed: null, id: speedId, mode: 0, speed: dynamicVideo ? sourceDuration / duration : null, type: "speed" });
+    const crop = image?.crop || { x: 0, y: 0, scale: 1 };
+    const segment = trackSegment(material.id, start, duration, "video", {
       x: imageLayout.x + Number(crop.x || 0),
       y: imageLayout.y + Number(crop.y || 0),
       scale: Number(crop.scale || 1),
-      extraMaterialRefs: [speedId, animationId],
-    }));
+      sourceDuration,
+      speed: dynamicVideo ? sourceDuration / duration : null,
+      volume: dynamicVideo ? 0 : 1,
+      extraMaterialRefs: [speedId],
+      renderIndex: 0,
+    });
+    const motion = motionPool.length ? motionPool[shotIndex % motionPool.length] : "";
+    const motionApplied = motion ? applyMotion(segment, motion, duration, motionStrength) : false;
+    if (!motionApplied && animationPool.length) {
+      const animation = animationMaterial(animationPool[shotIndex % animationPool.length], duration);
+      if (animation) {
+        materials.material_animations.push(animation);
+        segment.extra_material_refs.push(animation.id);
+      }
+    }
+    videoSegments.push(segment);
 
     for (const cue of splitSubtitleTimeline(item, template.caption.maxCharsPerLine)) {
       if (!template.caption.visible) continue;
@@ -659,6 +827,11 @@ export async function buildJianyingDraft(taskStore, task) {
       materials.texts.push(subtitle);
       subtitleSegments.push(trackSegment(subtitle.id, cue.startUs, cue.durationUs, "text", { x: template.caption.x, y: template.caption.y, alpha: template.caption.alpha, renderIndex: 15999 }));
       subtitleTimeline.push(cue);
+    }
+  }
+  if (motionPool.length && videoSegments.length) {
+    for (const [index, segment] of videoSegments.entries()) {
+      applyEdgeFade(segment, segment.target_timerange.duration, index === 0, index === videoSegments.length - 1);
     }
   }
 
@@ -695,16 +868,46 @@ export async function buildJianyingDraft(taskStore, task) {
   if (frameAssets) {
     const backgroundMaterial = videoMaterial(frameAssets.backgroundPath, totalDuration, width, height);
     materials.videos.push(backgroundMaterial);
-    tracks.push({ attribute: 0, flag: 0, id: id(), is_default_name: false, name: "template_frame_background", segments: [trackSegment(backgroundMaterial.id, 0, totalDuration, "video", { renderIndex: -100 })], type: "video" });
+    tracks.push({ attribute: 0, flag: 0, id: id(), is_default_name: false, name: "bg_main", segments: [trackSegment(backgroundMaterial.id, 0, totalDuration, "video", { renderIndex: 0 })], type: "video" });
+    for (const segment of videoSegments) segment.render_index = 1;
   }
   tracks.push(
     { attribute: 0, flag: 0, id: id(), is_default_name: false, name: "image_main", segments: videoSegments, type: "video" },
     { attribute: 0, flag: 0, id: id(), is_default_name: false, name: "audio_main", segments: narrationSegments, type: "audio" },
   );
   if (frameAssets) {
-    const borderMaterial = videoMaterial(frameAssets.borderPath, totalDuration, width, height);
-    materials.videos.push(borderMaterial);
-    tracks.push({ attribute: 0, flag: 0, id: id(), is_default_name: false, name: "template_frame_border", segments: [trackSegment(borderMaterial.id, 0, totalDuration, "video", { renderIndex: 1000 })], type: "video" });
+    if (frameAssets.topPath) {
+      const material = videoMaterial(frameAssets.topPath, totalDuration, width, frameAssets.topHeight);
+      materials.videos.push(material);
+      tracks.push({
+        attribute: 0,
+        flag: 0,
+        id: id(),
+        is_default_name: false,
+        name: "mask_top",
+        segments: [trackSegment(material.id, 0, totalDuration, "video", {
+          y: 1 - frameAssets.topHeight / height,
+          renderIndex: 2,
+        })],
+        type: "video",
+      });
+    }
+    if (frameAssets.bottomPath) {
+      const material = videoMaterial(frameAssets.bottomPath, totalDuration, width, frameAssets.bottomHeight);
+      materials.videos.push(material);
+      tracks.push({
+        attribute: 0,
+        flag: 0,
+        id: id(),
+        is_default_name: false,
+        name: "mask_bottom",
+        segments: [trackSegment(material.id, 0, totalDuration, "video", {
+          y: -(1 - frameAssets.bottomHeight / height),
+          renderIndex: 2,
+        })],
+        type: "video",
+      });
+    }
   }
 
   const titleText = task.artifacts?.rewrite?.title || task.title;
@@ -719,7 +922,7 @@ export async function buildJianyingDraft(taskStore, task) {
       id: id(),
       is_default_name: false,
       name: "cover_title",
-      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.title.x, y: template.title.y, alpha: template.title.alpha, renderIndex: 15000 })],
+      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.title.x, y: template.title.y, alpha: coverSource ? 0 : template.title.alpha, renderIndex: 15000 })],
       type: "text",
     });
   }
@@ -738,7 +941,7 @@ export async function buildJianyingDraft(taskStore, task) {
       id: id(),
       is_default_name: false,
       name: "cover_subtitle",
-      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.subtitle.x, y: template.subtitle.y, alpha: template.subtitle.alpha, renderIndex: 15000 })],
+      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.subtitle.x, y: template.subtitle.y, alpha: coverSource ? 0 : template.subtitle.alpha, renderIndex: 15000 })],
       type: "text",
     });
   }
@@ -763,24 +966,38 @@ export async function buildJianyingDraft(taskStore, task) {
     tracks.push({ attribute: 0, flag: 0, id: id(), is_default_name: false, name: "subtitle", segments: subtitleSegments, type: "text" });
   }
 
+  if (coverSource) {
+    const coverTarget = await copyAsset(coverSource, imageDir, `cover${extname(coverSource) || ".png"}`);
+    const coverMaterial = videoMaterial(coverTarget, 33_334, width, height);
+    const speedId = id();
+    materials.videos.push(coverMaterial);
+    materials.speeds.push({ curve_speed: null, id: speedId, mode: 0, speed: null, type: "speed" });
+    tracks.push({
+      attribute: 0,
+      flag: 0,
+      id: id(),
+      is_default_name: false,
+      name: "cover_frame",
+      segments: [trackSegment(coverMaterial.id, 0, 33_334, "video", {
+        sourceDuration: 33_334,
+        extraMaterialRefs: [speedId],
+        renderIndex: 20_000,
+      })],
+      type: "video",
+    });
+  }
+
   if (task.media?.bgm?.path) {
-    const target = await copyAsset(task.media.bgm.path, audioDir, `bgm${extname(task.media.bgm.path) || ".mp3"}`);
-    const sourceDuration = Math.round(Math.max(0.3, Number(task.media.bgm.durationSec || totalDuration / microseconds)) * microseconds);
-    const material = audioMaterial(target, sourceDuration);
+    const prepared = await prepareBgm(task.media.bgm.path, audioDir, totalDuration, template.audio.bgmFadeOutMs);
+    const material = audioMaterial(prepared.path, totalDuration);
     materials.audios.push(material);
-    const segments = [];
-    let bgmCursor = 0;
-    while (bgmCursor < totalDuration) {
-      const duration = task.options?.bgmSync ? Math.min(sourceDuration, totalDuration - bgmCursor) : totalDuration - bgmCursor;
-      segments.push(trackSegment(material.id, bgmCursor, duration, "audio", { volume: task.options?.bgmVolume ?? template.audio.bgmVolume }));
-      bgmCursor += duration;
-      if (!task.options?.bgmSync || sourceDuration <= 0) break;
-    }
-    if (segments.length && template.audio.bgmFadeOutMs > 0) {
-      const fade = audioFadeMaterial(template.audio.bgmFadeOutMs);
-      materials.audio_fades.push(fade);
-      segments.at(-1).extra_material_refs.push(fade.id);
-    }
+    const speedId = id();
+    materials.speeds.push({ curve_speed: null, id: speedId, mode: 0, speed: 1, type: "speed" });
+    const segments = [trackSegment(material.id, 0, totalDuration, "audio", {
+      volume: task.options?.bgmVolume ?? template.audio.bgmVolume,
+      sourceDuration: totalDuration,
+      extraMaterialRefs: [speedId],
+    })];
     tracks.push({
       attribute: 0,
       flag: 0,
@@ -905,18 +1122,28 @@ export async function buildJianyingDraft(taskStore, task) {
     writeFile(join(projectDir, "attachment_pc_common.json"), "{}\n", "utf8"),
     writeFile(join(projectDir, "timeline.srt"), buildSrt(subtitleTimeline), "utf8"),
     writeFile(join(projectDir, "storybound-manifest.json"), `${JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       taskId: task.id,
       taskTitle: task.title,
       generatedAt: new Date().toISOString(),
       durationSec: totalDuration / microseconds,
       shots: timeline,
       trackCount: tracks.length,
+      templateId,
+      aiCover: Boolean(coverSource),
+      dynamicVideoShots: [...readyVideos.keys()],
+      animationPool,
+      motionPool,
       sourceVersion: "Storybound 1.13.1 compatible",
     }, null, 2)}\n`, "utf8"),
   ]);
   const zipPath = join(base, "draft.zip");
   const zip = await writeStoredZip(projectDir, zipPath);
+  const oldProject = task.draft?.projectDir ? resolve(task.draft.projectDir) : "";
+  const safeDraftRoot = resolve(draftRoot).toLowerCase();
+  if (oldProject && oldProject !== resolve(projectDir) && oldProject.toLowerCase().startsWith(`${safeDraftRoot}\\`)) {
+    await rm(oldProject, { recursive: true, force: true }).catch(() => undefined);
+  }
   return {
     ready: true,
     projectName,

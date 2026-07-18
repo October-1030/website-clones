@@ -1,6 +1,7 @@
 import type { GeneratedImage } from "./image";
 import type { PipelineLlmArtifacts } from "./llm";
 import type { ExecutionMode, PausePreset, PipelineStatus, VideoForm } from "./app";
+import type { DraftTemplateConfig } from "./draft-template";
 
 export type TaskRunState = "idle" | "queued" | "running" | "paused" | "cancelled" | "completed";
 export type TaskStatus = "draft" | "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
@@ -21,7 +22,10 @@ export interface TaskOptions {
   autoBorrowImage?: boolean;
   dynamicStoryboard?: boolean;
   draftTemplateId?: string;
+  draftTemplateConfig?: DraftTemplateConfig;
   videoIntro?: boolean;
+  videoIntroCount?: number;
+  videoIntroDurationMode?: "narration" | "fixed";
   videoIntroDuration?: number;
   bgmSync?: boolean;
   referenceImage?: StoredAsset | null;
@@ -72,6 +76,16 @@ export interface AudioSegment {
   error?: string;
 }
 
+export interface StoredVideo extends StoredAsset {
+  id: string;
+  shotId: number;
+  durationSec: number;
+  status: "pending" | "ready" | "failed";
+  error?: string;
+  width?: number;
+  height?: number;
+}
+
 export interface TaskTimelineEntry {
   shotId: number;
   text: string;
@@ -116,6 +130,7 @@ export interface StoryboundTask {
   artifacts: PipelineLlmArtifacts;
   media: {
     images: StoredImage[];
+    videos: StoredVideo[];
     coverImages: StoredImage[];
     audioSegments: AudioSegment[];
     podcast: { segments: AudioSegment[]; totalDurationSec: number } | null;

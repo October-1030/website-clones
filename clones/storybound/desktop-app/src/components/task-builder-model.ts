@@ -1,6 +1,7 @@
 import { contentTracks, originalDefaultStyleByTrack, visualStyles } from "../data/app-data";
 import type { ExecutionMode, PausePreset, VideoForm } from "../types/app";
 import type { ImageGenerationRequest } from "../types/image";
+import type { DraftTemplateConfig } from "../types/draft-template";
 import type { StoryboundTask, TaskOptions } from "../types/task";
 
 export interface BuilderFormState {
@@ -27,7 +28,9 @@ export interface BuilderFormState {
   autoBorrowImage: boolean;
   dynamicStoryboard: boolean;
   draftTemplateId: string;
-  videoIntro: boolean;
+  draftTemplateConfig: DraftTemplateConfig | null;
+  videoIntroCount: number;
+  videoIntroDurationMode: "narration" | "fixed";
   videoIntroDuration: number;
   bgmSync: boolean;
   coverMode: NonNullable<TaskOptions["coverMode"]>;
@@ -66,9 +69,11 @@ export const defaultBuilderForm: BuilderFormState = {
   outroCta: "",
   materialSource: "ai",
   autoBorrowImage: true,
-  dynamicStoryboard: true,
+  dynamicStoryboard: false,
   draftTemplateId: "default-portrait-9-16",
-  videoIntro: false,
+  draftTemplateConfig: null,
+  videoIntroCount: 3,
+  videoIntroDurationMode: "narration",
   videoIntroDuration: 3,
   bgmSync: false,
   coverMode: "off",
@@ -107,9 +112,11 @@ export function formFromTask(task: StoryboundTask): BuilderFormState {
     outroCta: task.options.outroCta ?? "",
     materialSource: task.options.materialSource ?? "ai",
     autoBorrowImage: task.options.autoBorrowImage ?? true,
-    dynamicStoryboard: task.options.dynamicStoryboard ?? true,
+    dynamicStoryboard: task.options.videoIntro ?? task.options.dynamicStoryboard ?? false,
     draftTemplateId: task.options.draftTemplateId ?? "default-portrait-9-16",
-    videoIntro: task.options.videoIntro ?? false,
+    draftTemplateConfig: task.options.draftTemplateConfig ?? null,
+    videoIntroCount: task.options.videoIntroCount ?? 3,
+    videoIntroDurationMode: task.options.videoIntroDurationMode ?? "narration",
     videoIntroDuration: task.options.videoIntroDuration ?? 3,
     bgmSync: task.options.bgmSync ?? false,
     coverMode: task.options.coverMode ?? "off",
@@ -151,8 +158,11 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       autoBorrowImage: form.autoBorrowImage,
       dynamicStoryboard: form.dynamicStoryboard,
       draftTemplateId: form.draftTemplateId,
-      videoIntro: form.videoIntro,
-      videoIntroDuration: form.videoIntro ? form.videoIntroDuration : 0,
+      draftTemplateConfig: form.draftTemplateConfig ?? undefined,
+      videoIntro: form.dynamicStoryboard,
+      videoIntroCount: form.dynamicStoryboard ? form.videoIntroCount : 0,
+      videoIntroDurationMode: form.videoIntroDurationMode,
+      videoIntroDuration: form.dynamicStoryboard && form.videoIntroDurationMode === "fixed" ? form.videoIntroDuration : 0,
       bgmSync: form.bgmSync,
       coverMode: form.coverMode,
       coverTemplateId: form.coverTemplateId,

@@ -96,6 +96,7 @@ export function createTaskStore(root) {
     await Promise.all([
       mkdir(base, { recursive: true }),
       mkdir(join(base, "images"), { recursive: true }),
+      mkdir(join(base, "videos"), { recursive: true }),
       mkdir(join(base, "audio"), { recursive: true }),
       mkdir(join(base, "uploads"), { recursive: true }),
       mkdir(join(base, "draft"), { recursive: true }),
@@ -164,6 +165,7 @@ export function createTaskStore(root) {
       artifacts: input.artifacts && typeof input.artifacts === "object" ? input.artifacts : {},
       media: deepMerge({
         images: [],
+        videos: [],
         coverImages: [],
         audioSegments: [],
         podcast: null,
@@ -233,7 +235,7 @@ export function createTaskStore(root) {
   }
 
   async function saveBuffer(taskId, kind, fileName, buffer) {
-    const allowedKinds = new Set(["images", "audio", "uploads", "draft"]);
+    const allowedKinds = new Set(["images", "videos", "audio", "uploads", "draft"]);
     if (!allowedKinds.has(kind)) throw new Error("无效资源类型");
     const base = await ensureTaskFolders(taskId);
     const name = safeFileName(fileName);
@@ -254,7 +256,7 @@ export function createTaskStore(root) {
   }
 
   function resolveTaskFile(taskId, kind, fileName) {
-    const allowedKinds = new Set(["images", "audio", "uploads", "draft"]);
+    const allowedKinds = new Set(["images", "videos", "audio", "uploads", "draft"]);
     if (!allowedKinds.has(kind)) return null;
     const base = resolve(taskDir(taskId), kind);
     const target = resolve(base, safeFileName(fileName));
@@ -287,9 +289,14 @@ export function createTaskStore(root) {
     const media = deepMerge({}, task.media || {});
     if (step <= 4) {
       media.images = [];
+      media.videos = [];
       media.coverImages = [];
       await rm(join(taskDir(taskId), "images"), { recursive: true, force: true });
-      await mkdir(join(taskDir(taskId), "images"), { recursive: true });
+      await rm(join(taskDir(taskId), "videos"), { recursive: true, force: true });
+      await Promise.all([
+        mkdir(join(taskDir(taskId), "images"), { recursive: true }),
+        mkdir(join(taskDir(taskId), "videos"), { recursive: true }),
+      ]);
     }
     if (step <= 5) {
       media.audioSegments = [];

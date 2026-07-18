@@ -72,7 +72,7 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export async function uploadTaskAsset(taskId: string, file: File, kind: "images" | "audio" | "uploads"): Promise<StoredAsset> {
+export async function uploadTaskAsset(taskId: string, file: File, kind: "images" | "videos" | "audio" | "uploads"): Promise<StoredAsset> {
   const payload = await jsonRequest<{ asset: StoredAsset }>(`/api/tasks/${encodeURIComponent(taskId)}/assets`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

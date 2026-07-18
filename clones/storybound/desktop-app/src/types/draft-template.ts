@@ -45,8 +45,8 @@ export interface DraftTemplateConfig {
     fit: string;
     top: number;
     height: number;
-    animation?: string;
-    motion?: string;
+    animation?: string | string[];
+    motion?: string | string[];
     motionStrength?: number;
   };
   title: DraftTextLayer;
@@ -60,6 +60,8 @@ export interface DraftTemplateConfig {
   };
   frame: {
     enabled: boolean;
+    headerVisible?: boolean;
+    footerVisible?: boolean;
     headerColor: string;
     headerColorEnd: string;
     footerColor: string;
