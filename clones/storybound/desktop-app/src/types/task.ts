@@ -133,6 +133,7 @@ export interface StoryboundTask {
     videos: StoredVideo[];
     coverImages: StoredImage[];
     audioSegments: AudioSegment[];
+    continuousAudio: AudioSegment | null;
     podcast: { segments: AudioSegment[]; totalDurationSec: number } | null;
     externalAudio: StoredAsset | null;
     bgm: StoredAsset | null;

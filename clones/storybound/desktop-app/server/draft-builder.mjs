@@ -728,12 +728,15 @@ export async function buildJianyingDraft(taskStore, task) {
   if (missingImages.length) throw new Error(`以下分镜缺少图片：#${missingImages.join("、#")}`);
 
   const audioSegments = (task.media?.audioSegments || []).filter((item) => item.status === "ready" && item.path);
+  const continuousAudio = task.media?.continuousAudio?.status === "ready" && task.media?.continuousAudio?.path
+    ? task.media.continuousAudio
+    : null;
   const podcastSegments = task.media?.podcast?.segments?.filter((item) => item.status === "ready" && item.path) || [];
   const externalAudio = task.media?.externalAudio?.path ? task.media.externalAudio : null;
   if (!externalAudio && task.videoForm === "podcast" && !podcastSegments.length) {
     throw new Error("播客任务缺少 A/B 双人音频");
   }
-  if (!externalAudio && task.videoForm !== "podcast" && audioSegments.length < shots.length) {
+  if (!externalAudio && !continuousAudio && task.videoForm !== "podcast" && audioSegments.length < shots.length) {
     const readyIds = new Set(audioSegments.map((item) => item.shotId));
     const missing = shots.filter((shot) => !readyIds.has(shot.id)).map((shot) => shot.id);
     throw new Error(`以下分镜缺少配音：#${missing.join("、#")}`);
@@ -835,8 +838,9 @@ export async function buildJianyingDraft(taskStore, task) {
     }
   }
 
-  const audioInputSegments = externalAudio
-    ? [{ shotId: 0, path: externalAudio.path, startUs: 0, durationUs: timeline.at(-1)?.endUs || microseconds }]
+  const singleNarration = externalAudio || continuousAudio;
+  const audioInputSegments = singleNarration
+    ? [{ shotId: 0, path: singleNarration.path, startUs: 0, durationUs: timeline.at(-1)?.endUs || microseconds }]
     : task.videoForm === "podcast"
       ? podcastSegments.map((source, index) => ({ ...source, startUs: timeline[index]?.startUs, durationUs: timeline[index]?.durationUs }))
       : shots.map((shot, index) => ({

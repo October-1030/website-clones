@@ -323,7 +323,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       if (!activeTask.media.externalAudio?.path) throw new Error("请选择并上传完整外部配音");
       const totalDuration = activeTask.media.externalAudio.durationSec || timelineFromShots(shots).at(-1)?.endSec || 1;
       const timeline = timelineForTotalDuration(shots, totalDuration);
-      return persistState(activeTask, { media: { ...activeTask.media, timeline }, draft: null });
+      return persistState(activeTask, { media: { ...activeTask.media, audioSegments: [], continuousAudio: null, podcast: null, timeline }, draft: null });
     }
     if (!hasTtsCredentials) throw new Error("当前 TTS 引擎缺少凭据");
     const voiceA = activeTask.options.ttsVoiceId || form.ttsVoiceId;
@@ -343,19 +343,18 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         activeTask = await persistState(activeTask, { media: { ...activeTask.media, audioSegments: [...audioSegments], podcast: { segments: [...audioSegments], totalDurationSec: cursor } } });
       }
       const timeline = audioSegments.map((segment) => ({ shotId: segment.shotId, text: `[${segment.speaker}] ${segment.text}`, startSec: segment.startSec || 0, endSec: (segment.startSec || 0) + segment.durationSec, durationSec: segment.durationSec }));
-      return persistState(activeTask, { media: { ...activeTask.media, audioSegments, podcast: { segments: audioSegments, totalDurationSec: cursor }, timeline }, draft: null });
+      return persistState(activeTask, { media: { ...activeTask.media, audioSegments, continuousAudio: null, podcast: { segments: audioSegments, totalDurationSec: cursor }, externalAudio: null, timeline }, draft: null });
     }
-    const existing = new Map(activeTask.media.audioSegments.filter((item) => item.status === "ready" && item.path).map((item) => [item.shotId, item]));
-    for (const shot of shots) {
-      const segment = existing.get(shot.id) || await synthesizeSegment(activeTask, shot.id, shot.text, voiceA, signal);
-      audioSegments.push(segment);
-      activeTask = await persistState(activeTask, { media: { ...activeTask.media, audioSegments: [...audioSegments] } });
-    }
-    const durations = new Map(audioSegments.map((segment) => [segment.shotId, segment.durationSec]));
-    const timeline = timelineFromShots(shots, durations);
-    let cursor = 0;
-    for (const segment of audioSegments) { segment.startSec = cursor; cursor += segment.durationSec; }
-    return persistState(activeTask, { media: { ...activeTask.media, audioSegments, timeline }, draft: null });
+    const narrationText = shots.map((shot) => shot.text.trim().replace(/\s*\r?\n+\s*/g, "")).filter(Boolean).join("");
+    const existing = activeTask.media.continuousAudio;
+    const continuousAudio = existing?.status === "ready"
+      && existing.path
+      && existing.text === narrationText
+      && existing.voiceId === voiceA
+      ? existing
+      : await synthesizeSegment(activeTask, 0, narrationText, voiceA, signal);
+    const timeline = timelineForTotalDuration(shots, continuousAudio.durationSec);
+    return persistState(activeTask, { media: { ...activeTask.media, audioSegments: [], continuousAudio, podcast: null, externalAudio: null, timeline }, draft: null });
   }
 
   async function executeStep(activeTask: StoryboundTask, step: number, signal: AbortSignal): Promise<StoryboundTask> {
@@ -435,7 +434,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     }
     const start = pipelineStartStep(activeForm.mode);
     let activeTask = await ensureTask(activeForm);
-    activeTask = await persistState(activeTask, { ...taskPatchFromForm(activeForm), status: "running", runState: "running", currentStep: start, stepStatuses: initialStatuses(activeForm.mode, start), artifacts: {}, media: { ...activeTask.media, images: activeForm.materialSource === "ai" ? [] : activeTask.media.images, videos: [], coverImages: [], audioSegments: [], podcast: null, timeline: null }, draft: null, error: null });
+    activeTask = await persistState(activeTask, { ...taskPatchFromForm(activeForm), status: "running", runState: "running", currentStep: start, stepStatuses: initialStatuses(activeForm.mode, start), artifacts: {}, media: { ...activeTask.media, images: activeForm.materialSource === "ai" ? [] : activeTask.media.images, videos: [], coverImages: [], audioSegments: [], continuousAudio: null, podcast: null, timeline: null }, draft: null, error: null });
     await runPipeline(activeTask, start);
   }
 
@@ -569,6 +568,19 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   async function regenerateAudio(shotId: number): Promise<void> {
     if (!task || busy) return;
+    if (shotId === 0 && task.videoForm !== "podcast") {
+      const shots = task.artifacts.storyboard?.shots || [];
+      const narrationText = shots.map((shot) => shot.text.trim().replace(/\s*\r?\n+\s*/g, "")).filter(Boolean).join("");
+      if (!narrationText) return;
+      setBusy(true);
+      const controller = new AbortController();
+      try {
+        const continuousAudio = await synthesizeSegment(task, 0, narrationText, task.media.continuousAudio?.voiceId || task.options.ttsVoiceId || form.ttsVoiceId, controller.signal);
+        const timeline = timelineForTotalDuration(shots, continuousAudio.durationSec);
+        setTask(await updateTask(task.id, { media: { ...task.media, audioSegments: [], continuousAudio, externalAudio: null, timeline }, draft: null }));
+      } catch (error) { window.alert(error instanceof Error ? error.message : "整条旁白重配失败"); } finally { setBusy(false); }
+      return;
+    }
     const current = task.media.audioSegments.find((item) => item.shotId === shotId);
     const shot = task.artifacts.storyboard?.shots.find((item) => item.id === shotId);
     if (!current && !shot) return;

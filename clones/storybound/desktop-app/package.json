@@ -11,6 +11,7 @@
     "preview": "node server.mjs --production",
     "start": "node server.mjs --production",
     "smoke:task": "node scripts/smoke-task-lifecycle.mjs",
+    "smoke:continuous": "node scripts/smoke-continuous-audio.mjs",
     "smoke:pipeline": "node scripts/smoke-original-pipeline.mjs"
   },
   "dependencies": {

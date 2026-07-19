@@ -85,15 +85,28 @@ function imageFilter(index, durationSec, frameCount) {
 const taskPath = join(appRoot, ".storybound-data", "tasks", taskId, "task.json");
 const task = JSON.parse(await readFile(taskPath, "utf8"));
 if (!task.draft?.projectDir) throw new Error("任务尚未生成剪映草稿");
+const outputDir = join(dirname(taskPath), "review", round);
+await mkdir(outputDir, { recursive: true });
+let continuousPlan = null;
+try {
+  continuousPlan = JSON.parse(await readFile(join(outputDir, "continuous-plan.json"), "utf8"));
+} catch (error) {
+  if (error?.code !== "ENOENT") throw error;
+}
 const shots = task.artifacts?.storyboard?.shots || [];
-const timeline = task.media?.timeline || [];
+const timeline = continuousPlan?.timeline || task.media?.timeline || [];
 const audioSegments = task.media?.audioSegments || [];
 const images = task.media?.images || [];
-if (!shots.length || shots.length !== timeline.length || shots.length !== audioSegments.length || shots.length !== images.length) {
+const continuousAudioPath = continuousPlan?.audioPath || null;
+const materialCountsMatch = shots.length
+  && shots.length === timeline.length
+  && shots.length === images.length
+  && (continuousAudioPath || shots.length === audioSegments.length);
+if (!materialCountsMatch) {
   throw new Error(`素材数量不一致：shots=${shots.length}, timeline=${timeline.length}, audio=${audioSegments.length}, images=${images.length}`);
 }
 
-const totalDurationSec = timeline.at(-1).endSec;
+const totalDurationSec = continuousPlan?.totalDurationSec || timeline.at(-1).endSec;
 const coverHoldSec = Math.min(1.2, Math.max(0.6, timeline[0].durationSec * 0.18));
 const visualSegments = [];
 const cover = task.media?.coverImages?.find((item) => item.path);
@@ -103,9 +116,8 @@ for (const [index, image] of images.entries()) {
   visualSegments.push({ path: image.path, durationSec, label: `shot-${index + 1}` });
 }
 
-const outputDir = join(dirname(taskPath), "review", round);
-await mkdir(outputDir, { recursive: true });
-const srt = await readFile(join(task.draft.projectDir, "timeline.srt"), "utf8");
+const srtPath = continuousPlan ? join(outputDir, "timeline.srt") : join(task.draft.projectDir, "timeline.srt");
+const srt = await readFile(srtPath, "utf8");
 const cues = parseSrt(srt);
 const assPath = join(outputDir, "subtitles.ass");
 const outputPath = join(outputDir, `pocket-watch-${round}.mp4`);
@@ -115,7 +127,11 @@ const inputs = [];
 for (const segment of visualSegments) {
   inputs.push("-i", segment.path);
 }
-for (const segment of audioSegments) inputs.push("-i", segment.path);
+if (continuousAudioPath) {
+  inputs.push("-i", continuousAudioPath);
+} else {
+  for (const segment of audioSegments) inputs.push("-i", segment.path);
+}
 
 const filters = [];
 for (const [index, segment] of visualSegments.entries()) {
@@ -124,11 +140,15 @@ for (const [index, segment] of visualSegments.entries()) {
 filters.push(`${visualSegments.map((_segment, index) => `[v${index}]`).join("")}concat=n=${visualSegments.length}:v=1:a=0[vcat]`);
 
 const audioStartIndex = visualSegments.length;
-for (const [index] of audioSegments.entries()) {
-  const durationSec = timeline[index].durationSec;
-  filters.push(`[${audioStartIndex + index}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${durationSec.toFixed(6)},asetpts=PTS-STARTPTS[a${index}]`);
+if (continuousAudioPath) {
+  filters.push(`[${audioStartIndex}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${totalDurationSec.toFixed(6)},asetpts=PTS-STARTPTS[acat]`);
+} else {
+  for (const [index] of audioSegments.entries()) {
+    const durationSec = timeline[index].durationSec;
+    filters.push(`[${audioStartIndex + index}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${durationSec.toFixed(6)},asetpts=PTS-STARTPTS[a${index}]`);
+  }
+  filters.push(`${audioSegments.map((_segment, index) => `[a${index}]`).join("")}concat=n=${audioSegments.length}:v=0:a=1[acat]`);
 }
-filters.push(`${audioSegments.map((_segment, index) => `[a${index}]`).join("")}concat=n=${audioSegments.length}:v=0:a=1[acat]`);
 filters.push(`[vcat]ass='${assPath.replaceAll("\\", "/").replace(":", "\\:")}',setsar=1,setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=yuv420p,fade=t=out:st=${Math.max(0, totalDurationSec - 0.5).toFixed(3)}:d=0.5[vout]`);
 filters.push(`[acat]afade=t=in:st=0:d=0.05,afade=t=out:st=${Math.max(0, totalDurationSec - 0.45).toFixed(3)}:d=0.45,loudnorm=I=-14:TP=-1.5:LRA=7[aout]`);
 
@@ -170,9 +190,11 @@ const sceneMap = shots.map((shot, index) => ({
   subtitle: shot.text,
   visualAnchor: shot.visual,
   imagePath: images[index].path,
-  audioPath: audioSegments[index].path,
+  audioPath: continuousAudioPath || audioSegments[index].path,
+  speechStartSec: timeline[index].speechStartSec ?? timeline[index].startSec,
+  speechEndSec: timeline[index].speechEndSec ?? timeline[index].endSec,
 }));
 await writeFile(join(outputDir, "scene-voice-map.json"), `${JSON.stringify(sceneMap, null, 2)}\n`, "utf8");
-await writeFile(join(outputDir, "video-spec.md"), `# 怀表测试成片 ${round}\n\n- 画布：1080 × 1920\n- 帧率：30 fps\n- 目标时长：${totalDurationSec.toFixed(3)} 秒\n- 视频：H.264 / yuv420p\n- 音频：AAC / 48 kHz / 192 kbps / -14 LUFS 目标\n- 分镜：${shots.length}\n- 字幕：${cues.length} 条，手机底部安全区 250 px\n- 封面首屏：${cover ? `${coverHoldSec.toFixed(2)} 秒` : "无独立封面"}\n- BGM：本轮未加入，先隔离检查配音、字幕与镜头节奏\n`, "utf8");
+await writeFile(join(outputDir, "video-spec.md"), `# 怀表测试成片 ${round}\n\n- 画布：1080 × 1920\n- 帧率：30 fps\n- 目标时长：${totalDurationSec.toFixed(3)} 秒\n- 视频：H.264 / yuv420p\n- 音频：AAC / 48 kHz / 192 kbps / -14 LUFS 目标\n- 分镜：${shots.length}\n- 字幕：${cues.length} 条，手机底部安全区 250 px\n- 封面首屏：${cover ? `${coverHoldSec.toFixed(2)} 秒` : "无独立封面"}\n- 配音模式：${continuousAudioPath ? "单条连续旁白，字幕与镜头依据实际 ASR 时间重建" : "逐镜头音频拼接"}\n- BGM：本轮未加入，只检查配音连续性、字幕与镜头节奏\n`, "utf8");
 
-process.stdout.write(`${JSON.stringify({ outputPath, outputDir, durationSec: totalDurationSec, shots: shots.length, subtitles: cues.length })}\n`);
+process.stdout.write(`${JSON.stringify({ outputPath, outputDir, durationSec: totalDurationSec, shots: shots.length, subtitles: cues.length, audioMode: continuousAudioPath ? "continuous" : "segmented" })}\n`);

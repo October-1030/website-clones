@@ -987,11 +987,12 @@ async function handleTtsApi(request, response, pathname) {
             result.audio,
           )
         : null;
+      const durationSec = saved ? await probeMediaDuration(saved.path) || result.durationSec : result.durationSec;
       response.writeHead(200, {
         "Content-Type": "audio/mpeg",
         "Content-Length": result.audio.length,
         "X-TTS-Segments": String(result.segments),
-        "X-TTS-Duration": String(result.durationSec),
+        "X-TTS-Duration": String(durationSec),
         ...(saved ? {
           "X-Asset-Url": encodeURIComponent(saved.url),
           "X-Asset-Path": encodeURIComponent(saved.path),

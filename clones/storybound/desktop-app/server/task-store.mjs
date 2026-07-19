@@ -70,7 +70,9 @@ function taskSummary(task) {
     updatedAt: task.updatedAt,
     completedAt: task.completedAt ?? null,
     imageCount: task.media?.images?.filter((item) => item.status === "ready").length ?? 0,
-    audioCount: task.media?.audioSegments?.filter((item) => item.status === "ready").length ?? 0,
+    audioCount: task.media?.continuousAudio?.status === "ready"
+      ? 1
+      : task.media?.audioSegments?.filter((item) => item.status === "ready").length ?? 0,
     draftReady: Boolean(task.draft?.ready),
   };
 }
@@ -168,6 +170,7 @@ export function createTaskStore(root) {
         videos: [],
         coverImages: [],
         audioSegments: [],
+        continuousAudio: null,
         podcast: null,
         externalAudio: null,
         bgm: null,
@@ -203,7 +206,7 @@ export function createTaskStore(root) {
       const value = key === "imageMeta"
         ? task.media?.images
         : key === "audioMeta"
-          ? { segments: task.media?.audioSegments, podcast: task.media?.podcast, externalAudio: task.media?.externalAudio }
+          ? { segments: task.media?.audioSegments, continuousAudio: task.media?.continuousAudio, podcast: task.media?.podcast, externalAudio: task.media?.externalAudio }
           : key === "timeline"
             ? task.media?.timeline
             : task.artifacts?.[key];
@@ -300,6 +303,7 @@ export function createTaskStore(root) {
     }
     if (step <= 5) {
       media.audioSegments = [];
+      media.continuousAudio = null;
       media.podcast = null;
       media.timeline = null;
       await rm(join(taskDir(taskId), "audio"), { recursive: true, force: true });
