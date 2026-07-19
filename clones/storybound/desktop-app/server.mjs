@@ -620,7 +620,19 @@ function normalizeCharacterCard(value) {
     appearance: clampString(value.appearance || value.face || value.look),
     clothing: clampString(value.clothing || value.costume || value.outfit),
   };
-  return Object.values(card).some(Boolean) ? card : undefined;
+  if (!Object.values(card).some(Boolean)) return undefined;
+  const feminine = /女/u.test(`${card.gender}${card.identity}`);
+  const masculine = /男/u.test(`${card.gender}${card.identity}`);
+  if (!card.age) card.age = "青年至中年";
+  if (!card.appearance) {
+    card.appearance = feminine
+      ? "中长深色头发，椭圆脸，表情克制内敛，眼神含蓄深邃"
+      : masculine
+        ? "短深色头发，轮廓自然，表情克制内敛，眼神含蓄深邃"
+        : "深色头发，五官自然，表情克制内敛，眼神含蓄深邃";
+  }
+  if (!card.clothing) card.clothing = "深色素雅服装；跨分镜保持同一脸型、发型、服装与年龄";
+  return card;
 }
 
 function characterCardPrompt(card) {
@@ -716,9 +728,13 @@ function normalizePipelineResult(step, payload, context, artifacts) {
         const fixedCharacter = track?.needsCharacterCard ? characterCardPrompt(artifacts.storyboard?.characterCard) : "";
         const fallbackCore = `${shot.visual}，${shot.emotion}`;
         const suppliedCore = clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore);
-        const corePrompt = fixedCharacter && !suppliedCore.includes(fixedCharacter.slice(0, 12))
-          ? `固定主角设定：${fixedCharacter}。当前画面：${suppliedCore}`
+        const narrativeCue = clampString(shot.text).replace(/\s+/g, " ").slice(0, 100);
+        const semanticCore = narrativeCue && !suppliedCore.includes(narrativeCue.slice(0, 12))
+          ? `${suppliedCore}。本镜叙事内容（仅用于转化成画面，禁止在图中生成文字）：${narrativeCue}`
           : suppliedCore;
+        const corePrompt = fixedCharacter && !semanticCore.includes(fixedCharacter.slice(0, 12))
+          ? `固定主角设定：${fixedCharacter}。当前画面：${semanticCore}`
+          : semanticCore;
         const prefixMarker = clampString(style?.prefix).slice(0, 14);
         const negativePrompt = clampString(provided.negativePrompt || provided.negative_prompt, style?.negativePrompt);
         const positivePrompt = prefixMarker && corePrompt.includes(prefixMarker)
