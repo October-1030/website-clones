@@ -129,6 +129,15 @@ try {
   if (subtitleTexts.length <= 2 || subtitleTexts.some((text) => [...text.replace(/\s/g, "")].length > 12 || /[，,。！？!?；;：:、]/.test(text))) {
     throw new Error(`长字幕未正确拆分：${subtitleTexts.join(" | ")}`);
   }
+  const subtitleRanges = (subtitleTrack?.segments || []).map((segment) => ({
+    start: segment.target_timerange.start,
+    end: segment.target_timerange.start + segment.target_timerange.duration,
+  }));
+  if (subtitleRanges[0]?.start !== 0
+    || subtitleRanges.at(-1)?.end !== draftInfo.duration
+    || subtitleRanges.slice(1).some((range, index) => range.start !== subtitleRanges[index].end)) {
+    throw new Error("字幕拆分后出现了非预期空隙或重叠");
+  }
   const firstCaptionMaterial = draftInfo.materials?.texts?.find((item) => item.id === subtitleTrack?.segments?.[0]?.material_id);
   const firstCaptionStyle = firstCaptionMaterial && JSON.parse(firstCaptionMaterial.content).styles?.[0];
   if (!firstCaptionMaterial || firstCaptionMaterial.background_alpha !== 0.5 || firstCaptionMaterial.font_size !== 15 || firstCaptionMaterial.line_max_width !== 1 || firstCaptionStyle?.size !== 12 || firstCaptionStyle?.strokes?.length !== 1) {

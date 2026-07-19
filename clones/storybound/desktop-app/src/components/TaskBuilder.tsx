@@ -311,9 +311,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }
 
   async function synthesizeSegment(activeTask: StoryboundTask, shotId: number, text: string, voiceId: string, signal: AbortSignal, speaker?: "A" | "B"): Promise<AudioSegment> {
-    const audio = await synthesizeTts({ provider: config.provider, text, voiceId, speed: activeTask.options.ttsSpeed || 1, config, taskId: activeTask.id, shotId, fileName: `${speaker ? `${speaker}-` : ""}${shotId}.mp3`, signal });
+    const speed = activeTask.options.ttsSpeed || 1;
+    const audio = await synthesizeTts({ provider: config.provider, text, voiceId, speed, config, taskId: activeTask.id, shotId, fileName: `${speaker ? `${speaker}-` : ""}${shotId}.mp3`, signal });
     if (!audio.assetUrl || !audio.assetPath || !audio.fileName) throw new Error(`第 ${shotId} 段音频未写入任务目录`);
-    return { id: `audio-${speaker || "N"}-${shotId}-${Date.now()}`, shotId, speaker, text, voiceId, fileName: audio.fileName, path: audio.assetPath, url: audio.assetUrl, bytes: audio.blob.size, durationSec: audio.durationSec, status: "ready" };
+    return { id: `audio-${speaker || "N"}-${shotId}-${Date.now()}`, shotId, speaker, text, voiceId, fileName: audio.fileName, path: audio.assetPath, url: audio.assetUrl, bytes: audio.blob.size, durationSec: audio.durationSec, speed, status: "ready" };
   }
 
   async function runAudioStep(activeTask: StoryboundTask, signal: AbortSignal): Promise<StoryboundTask> {
@@ -345,16 +346,35 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       const timeline = audioSegments.map((segment) => ({ shotId: segment.shotId, text: `[${segment.speaker}] ${segment.text}`, startSec: segment.startSec || 0, endSec: (segment.startSec || 0) + segment.durationSec, durationSec: segment.durationSec }));
       return persistState(activeTask, { media: { ...activeTask.media, audioSegments, continuousAudio: null, podcast: { segments: audioSegments, totalDurationSec: cursor }, externalAudio: null, timeline }, draft: null });
     }
-    const narrationText = shots.map((shot) => shot.text.trim().replace(/\s*\r?\n+\s*/g, "")).filter(Boolean).join("");
-    const existing = activeTask.media.continuousAudio;
-    const continuousAudio = existing?.status === "ready"
-      && existing.path
-      && existing.text === narrationText
-      && existing.voiceId === voiceA
-      ? existing
-      : await synthesizeSegment(activeTask, 0, narrationText, voiceA, signal);
-    const timeline = timelineForTotalDuration(shots, continuousAudio.durationSec);
-    return persistState(activeTask, { media: { ...activeTask.media, audioSegments: [], continuousAudio, podcast: null, externalAudio: null, timeline }, draft: null });
+    if (activeTask.options.ttsMode === "continuous") {
+      const narrationText = shots.map((shot) => shot.text.trim().replace(/\s*\r?\n+\s*/g, "")).filter(Boolean).join("");
+      const existing = activeTask.media.continuousAudio;
+      const continuousAudio = existing?.status === "ready"
+        && existing.path
+        && existing.text === narrationText
+        && existing.voiceId === voiceA
+        && existing.speed === (activeTask.options.ttsSpeed || 1)
+        ? existing
+        : await synthesizeSegment(activeTask, 0, narrationText, voiceA, signal);
+      const timeline = timelineForTotalDuration(shots, continuousAudio.durationSec);
+      return persistState(activeTask, { media: { ...activeTask.media, audioSegments: [], continuousAudio, podcast: null, externalAudio: null, timeline }, draft: null });
+    }
+    const existing = new Map(activeTask.media.audioSegments.filter((item) => item.status === "ready" && item.path).map((item) => [item.shotId, item]));
+    for (const shot of shots) {
+      const previous = existing.get(shot.id);
+      const segment = previous?.text === shot.text
+        && previous.voiceId === voiceA
+        && previous.speed === (activeTask.options.ttsSpeed || 1)
+        ? previous
+        : await synthesizeSegment(activeTask, shot.id, shot.text, voiceA, signal);
+      audioSegments.push(segment);
+      activeTask = await persistState(activeTask, { media: { ...activeTask.media, audioSegments: [...audioSegments], continuousAudio: null, externalAudio: null } });
+    }
+    const durations = new Map(audioSegments.map((segment) => [segment.shotId, segment.durationSec]));
+    const timeline = timelineFromShots(shots, durations);
+    let cursor = 0;
+    for (const segment of audioSegments) { segment.startSec = cursor; cursor += segment.durationSec; }
+    return persistState(activeTask, { media: { ...activeTask.media, audioSegments, continuousAudio: null, podcast: null, externalAudio: null, timeline }, draft: null });
   }
 
   async function executeStep(activeTask: StoryboundTask, step: number, signal: AbortSignal): Promise<StoryboundTask> {

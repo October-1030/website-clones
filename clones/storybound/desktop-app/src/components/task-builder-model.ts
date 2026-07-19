@@ -41,6 +41,7 @@ export interface BuilderFormState {
   ttsVoiceId: string;
   ttsVoiceIdB: string;
   ttsSpeed: number;
+  ttsMode: NonNullable<TaskOptions["ttsMode"]>;
   podcastImageMode: "multi" | "single";
   podcastPair: string;
 }
@@ -84,6 +85,7 @@ export const defaultBuilderForm: BuilderFormState = {
   ttsVoiceId: "",
   ttsVoiceIdB: "",
   ttsSpeed: 1,
+  ttsMode: "original-segmented",
   podcastImageMode: "multi",
   podcastPair: "自定义双主播",
 };
@@ -127,6 +129,7 @@ export function formFromTask(task: StoryboundTask): BuilderFormState {
     ttsVoiceId: task.options.ttsVoiceId ?? "",
     ttsVoiceIdB: task.options.ttsVoiceIdB ?? "",
     ttsSpeed: task.options.ttsSpeed ?? 1,
+    ttsMode: task.options.ttsMode ?? "original-segmented",
     podcastImageMode: task.options.podcastImageMode ?? "multi",
     podcastPair: task.options.podcastPair ?? "自定义双主播",
   };
@@ -172,6 +175,7 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       ttsVoiceId: form.ttsVoiceId,
       ttsVoiceIdB: form.ttsVoiceIdB,
       ttsSpeed: form.ttsSpeed,
+      ttsMode: form.ttsMode,
       podcastImageMode: form.podcastImageMode,
       podcastPair: form.podcastPair,
     },

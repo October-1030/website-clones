@@ -38,6 +38,7 @@ export interface TaskOptions {
   ttsVoiceId?: string;
   ttsVoiceIdB?: string;
   ttsSpeed?: number;
+  ttsMode?: "original-segmented" | "continuous";
   podcastImageMode?: "multi" | "single";
   podcastPair?: string;
   narrationVolume?: number;
@@ -71,6 +72,7 @@ export interface AudioSegment {
   url: string;
   bytes: number;
   durationSec: number;
+  speed?: number;
   startSec?: number;
   status: "pending" | "ready" | "failed";
   error?: string;

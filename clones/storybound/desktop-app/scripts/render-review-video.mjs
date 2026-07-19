@@ -87,17 +87,24 @@ const task = JSON.parse(await readFile(taskPath, "utf8"));
 if (!task.draft?.projectDir) throw new Error("任务尚未生成剪映草稿");
 const outputDir = join(dirname(taskPath), "review", round);
 await mkdir(outputDir, { recursive: true });
-let continuousPlan = null;
+let reviewPlan = null;
 try {
-  continuousPlan = JSON.parse(await readFile(join(outputDir, "continuous-plan.json"), "utf8"));
+  reviewPlan = JSON.parse(await readFile(join(outputDir, "review-plan.json"), "utf8"));
 } catch (error) {
   if (error?.code !== "ENOENT") throw error;
 }
+if (!reviewPlan) {
+  try {
+    reviewPlan = JSON.parse(await readFile(join(outputDir, "continuous-plan.json"), "utf8"));
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
 const shots = task.artifacts?.storyboard?.shots || [];
-const timeline = continuousPlan?.timeline || task.media?.timeline || [];
+const timeline = reviewPlan?.timeline || task.media?.timeline || [];
 const audioSegments = task.media?.audioSegments || [];
 const images = task.media?.images || [];
-const continuousAudioPath = continuousPlan?.audioPath || null;
+const continuousAudioPath = reviewPlan?.audioPath || null;
 const materialCountsMatch = shots.length
   && shots.length === timeline.length
   && shots.length === images.length
@@ -106,7 +113,7 @@ if (!materialCountsMatch) {
   throw new Error(`素材数量不一致：shots=${shots.length}, timeline=${timeline.length}, audio=${audioSegments.length}, images=${images.length}`);
 }
 
-const totalDurationSec = continuousPlan?.totalDurationSec || timeline.at(-1).endSec;
+const totalDurationSec = reviewPlan?.totalDurationSec || timeline.at(-1).endSec;
 const coverHoldSec = Math.min(1.2, Math.max(0.6, timeline[0].durationSec * 0.18));
 const visualSegments = [];
 const cover = task.media?.coverImages?.find((item) => item.path);
@@ -116,7 +123,7 @@ for (const [index, image] of images.entries()) {
   visualSegments.push({ path: image.path, durationSec, label: `shot-${index + 1}` });
 }
 
-const srtPath = continuousPlan ? join(outputDir, "timeline.srt") : join(task.draft.projectDir, "timeline.srt");
+const srtPath = reviewPlan ? join(outputDir, "timeline.srt") : join(task.draft.projectDir, "timeline.srt");
 const srt = await readFile(srtPath, "utf8");
 const cues = parseSrt(srt);
 const assPath = join(outputDir, "subtitles.ass");

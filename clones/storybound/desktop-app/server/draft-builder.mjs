@@ -679,13 +679,19 @@ function splitSubtitleTimeline(item, maxChars) {
   const weights = chunks.map((text) => Math.max(1, subtitleLength(text)));
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
   let currentUs = item.startUs;
-  return chunks.map((text, index) => {
+  const cues = chunks.map((text, index) => {
     const rawDurationUs = Math.trunc(item.durationUs * weights[index] / totalWeight);
     const startUs = Math.floor(currentUs / 1000) * 1000;
     const endUs = Math.floor((currentUs + rawDurationUs) / 1000) * 1000;
     currentUs += rawDurationUs;
     return { shotId: item.shotId, text, startUs, endUs, durationUs: endUs - startUs };
   });
+  const lastCue = cues.at(-1);
+  if (lastCue) {
+    lastCue.endUs = item.endUs;
+    lastCue.durationUs = item.endUs - lastCue.startUs;
+  }
+  return cues;
 }
 
 function timelineInMicroseconds(timeline) {

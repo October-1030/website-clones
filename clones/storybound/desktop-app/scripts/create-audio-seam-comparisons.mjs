@@ -59,19 +59,46 @@ async function createComparison(roundData, outputPath) {
   return boundaries;
 }
 
+async function createSeamClips(roundData, outputDir, label) {
+  const boundaries = roundData.sceneMap.slice(0, -1).map((scene) => scene.endSec);
+  const clips = [];
+  for (const [index, boundarySec] of boundaries.entries()) {
+    const outputPath = join(outputDir, `seam-${String(index + 1).padStart(2, "0")}-${label}.mp3`);
+    await execFileAsync(ffmpeg, [
+      "-y",
+      "-ss", Math.max(0, boundarySec - 1.25).toFixed(6),
+      "-t", "2.500",
+      "-i", roundData.videoPath,
+      "-vn",
+      "-c:a", "libmp3lame",
+      "-b:a", "192k",
+      outputPath,
+    ], {
+      cwd: appRoot,
+      windowsHide: true,
+      timeout: 60_000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    clips.push({ seam: `${index + 1}→${index + 2}`, boundarySec, outputPath });
+  }
+  return clips;
+}
+
 const before = await loadRound(beforeRound);
 const after = await loadRound(afterRound);
-const outputDir = join(after.roundDir, "comparison");
+const outputDir = join(after.roundDir, "comparison", `${beforeRound}-vs-${afterRound}`);
 await mkdir(outputDir, { recursive: true });
 const beforePath = join(outputDir, "8-seams-before.mp3");
 const afterPath = join(outputDir, "8-seams-after.mp3");
 const beforeBoundaries = await createComparison(before, beforePath);
 const afterBoundaries = await createComparison(after, afterPath);
+const beforeClips = await createSeamClips(before, outputDir, "before");
+const afterClips = await createSeamClips(after, outputDir, "after");
 const manifestPath = join(outputDir, "comparison-manifest.json");
 await writeFile(manifestPath, `${JSON.stringify({
   window: "每个接缝前后各 1.25 秒，接缝样本之间保留 0.35 秒静音",
-  before: { round: beforeRound, source: before.videoPath, boundariesSec: beforeBoundaries, outputPath: beforePath },
-  after: { round: afterRound, source: after.videoPath, boundariesSec: afterBoundaries, outputPath: afterPath },
+  before: { round: beforeRound, source: before.videoPath, boundariesSec: beforeBoundaries, outputPath: beforePath, clips: beforeClips },
+  after: { round: afterRound, source: after.videoPath, boundariesSec: afterBoundaries, outputPath: afterPath, clips: afterClips },
 }, null, 2)}\n`, "utf8");
 
 process.stdout.write(`${JSON.stringify({ beforePath, afterPath, manifestPath })}\n`);
