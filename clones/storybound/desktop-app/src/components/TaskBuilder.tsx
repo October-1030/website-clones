@@ -49,18 +49,18 @@ function fallbackTitle(text: string): string {
   return compact ? `${compact.slice(0, 22)}${compact.length > 22 ? "…" : ""}` : "未命名视频";
 }
 
-function mechanicalShots(text: string, targetScenes: number | null): StoryboardShot[] {
+function mechanicalShots(text: string, targetScenes: number | null, maxChars = 55): StoryboardShot[] {
   const paragraphs = text.split(/\n\s*\n+/).map((item) => item.trim()).filter(Boolean);
   const rawPieces = (paragraphs.length > 1 ? paragraphs : text.split(/(?<=[。！？!?；;])|\n+/))
     .map((item) => item.trim()).filter(Boolean);
   const pieces = rawPieces.flatMap((piece) => {
     const chunks: string[] = [];
     let remaining = piece;
-    while (remaining.length > 55) {
-      const window = remaining.slice(0, 56);
+    while (remaining.length > maxChars) {
+      const window = remaining.slice(0, maxChars + 1);
       const candidates = ["。", "！", "？", "；", "，", ".", "!", "?", ";", ","];
       let splitAt = candidates.reduce((best, marker) => Math.max(best, window.lastIndexOf(marker)), -1);
-      if (splitAt < 24) splitAt = 44;
+      if (splitAt < Math.max(8, Math.floor(maxChars * 0.55))) splitAt = maxChars - 1;
       chunks.push(remaining.slice(0, splitAt + 1).trim());
       remaining = remaining.slice(splitAt + 1).trim();
     }
@@ -74,7 +74,7 @@ function mechanicalShots(text: string, targetScenes: number | null): StoryboardS
     let shortest = Number.POSITIVE_INFINITY;
     for (let index = 0; index < merged.length - 1; index += 1) {
       const combinedLength = merged[index].length + merged[index + 1].length;
-      if (combinedLength <= 55 && combinedLength < shortest) {
+      if (combinedLength <= maxChars && combinedLength < shortest) {
         shortest = combinedLength;
         mergeAt = index;
       }
@@ -120,6 +120,30 @@ function timelineForTotalDuration(shots: StoryboardShot[], totalDurationSec: num
     const durationSec = index === shots.length - 1 ? remaining : Math.max(0.3, Math.min(remaining, weighted));
     const item = { shotId: shot.id, text: shot.text, startSec: cursor, endSec: cursor + durationSec, durationSec };
     cursor = item.endSec;
+    return item;
+  });
+}
+
+function compactShotText(text: string): string {
+  return text.trim().replace(/\s*\r?\n+\s*/g, "");
+}
+
+function timelineFromWordAlignment(shots: StoryboardShot[], audio: AudioSegment): TaskTimelineEntry[] {
+  const words = audio.alignment?.words || [];
+  if (!words.length) throw new Error("MiniMax 没有返回词级时间戳，无法按真实发音位置生成分镜标记");
+  let textCursor = 0;
+  let timeCursor = 0;
+  return shots.map((shot, index) => {
+    const text = compactShotText(shot.text);
+    textCursor += text.length;
+    const marker = words.find((word) => word.textEnd >= textCursor);
+    const measuredEnd = index === shots.length - 1 ? audio.durationSec : marker?.endSec;
+    if (!Number.isFinite(measuredEnd) || Number(measuredEnd) <= timeCursor) {
+      throw new Error(`第 ${shot.id} 镜缺少可用的 MiniMax 时间戳`);
+    }
+    const endSec = Number(measuredEnd);
+    const item = { shotId: shot.id, text: shot.text, startSec: timeCursor, endSec, durationSec: endSec - timeCursor };
+    timeCursor = endSec;
     return item;
   });
 }
@@ -200,6 +224,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       targetScenes: activeForm.targetScenes,
       fixedIntro: activeForm.fixedIntro,
       outroCta: activeForm.outroCta,
+      ttsMode: activeForm.ttsMode,
     };
   }
 
@@ -249,7 +274,11 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   async function runLlmStep(activeTask: StoryboundTask, step: 0 | 1 | 2 | 3, signal: AbortSignal): Promise<StoryboundTask> {
     if (!hasLlmCredentials) throw new Error("LLM 未配置，无法执行原版预审、改写、分镜和绘图提示词逻辑");
     if (step === 2 && activeTask.mode === "direct") {
-      const shots = mechanicalShots(activeTask.inputText, activeTask.options.targetScenes ?? null);
+      const shots = mechanicalShots(
+        activeTask.inputText,
+        activeTask.options.targetScenes ?? null,
+        activeTask.options.ttsMode === "continuous" ? 28 : 55,
+      );
       if (!shots.length) throw new Error("直接出片模式没有切出有效分镜，请用空行或标点分隔文案");
       return persistState(activeTask, { artifacts: { ...activeTask.artifacts, storyboard: { shots } } });
     }
@@ -314,7 +343,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     const speed = activeTask.options.ttsSpeed || 1;
     const audio = await synthesizeTts({ provider: config.provider, text, voiceId, speed, config, taskId: activeTask.id, shotId, fileName: `${speaker ? `${speaker}-` : ""}${shotId}.mp3`, signal });
     if (!audio.assetUrl || !audio.assetPath || !audio.fileName) throw new Error(`第 ${shotId} 段音频未写入任务目录`);
-    return { id: `audio-${speaker || "N"}-${shotId}-${Date.now()}`, shotId, speaker, text, voiceId, fileName: audio.fileName, path: audio.assetPath, url: audio.assetUrl, bytes: audio.blob.size, durationSec: audio.durationSec, speed, status: "ready" };
+    return { id: `audio-${speaker || "N"}-${shotId}-${Date.now()}`, shotId, speaker, text, voiceId, fileName: audio.fileName, path: audio.assetPath, url: audio.assetUrl, bytes: audio.blob.size, durationSec: audio.durationSec, speed, alignment: audio.alignment, status: "ready" };
   }
 
   async function runAudioStep(activeTask: StoryboundTask, signal: AbortSignal): Promise<StoryboundTask> {
@@ -347,16 +376,19 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       return persistState(activeTask, { media: { ...activeTask.media, audioSegments, continuousAudio: null, podcast: { segments: audioSegments, totalDurationSec: cursor }, externalAudio: null, timeline }, draft: null });
     }
     if (activeTask.options.ttsMode === "continuous") {
-      const narrationText = shots.map((shot) => shot.text.trim().replace(/\s*\r?\n+\s*/g, "")).filter(Boolean).join("");
+      const narrationText = shots.map((shot) => compactShotText(shot.text)).filter(Boolean).join("");
       const existing = activeTask.media.continuousAudio;
       const continuousAudio = existing?.status === "ready"
         && existing.path
         && existing.text === narrationText
         && existing.voiceId === voiceA
         && existing.speed === (activeTask.options.ttsSpeed || 1)
+        && (config.provider !== "minimax" || Boolean(existing.alignment?.words.length))
         ? existing
         : await synthesizeSegment(activeTask, 0, narrationText, voiceA, signal);
-      const timeline = timelineForTotalDuration(shots, continuousAudio.durationSec);
+      const timeline = config.provider === "minimax"
+        ? timelineFromWordAlignment(shots, continuousAudio)
+        : timelineForTotalDuration(shots, continuousAudio.durationSec);
       return persistState(activeTask, { media: { ...activeTask.media, audioSegments: [], continuousAudio, podcast: null, externalAudio: null, timeline }, draft: null });
     }
     const existing = new Map(activeTask.media.audioSegments.filter((item) => item.status === "ready" && item.path).map((item) => [item.shotId, item]));
@@ -590,13 +622,15 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (!task || busy) return;
     if (shotId === 0 && task.videoForm !== "podcast") {
       const shots = task.artifacts.storyboard?.shots || [];
-      const narrationText = shots.map((shot) => shot.text.trim().replace(/\s*\r?\n+\s*/g, "")).filter(Boolean).join("");
+      const narrationText = shots.map((shot) => compactShotText(shot.text)).filter(Boolean).join("");
       if (!narrationText) return;
       setBusy(true);
       const controller = new AbortController();
       try {
         const continuousAudio = await synthesizeSegment(task, 0, narrationText, task.media.continuousAudio?.voiceId || task.options.ttsVoiceId || form.ttsVoiceId, controller.signal);
-        const timeline = timelineForTotalDuration(shots, continuousAudio.durationSec);
+        const timeline = config.provider === "minimax"
+          ? timelineFromWordAlignment(shots, continuousAudio)
+          : timelineForTotalDuration(shots, continuousAudio.durationSec);
         setTask(await updateTask(task.id, { media: { ...task.media, audioSegments: [], continuousAudio, externalAudio: null, timeline }, draft: null }));
       } catch (error) { window.alert(error instanceof Error ? error.message : "整条旁白重配失败"); } finally { setBusy(false); }
       return;

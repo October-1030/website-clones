@@ -104,7 +104,7 @@ const shots = task.artifacts?.storyboard?.shots || [];
 const timeline = reviewPlan?.timeline || task.media?.timeline || [];
 const audioSegments = task.media?.audioSegments || [];
 const images = task.media?.images || [];
-const continuousAudioPath = reviewPlan?.audioPath || null;
+const continuousAudioPath = reviewPlan?.audioPath || task.media?.continuousAudio?.path || null;
 const materialCountsMatch = shots.length
   && shots.length === timeline.length
   && shots.length === images.length
@@ -114,7 +114,8 @@ if (!materialCountsMatch) {
 }
 
 const totalDurationSec = reviewPlan?.totalDurationSec || timeline.at(-1).endSec;
-const coverHoldSec = Math.min(1.2, Math.max(0.6, timeline[0].durationSec * 0.18));
+const tutorialMode = task.options?.ttsMode === "continuous";
+const coverHoldSec = tutorialMode ? 1 / 30 : Math.min(1.2, Math.max(0.6, timeline[0].durationSec * 0.18));
 const visualSegments = [];
 const cover = task.media?.coverImages?.find((item) => item.path);
 if (cover) visualSegments.push({ path: cover.path, durationSec: coverHoldSec, label: "cover" });
@@ -202,6 +203,6 @@ const sceneMap = shots.map((shot, index) => ({
   speechEndSec: timeline[index].speechEndSec ?? timeline[index].endSec,
 }));
 await writeFile(join(outputDir, "scene-voice-map.json"), `${JSON.stringify(sceneMap, null, 2)}\n`, "utf8");
-await writeFile(join(outputDir, "video-spec.md"), `# 怀表测试成片 ${round}\n\n- 画布：1080 × 1920\n- 帧率：30 fps\n- 目标时长：${totalDurationSec.toFixed(3)} 秒\n- 视频：H.264 / yuv420p\n- 音频：AAC / 48 kHz / 192 kbps / -14 LUFS 目标\n- 分镜：${shots.length}\n- 字幕：${cues.length} 条，手机底部安全区 250 px\n- 封面首屏：${cover ? `${coverHoldSec.toFixed(2)} 秒` : "无独立封面"}\n- 配音模式：${continuousAudioPath ? "单条连续旁白，字幕与镜头依据实际 ASR 时间重建" : "逐镜头音频拼接"}\n- BGM：本轮未加入，只检查配音连续性、字幕与镜头节奏\n`, "utf8");
+await writeFile(join(outputDir, "video-spec.md"), `# 怀表测试成片 ${round}\n\n- 画布：1080 × 1920\n- 帧率：30 fps\n- 目标时长：${totalDurationSec.toFixed(3)} 秒\n- 视频：H.264 / yuv420p\n- 音频：AAC / 48 kHz / 192 kbps / -14 LUFS 目标\n- 分镜：${shots.length}\n- 字幕：${cues.length} 条，手机底部安全区 250 px\n- 封面首屏：${cover ? `${coverHoldSec.toFixed(2)} 秒` : "无独立封面"}\n- 配音模式：${continuousAudioPath ? "单条连续旁白，字幕与镜头依据 MiniMax 词级时间戳重建" : "逐镜头音频拼接"}\n- BGM：本轮未加入，只检查配音连续性、字幕与镜头节奏\n`, "utf8");
 
 process.stdout.write(`${JSON.stringify({ outputPath, outputDir, durationSec: totalDurationSec, shots: shots.length, subtitles: cues.length, audioMode: continuousAudioPath ? "continuous" : "segmented" })}\n`);

@@ -51,7 +51,27 @@ const qcDir = join(outputDir, "qc");
 const sceneMap = JSON.parse(await readFile(join(outputDir, "scene-voice-map.json"), "utf8"));
 const transcript = JSON.parse(await readFile(join(qcDir, "transcript.json"), "utf8"));
 const segments = Array.isArray(transcript.segments) ? transcript.segments : [];
-const words = segments
+function segmentQuality(segment) {
+  const segmentWords = Array.isArray(segment.words) ? segment.words : [];
+  const durationSec = Math.max(0.001, Number(segment.end || 0) - Number(segment.start || 0));
+  const probabilities = segmentWords.map((word) => Number(word.probability)).filter(Number.isFinite);
+  const meanProbability = probabilities.length ? probabilities.reduce((sum, value) => sum + value, 0) / probabilities.length : 1;
+  const wordsPerSecond = segmentWords.length / durationSec;
+  const impossibleTailHallucination = segmentWords.length >= 8 && wordsPerSecond > 25 && meanProbability < 0.6;
+  return { durationSec, meanProbability, wordsPerSecond, impossibleTailHallucination };
+}
+const segmentAudit = segments.map((segment) => ({ segment, quality: segmentQuality(segment) }));
+const acceptedSegments = segmentAudit.filter((item) => !item.quality.impossibleTailHallucination).map((item) => item.segment);
+const discardedSegments = segmentAudit.filter((item) => item.quality.impossibleTailHallucination).map((item) => ({
+  startSec: Number(item.segment.start || 0),
+  endSec: Number(item.segment.end || 0),
+  text: item.segment.text,
+  wordCount: Array.isArray(item.segment.words) ? item.segment.words.length : 0,
+  meanProbability: Number(item.quality.meanProbability.toFixed(4)),
+  wordsPerSecond: Number(item.quality.wordsPerSecond.toFixed(1)),
+  reason: "低置信度且语速超出物理可能范围的静音尾部幻觉",
+}));
+const words = acceptedSegments
   .flatMap((segment) => Array.isArray(segment.words) ? segment.words : [])
   .filter((word) => normalize(word.word));
 
@@ -62,7 +82,7 @@ const sceneComparisons = sceneMap.map((scene) => {
   });
   const actual = matchingWords.length
     ? matchingWords.map((word) => word.word).join("")
-    : segments.filter((segment) => segment.start >= scene.startSec - 0.03 && segment.start < scene.endSec + 0.03).map((segment) => segment.text).join("");
+    : acceptedSegments.filter((segment) => segment.start >= scene.startSec - 0.03 && segment.start < scene.endSec + 0.03).map((segment) => segment.text).join("");
   return {
     shotId: scene.shotId,
     startSec: scene.startSec,
@@ -71,14 +91,14 @@ const sceneComparisons = sceneMap.map((scene) => {
   };
 });
 const expectedFull = sceneMap.map((scene) => scene.voice).join("");
-const full = compare(expectedFull, transcript.text);
+const full = compare(expectedFull, acceptedSegments.map((segment) => segment.text).join(""));
 const videoDurationSec = sceneMap.at(-1).endSec;
 const lastSpeechEndSec = Math.min(
   videoDurationSec,
   Math.max(
     0,
     ...words.map((word) => Number(word.end || 0)),
-    ...segments.filter((segment) => normalize(segment.text)).map((segment) => Number(segment.end || 0)),
+    ...acceptedSegments.filter((segment) => normalize(segment.text)).map((segment) => Number(segment.end || 0)),
   ),
 );
 const result = {
@@ -89,6 +109,7 @@ const result = {
   videoDurationSec,
   lastSpeechEndSec,
   endTailSec: Number((videoDurationSec - lastSpeechEndSec).toFixed(3)),
+  discardedAsrHallucinations: discardedSegments,
   full,
   scenes: sceneComparisons,
 };
@@ -96,7 +117,7 @@ const result = {
 await writeFile(join(qcDir, "transcript-comparison.json"), `${JSON.stringify(result, null, 2)}\n`, "utf8");
 await writeFile(
   join(qcDir, "transcript-comparison.md"),
-  `# ${round} 配音复核\n\n- 整体字符错误率（本机 Whisper 复核值）：${(full.characterErrorRate * 100).toFixed(1)}%\n- 识别语种：${transcript.language}（置信度 ${(Number(transcript.language_probability || 0) * 100).toFixed(1)}%）\n- 最后语音结束：${lastSpeechEndSec.toFixed(3)}s\n- 视频目标结束：${videoDurationSec.toFixed(3)}s\n- 结尾余量：${(videoDurationSec - lastSpeechEndSec).toFixed(3)}s\n\n## 分镜对照\n\n${sceneComparisons.map((item) => `- 第 ${item.shotId} 镜｜${item.startSec.toFixed(3)}–${item.endSec.toFixed(3)}s｜CER ${(item.characterErrorRate * 100).toFixed(1)}%｜期望 ${item.expectedChars} 字 / 识别 ${item.actualChars} 字`).join("\n")}\n`,
+  `# ${round} 配音复核\n\n- 整体字符错误率（本机 Whisper 复核值）：${(full.characterErrorRate * 100).toFixed(1)}%\n- 识别语种：${transcript.language}（置信度 ${(Number(transcript.language_probability || 0) * 100).toFixed(1)}%）\n- 最后语音结束：${lastSpeechEndSec.toFixed(3)}s\n- 视频目标结束：${videoDurationSec.toFixed(3)}s\n- 结尾余量：${(videoDurationSec - lastSpeechEndSec).toFixed(3)}s\n- 排除的不可能 ASR 尾部幻觉：${discardedSegments.length} 段（原始数据仍保留在 transcript.json）\n\n## 分镜对照\n\n${sceneComparisons.map((item) => `- 第 ${item.shotId} 镜｜${item.startSec.toFixed(3)}–${item.endSec.toFixed(3)}s｜CER ${(item.characterErrorRate * 100).toFixed(1)}%｜期望 ${item.expectedChars} 字 / 识别 ${item.actualChars} 字`).join("\n")}\n`,
   "utf8",
 );
 

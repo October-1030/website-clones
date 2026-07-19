@@ -694,6 +694,69 @@ function splitSubtitleTimeline(item, maxChars) {
   return cues;
 }
 
+function alignedSubtitleTimeline(audio, totalDurationUs, maxChars = 9) {
+  const words = Array.isArray(audio?.alignment?.words) ? audio.alignment.words : [];
+  if (!words.length) return [];
+  const punctuation = /^[，。、；：？！…,.!?;:'"“”‘’（）()《》【】\[\]—-]+$/u;
+  const chinese = /[\u3400-\u9fff]/gu;
+  const groups = [];
+  let current = null;
+
+  function flush() {
+    if (!current?.text) return;
+    current.text = current.text.replace(/。+/gu, "。").replace(/^。|。$/gu, (value) => value);
+    groups.push(current);
+    current = null;
+  }
+
+  for (const [index, word] of words.entries()) {
+    const raw = String(word.text || "").replace(/\s+/gu, "");
+    if (!raw) continue;
+    const isPunctuation = punctuation.test(raw);
+    const text = isPunctuation ? "。" : raw;
+    const chineseCount = (text.match(chinese) || []).length;
+    const nextText = String(words[index + 1]?.text || "").replace(/\s+/gu, "");
+    const nextIsPunctuation = punctuation.test(nextText);
+    const nextStartsWithDe = nextText.startsWith("的");
+    const wouldOverflow = !isPunctuation && current && current.chineseCount + chineseCount > maxChars;
+    const shouldReserveForDe = !isPunctuation && current && nextStartsWithDe && current.chineseCount + chineseCount >= maxChars;
+    if (wouldOverflow || shouldReserveForDe) flush();
+    if (!current) {
+      current = {
+        text: "",
+        chineseCount: 0,
+        startSec: Number(word.startSec),
+        endSec: Number(word.endSec),
+      };
+    }
+    if (!(isPunctuation && current.text.endsWith("。"))) current.text += text;
+    current.chineseCount += chineseCount;
+    current.endSec = Number(word.endSec);
+    // Keep sentence punctuation attached to the preceding caption even when
+    // that caption has reached the Chinese-character limit. A punctuation-only
+    // cue otherwise produces a visible one-frame "。" flash in Jianying.
+    if ((isPunctuation && !nextIsPunctuation) || (!isPunctuation && current.chineseCount >= maxChars && !nextIsPunctuation)) flush();
+  }
+  flush();
+
+  const cues = [];
+  let cursorUs = 0;
+  for (const [index, group] of groups.entries()) {
+    const isLast = index === groups.length - 1;
+    const measuredEndUs = Math.max(cursorUs + 1, Math.round(Number(group.endSec) * microseconds));
+    const endUs = isLast ? totalDurationUs : Math.min(totalDurationUs, measuredEndUs);
+    if (endUs <= cursorUs) continue;
+    cues.push({ shotId: 0, text: group.text, startUs: cursorUs, endUs, durationUs: endUs - cursorUs });
+    cursorUs = endUs;
+  }
+  const lastCue = cues.at(-1);
+  if (lastCue && lastCue.endUs !== totalDurationUs) {
+    lastCue.endUs = totalDurationUs;
+    lastCue.durationUs = totalDurationUs - lastCue.startUs;
+  }
+  return cues;
+}
+
 function timelineInMicroseconds(timeline) {
   let cursorUs = 0;
   return timeline.map((item) => {
@@ -727,6 +790,7 @@ export async function buildJianyingDraft(taskStore, task) {
   const readyImages = new Map((task.media?.images || []).filter((item) => item.status === "ready" && item.path).map((item) => [item.shotId, item]));
   const readyVideos = new Map((task.media?.videos || []).filter((item) => item.status === "ready" && item.path).map((item) => [item.shotId, item]));
   const firstImage = [...readyImages.values()][0];
+  const tutorialMode = task.options?.ttsMode === "continuous";
   const singleImage = task.videoForm === "podcast" && task.options?.podcastImageMode === "single";
   const missingImages = singleImage
     ? (firstImage ? [] : [shots[0].id])
@@ -758,7 +822,8 @@ export async function buildJianyingDraft(taskStore, task) {
   const videoDir = join(projectDir, "assets", "video");
   await Promise.all([mkdir(imageDir, { recursive: true }), mkdir(audioDir, { recursive: true }), mkdir(videoDir, { recursive: true })]);
   let draftCover = "";
-  const coverSource = task.media?.coverImages?.find((image) => image.status === "ready" && image.path)?.path;
+  const explicitCoverSource = task.media?.coverImages?.find((image) => image.status === "ready" && image.path)?.path;
+  const coverSource = explicitCoverSource || (tutorialMode ? firstImage?.path : null);
   if (coverSource) {
     const extension = extname(coverSource) || ".jpg";
     const coverTarget = join(projectDir, `draft_cover${extension}`);
@@ -777,6 +842,11 @@ export async function buildJianyingDraft(taskStore, task) {
   const narrationSegments = [];
   const subtitleSegments = [];
   const subtitleTimeline = [];
+  const totalTimelineUs = timeline.at(-1)?.endUs || microseconds;
+  const captionMaxChars = tutorialMode ? Math.min(9, template.caption.maxCharsPerLine) : template.caption.maxCharsPerLine;
+  const alignedCaptions = tutorialMode && continuousAudio?.alignment?.words?.length
+    ? alignedSubtitleTimeline(continuousAudio, totalTimelineUs, captionMaxChars)
+    : [];
   const animationPool = normalizePool(template.image.animation);
   const motionPool = normalizePool(template.image.motion);
   const motionStrength = Number(template.image.motionStrength || 1);
@@ -825,7 +895,7 @@ export async function buildJianyingDraft(taskStore, task) {
     }
     videoSegments.push(segment);
 
-    for (const cue of splitSubtitleTimeline(item, template.caption.maxCharsPerLine)) {
+    for (const cue of alignedCaptions.length ? [] : splitSubtitleTimeline(item, captionMaxChars)) {
       if (!template.caption.visible) continue;
       const subtitle = textMaterial(cue.text, textLayerOptions(template.caption, {
         type: "subtitle",
@@ -837,6 +907,18 @@ export async function buildJianyingDraft(taskStore, task) {
       subtitleSegments.push(trackSegment(subtitle.id, cue.startUs, cue.durationUs, "text", { x: template.caption.x, y: template.caption.y, alpha: template.caption.alpha, renderIndex: 15999 }));
       subtitleTimeline.push(cue);
     }
+  }
+  for (const cue of alignedCaptions) {
+    if (!template.caption.visible) continue;
+    const subtitle = textMaterial(cue.text, textLayerOptions(template.caption, {
+      type: "subtitle",
+      backgroundColor: template.caption.background.color,
+      backgroundAlpha: template.caption.background.alpha,
+      backgroundRoundRadius: template.caption.background.roundRadius,
+    }));
+    materials.texts.push(subtitle);
+    subtitleSegments.push(trackSegment(subtitle.id, cue.startUs, cue.durationUs, "text", { x: template.caption.x, y: template.caption.y, alpha: template.caption.alpha, renderIndex: 15999 }));
+    subtitleTimeline.push(cue);
   }
   if (motionPool.length && videoSegments.length) {
     for (const [index, segment] of videoSegments.entries()) {
@@ -921,6 +1003,8 @@ export async function buildJianyingDraft(taskStore, task) {
   }
 
   const titleText = task.artifacts?.rewrite?.title || task.title;
+  const coverTextDuration = tutorialMode ? 33_334 : totalDuration;
+  const coverTextAlpha = explicitCoverSource ? 0 : undefined;
   if (template.title.visible && titleText) {
     const material = textMaterial(titleText, textLayerOptions(template.title, {
       fontSize: fittedFontSize(template.title.fontSize, titleText, 200, 14),
@@ -932,7 +1016,7 @@ export async function buildJianyingDraft(taskStore, task) {
       id: id(),
       is_default_name: false,
       name: "cover_title",
-      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.title.x, y: template.title.y, alpha: coverSource ? 0 : template.title.alpha, renderIndex: 15000 })],
+      segments: [trackSegment(material.id, 0, coverTextDuration, "text", { x: template.title.x, y: template.title.y, alpha: coverTextAlpha ?? template.title.alpha, renderIndex: 15000 })],
       type: "text",
     });
   }
@@ -951,7 +1035,7 @@ export async function buildJianyingDraft(taskStore, task) {
       id: id(),
       is_default_name: false,
       name: "cover_subtitle",
-      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.subtitle.x, y: template.subtitle.y, alpha: coverSource ? 0 : template.subtitle.alpha, renderIndex: 15000 })],
+      segments: [trackSegment(material.id, 0, coverTextDuration, "text", { x: template.subtitle.x, y: template.subtitle.y, alpha: coverTextAlpha ?? template.subtitle.alpha, renderIndex: 15000 })],
       type: "text",
     });
   }

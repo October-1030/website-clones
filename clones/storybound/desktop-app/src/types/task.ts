@@ -73,9 +73,24 @@ export interface AudioSegment {
   bytes: number;
   durationSec: number;
   speed?: number;
+  alignment?: TtsAlignment;
   startSec?: number;
   status: "pending" | "ready" | "failed";
   error?: string;
+}
+
+export interface TtsWordTiming {
+  text: string;
+  textStart: number;
+  textEnd: number;
+  startSec: number;
+  endSec: number;
+}
+
+export interface TtsAlignment {
+  source: "minimax-word";
+  text: string;
+  words: TtsWordTiming[];
 }
 
 export interface StoredVideo extends StoredAsset {

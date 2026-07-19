@@ -1,4 +1,5 @@
 import type { TtsConfig, TtsCredentialStatus, TtsProvider, TtsVoice } from "../types/tts";
+import type { TtsAlignment } from "../types/task";
 
 interface TtsRequestOptions {
   provider: TtsProvider;
@@ -19,6 +20,7 @@ interface TtsAudioResponse {
   assetUrl?: string;
   assetPath?: string;
   fileName?: string;
+  alignment?: TtsAlignment;
 }
 
 async function responseError(response: Response): Promise<string> {
@@ -50,17 +52,26 @@ async function requestAudio(path: string, options: TtsRequestOptions): Promise<T
       taskId: options.taskId,
       shotId: options.shotId,
       fileName: options.fileName,
+      alignment: options.taskId && options.shotId === 0 && options.provider === "minimax",
     }),
     signal: options.signal,
   });
   if (!response.ok) throw new Error(await responseError(response));
+  const alignmentUrl = decodeURIComponent(response.headers.get("X-TTS-Alignment-Url") || "");
+  const blob = await response.blob();
+  let alignment: TtsAlignment | undefined;
+  if (alignmentUrl) {
+    const alignmentResponse = await fetch(alignmentUrl, { cache: "no-store", signal: options.signal });
+    if (alignmentResponse.ok) alignment = await alignmentResponse.json() as TtsAlignment;
+  }
   return {
-    blob: await response.blob(),
+    blob,
     segments: Number(response.headers.get("X-TTS-Segments") || 1),
     durationSec: Number(response.headers.get("X-TTS-Duration") || 0),
     assetUrl: decodeURIComponent(response.headers.get("X-Asset-Url") || "") || undefined,
     assetPath: decodeURIComponent(response.headers.get("X-Asset-Path") || "") || undefined,
     fileName: decodeURIComponent(response.headers.get("X-Asset-File") || "") || undefined,
+    alignment,
   };
 }
 

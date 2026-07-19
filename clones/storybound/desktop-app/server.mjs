@@ -16,6 +16,16 @@ await taskStore.ensureRoot();
 const originalPromptLibrary = JSON.parse(
   await readFile(join(root, "original-prompt-library.json"), "utf8"),
 );
+const tutorialStoryboardPrompt = `# 同琛教程分镜补充规则（连续旁白模式）
+- 分镜与最终显示字幕是两套数据；这里按可视语义切图片，不按 9 字字幕切图片。
+- 每张图片目标覆盖 5–7 秒旁白；按正常中文语速优先组织为约 20–30 字且语义完整的画面段。
+- 同一主体、场景和连续动作应合并；人物、地点、时间或核心动作变化时切镜。
+- 3–5 分钟成片通常控制在 27–35 镜，数量随正文动态变化，不机械凑数。`;
+const tutorialImagePrompt = `# 同琛教程绘图提示词补充规则（连续旁白模式）
+- 每个分镜必须输出一条完整、可直接生图的中文提示词，数量与分镜严格一致。
+- 人物题材写明姓名或身份、年龄、性别、面部特征、服装、景别、动作、时代和场景细节；相近年龄段重复一致外观。
+- 全片统一色调并保持时代真实；中老年人物故事可采用低饱和、轻微泛黄的写实质感。
+- 禁止生成台词、字幕、书名或水印；禁止用象征、剪影、拼贴、线稿漫画替代真实画面。`;
 const production = process.argv.includes("--production");
 const port = Number(process.env.PORT || 5173);
 const publicAccessToken = String(process.env.STORYBOUND_PUBLIC_ACCESS_TOKEN || "").trim();
@@ -334,7 +344,30 @@ async function minimaxJson(path, apiKey, body, timeoutMs = 90000) {
   return payload;
 }
 
-async function synthesizeMinimax(text, voiceId, speed, config) {
+async function fetchMinimaxAlignment(url, text) {
+  if (!url) return null;
+  const response = await fetchWithTimeout(url, { headers: { Accept: "application/json" } }, 20_000);
+  if (!response.ok) return null;
+  let segments;
+  try {
+    segments = JSON.parse(await response.text());
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(segments)) return null;
+  const words = segments.flatMap((segment) => Array.isArray(segment.timestamped_words) ? segment.timestamped_words : [])
+    .map((word) => ({
+      text: String(word.word || ""),
+      textStart: Number(word.word_begin),
+      textEnd: Number(word.word_end),
+      startSec: Number(word.time_begin) / 1000,
+      endSec: Number(word.time_end) / 1000,
+    }))
+    .filter((word) => word.text && Number.isFinite(word.textStart) && Number.isFinite(word.textEnd) && Number.isFinite(word.startSec) && Number.isFinite(word.endSec));
+  return words.length ? { source: "minimax-word", text, words } : null;
+}
+
+async function synthesizeMinimax(text, voiceId, speed, config, withAlignment = false) {
   const payload = await minimaxJson("v1/t2a_v2", config?.apiKey, {
     model: config?.model || "speech-2.8-hd",
     text,
@@ -347,11 +380,17 @@ async function synthesizeMinimax(text, voiceId, speed, config) {
       pitch: 0,
     },
     audio_setting: { sample_rate: 32000, bitrate: 128000, format: "mp3", channel: 1 },
+    subtitle_enable: withAlignment,
+    ...(withAlignment ? { subtitle_type: "word" } : {}),
     output_format: "hex",
   });
   const hex = payload.data?.audio;
   if (!hex || typeof hex !== "string") throw new Error("MiniMax 响应缺少 audio 字段");
-  return Buffer.from(hex, "hex");
+  return {
+    audio: Buffer.from(hex, "hex"),
+    durationSec: Number(payload.extra_info?.audio_length) / 1000,
+    alignment: withAlignment ? await fetchMinimaxAlignment(payload.data?.subtitle_file, text) : null,
+  };
 }
 
 async function synthesize(body) {
@@ -361,17 +400,37 @@ async function synthesize(body) {
   if (!text) throw new Error("请输入配音文本");
   if (text.length > 10000) throw new Error("配音文本最多 10000 字");
   if (!voiceId) throw new Error("请选择配音员");
-  const maxLength = provider === "minimax" ? 2000 : 500;
+  const maxLength = provider === "minimax" ? (body.alignment ? 9999 : 2000) : 500;
   const parts = splitText(text, maxLength);
-  const buffers = await mapLimit(parts, 3, (part) =>
+  const results = await mapLimit(parts, 3, async (part) =>
     provider === "minimax"
-      ? synthesizeMinimax(part, voiceId, body.speed, body.config)
-      : synthesizeVolcengine(part, voiceId, body.speed, body.config),
+      ? synthesizeMinimax(part, voiceId, body.speed, body.config, Boolean(body.alignment))
+      : { audio: await synthesizeVolcengine(part, voiceId, body.speed, body.config), durationSec: null, alignment: null },
   );
+  let textOffset = 0;
+  let timeOffset = 0;
+  const alignedWords = [];
+  for (const [index, result] of results.entries()) {
+    if (result.alignment?.words) {
+      alignedWords.push(...result.alignment.words.map((word) => ({
+        ...word,
+        textStart: word.textStart + textOffset,
+        textEnd: word.textEnd + textOffset,
+        startSec: word.startSec + timeOffset,
+        endSec: word.endSec + timeOffset,
+      })));
+    }
+    textOffset += parts[index].length;
+    timeOffset += Number.isFinite(result.durationSec) ? result.durationSec : 0;
+  }
+  const measuredDuration = results.every((result) => Number.isFinite(result.durationSec) && result.durationSec > 0)
+    ? results.reduce((sum, result) => sum + result.durationSec, 0)
+    : 0;
   return {
-    audio: Buffer.concat(buffers),
+    audio: Buffer.concat(results.map((result) => result.audio)),
     segments: parts.length,
-    durationSec: Math.max(0.8, text.replace(/\s/g, "").length / (4.2 * Math.max(0.5, Number(body.speed || 1)))),
+    durationSec: measuredDuration || Math.max(0.8, text.replace(/\s/g, "").length / (4.2 * Math.max(0.5, Number(body.speed || 1)))),
+    alignment: alignedWords.length ? { source: "minimax-word", text, words: alignedWords } : null,
   };
 }
 
@@ -683,7 +742,8 @@ function normalizePipelineResult(step, payload, context, artifacts) {
   }
   if (step === "storyboard") {
     const source = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
-    const fallbackShots = splitText(source, 45).slice(0, 60).map((text, index) => ({
+    const fallbackChars = context.ttsMode === "continuous" ? 28 : 45;
+    const fallbackShots = splitText(source, fallbackChars).slice(0, 60).map((text, index) => ({
       id: index + 1,
       text,
       visual: track?.skeletonScenes?.[index % Math.max(1, track.skeletonScenes.length)] || "与字幕内容对应的可执行画面",
@@ -779,6 +839,7 @@ function pipelineContextPayload(context, artifacts) {
       targetScenes: context.targetScenes,
       fixedIntro: context.fixedIntro,
       outroCta: context.outroCta,
+      ttsMode: context.ttsMode,
     },
   };
 }
@@ -904,13 +965,13 @@ async function runLlmPipeline(body) {
   if (step === "storyboard") {
     const source = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
     const splitPayload = await callLlmJson(config, pipelineMessages(
-      [originalPromptLibrary.storyboardAgentPrompt, originalPromptLibrary.sentenceSplitPrompt],
+      [originalPromptLibrary.storyboardAgentPrompt, originalPromptLibrary.sentenceSplitPrompt, context.ttsMode === "continuous" ? tutorialStoryboardPrompt : ""],
       `当前只执行 StoryboardAgent 第一阶段。按原版尾部锚点法，严格返回 JSON：${JSON.stringify({ anchors: ["每个分镜在原文中的最后10-20个字符，最后一项覆盖全文末尾"] })}`,
       { ...base, sourceText: source },
     ), 0.2, "影视分镜锚点拆分");
     let shots = splitShotsFromAnchors(source, splitPayload.anchors || splitPayload.endAnchors || splitPayload.boundaries, track);
     if (!shots.length) {
-      shots = splitText(String(source).replace(/[“”]/g, ""), 45).slice(0, 60).map((text, index) => ({
+      shots = splitText(String(source).replace(/[“”]/g, ""), context.ttsMode === "continuous" ? 28 : 45).slice(0, 60).map((text, index) => ({
         id: index + 1,
         text,
         visual: track?.skeletonScenes?.[index % Math.max(1, track?.skeletonScenes?.length || 1)] || "与字幕内容对应的可执行画面",
@@ -931,7 +992,7 @@ async function runLlmPipeline(body) {
   }
 
   const promptPayload = await callLlmJson(config, pipelineMessages(
-    [originalPromptLibrary.storyboardAgentPrompt, track?.imagePrompt, originalPromptLibrary.producerAgentPrompt],
+    [originalPromptLibrary.storyboardAgentPrompt, track?.imagePrompt, context.ttsMode === "continuous" ? tutorialImagePrompt : "", originalPromptLibrary.producerAgentPrompt],
     `执行 StoryboardAgent 第二阶段并交接 ProducerAgent。严格返回 JSON：${JSON.stringify({ prompts: [{ shotId: 1, prompt: "只写画面主体、环境、动作、光影和构图", negativePrompt: "" }] })}。不得修改 shotId 与字幕；prompt 不要重复画风前后缀，系统会按原版逻辑统一拼接。`,
     base,
   ), 0.72, "原版绘图提示词");
@@ -987,6 +1048,14 @@ async function handleTtsApi(request, response, pathname) {
             result.audio,
           )
         : null;
+      const alignmentSaved = saved && result.alignment
+        ? await taskStore.saveBuffer(
+            body.taskId,
+            "audio",
+            `${saved.fileName.replace(/\.[^.]+$/u, "")}.timestamps.json`,
+            Buffer.from(`${JSON.stringify(result.alignment, null, 2)}\n`, "utf8"),
+          )
+        : null;
       const durationSec = saved ? await probeMediaDuration(saved.path) || result.durationSec : result.durationSec;
       response.writeHead(200, {
         "Content-Type": "audio/mpeg",
@@ -998,6 +1067,7 @@ async function handleTtsApi(request, response, pathname) {
           "X-Asset-Path": encodeURIComponent(saved.path),
           "X-Asset-File": encodeURIComponent(saved.fileName),
         } : {}),
+        ...(alignmentSaved ? { "X-TTS-Alignment-Url": encodeURIComponent(alignmentSaved.url) } : {}),
         "Cache-Control": "no-store",
       });
       response.end(result.audio);

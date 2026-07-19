@@ -5,6 +5,18 @@ import { join } from "node:path";
 const baseUrl = process.env.STORYBOUND_URL || "http://127.0.0.1:5173";
 const taskId = randomUUID();
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+const narrationText = "第一段旁白藏着怀表的秘密。第二段旁白说时间已经停下。";
+
+function wordAlignment(text, durationSec) {
+  const characters = [...text];
+  return characters.map((word, index) => ({
+    text: word,
+    textStart: index,
+    textEnd: index + 1,
+    startSec: durationSec * index / characters.length,
+    endSec: durationSec * (index + 1) / characters.length,
+  }));
+}
 
 function silentWav(seconds = 4, sampleRate = 8000) {
   const samples = seconds * sampleRate;
@@ -52,14 +64,14 @@ try {
     body: JSON.stringify({
       id: taskId,
       title: "连续旁白草稿回归测试",
-      inputText: "第一段连续旁白。第二段连续旁白。",
+      inputText: narrationText,
       mode: "direct",
       videoForm: "narration",
       aspectRatio: "9:16",
-      options: { draftTemplateId: "default-portrait-9-16" },
+      options: { draftTemplateId: "default-portrait-9-16", ttsMode: "continuous" },
       artifacts: { storyboard: { shots: [
-        { id: 1, text: "第一段连续旁白。", visual: "画面一", emotion: "自然", durationSec: 2 },
-        { id: 2, text: "第二段连续旁白。", visual: "画面二", emotion: "自然", durationSec: 2 },
+        { id: 1, text: "第一段旁白藏着怀表的秘密。", visual: "画面一", emotion: "自然", durationSec: 2 },
+        { id: 2, text: "第二段旁白说时间已经停下。", visual: "画面二", emotion: "自然", durationSec: 2 },
       ] } },
     }),
   });
@@ -79,10 +91,10 @@ try {
         { id: "image-2", shotId: 2, prompt: "画面二", status: "ready", ...image2 },
       ],
       audioSegments: [],
-      continuousAudio: { id: "audio-continuous", shotId: 0, text: "第一段连续旁白。第二段连续旁白。", voiceId: "smoke", status: "ready", ...audio },
+      continuousAudio: { id: "audio-continuous", shotId: 0, text: narrationText, voiceId: "smoke", status: "ready", alignment: { source: "minimax-word", text: narrationText, words: wordAlignment(narrationText, 4) }, ...audio },
       timeline: [
-        { shotId: 1, text: "第一段连续旁白。", startSec: 0, endSec: 2, durationSec: 2 },
-        { shotId: 2, text: "第二段连续旁白。", startSec: 2, endSec: 4, durationSec: 2 },
+        { shotId: 1, text: "第一段旁白藏着怀表的秘密。", startSec: 0, endSec: 2, durationSec: 2 },
+        { shotId: 2, text: "第二段旁白说时间已经停下。", startSec: 2, endSec: 4, durationSec: 2 },
       ],
     } }),
   });
@@ -92,7 +104,23 @@ try {
   if (narrationTrack?.segments?.length !== 1) throw new Error(`连续旁白应只有 1 个音频片段，实际为 ${narrationTrack?.segments?.length || 0}`);
   if (draftInfo.materials?.audios?.length !== 1) throw new Error(`连续旁白应只有 1 个音频素材，实际为 ${draftInfo.materials?.audios?.length || 0}`);
   if (narrationTrack.segments[0].target_timerange?.duration !== 4_000_000) throw new Error("连续旁白没有覆盖完整 4 秒时间线");
-  process.stdout.write(`${JSON.stringify({ ok: true, taskId, projectName: result.draft.projectName, narrationSegments: 1, durationUs: draftInfo.duration })}\n`);
+  const textById = new Map((draftInfo.materials?.texts || []).map((item) => [item.id, JSON.parse(item.content).text]));
+  const subtitleTrack = draftInfo.tracks?.find((track) => track.name === "subtitle");
+  const subtitleTexts = (subtitleTrack?.segments || []).map((segment) => textById.get(segment.material_id) || "");
+  const punctuationOnly = /^[，。、；：？！…,.!?;:'"“”‘’（）()《》【】\[\]—-]+$/u;
+  if (!subtitleTexts.length || subtitleTexts.some((text) => (text.match(/[\u3400-\u9fff]/gu) || []).length > 9 || text.startsWith("的") || punctuationOnly.test(text))) {
+    throw new Error(`教程短字幕规则失败：${subtitleTexts.join(" | ")}`);
+  }
+  const ranges = subtitleTrack.segments.map((segment) => ({ start: segment.target_timerange.start, end: segment.target_timerange.start + segment.target_timerange.duration }));
+  if (ranges[0]?.start !== 0 || ranges.at(-1)?.end !== 4_000_000 || ranges.slice(1).some((range, index) => range.start !== ranges[index].end)) {
+    throw new Error("教程字幕时间线出现空隙、重叠或尾部截断");
+  }
+  const titleTrack = draftInfo.tracks?.find((track) => track.name === "cover_title");
+  const coverFrame = draftInfo.tracks?.find((track) => track.name === "cover_frame");
+  if (titleTrack?.segments?.[0]?.target_timerange?.duration !== 33_334 || coverFrame?.segments?.[0]?.target_timerange?.duration !== 33_334) {
+    throw new Error("教程封面没有限制为一帧");
+  }
+  process.stdout.write(`${JSON.stringify({ ok: true, taskId, projectName: result.draft.projectName, narrationSegments: 1, subtitles: subtitleTexts, durationUs: draftInfo.duration })}\n`);
 } finally {
   if (created && process.env.KEEP_TASK !== "1") await request(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => undefined);
 }

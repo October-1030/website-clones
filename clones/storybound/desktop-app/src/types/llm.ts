@@ -34,6 +34,7 @@ export interface PipelineContext {
   targetScenes?: number | null;
   fixedIntro?: string;
   outroCta?: string;
+  ttsMode?: "original-segmented" | "continuous";
 }
 
 export type LlmPipelineStep = "precheck" | "rewrite" | "storyboard" | "prompts";

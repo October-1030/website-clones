@@ -12,6 +12,8 @@
     "start": "node server.mjs --production",
     "smoke:task": "node scripts/smoke-task-lifecycle.mjs",
     "smoke:continuous": "node scripts/smoke-continuous-audio.mjs",
+    "smoke:alignment": "node scripts/smoke-minimax-alignment.mjs",
+    "rebuild:tutorial": "node scripts/rebuild-pocket-watch-tutorial.mjs",
     "smoke:pipeline": "node scripts/smoke-original-pipeline.mjs"
   },
   "dependencies": {
