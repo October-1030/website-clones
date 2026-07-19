@@ -47,11 +47,20 @@ function srtTime(seconds) {
 const taskPath = join(appRoot, ".storybound-data", "tasks", taskId, "task.json");
 const task = JSON.parse(await readFile(taskPath, "utf8"));
 const shots = task.artifacts?.storyboard?.shots || [];
-const oldTimeline = task.media?.timeline || [];
+const reviewDir = join(dirname(taskPath), "review", round);
 const analysisPath = join(dirname(taskPath), "review", round, "qc", "tts-segment-analysis.json");
 const analysis = JSON.parse(await readFile(analysisPath, "utf8"));
 const measuredByShot = new Map(analysis.segments.map((item) => [Number(item.shotId), item]));
-const originalSrt = parseSrt(await readFile(join(task.draft.projectDir, "timeline.srt"), "utf8"));
+let subtitleSourceTask = task;
+let subtitleSrtPath = task.draft?.projectDir ? join(task.draft.projectDir, "timeline.srt") : "";
+if (!subtitleSrtPath) {
+  const generationManifest = JSON.parse(await readFile(join(reviewDir, "generation-manifest.json"), "utf8"));
+  if (!generationManifest.preservedArchiveDir) throw new Error("缺少可复用的旧版字幕切分来源");
+  subtitleSourceTask = JSON.parse(await readFile(join(generationManifest.preservedArchiveDir, "task-before-regeneration.json"), "utf8"));
+  subtitleSrtPath = join(generationManifest.preservedArchiveDir, "draft-project", "timeline.srt");
+}
+const oldTimeline = subtitleSourceTask.media?.timeline || [];
+const originalSrt = parseSrt(await readFile(subtitleSrtPath, "utf8"));
 let cursor = 0;
 const timeline = [];
 const cues = [];
@@ -91,7 +100,7 @@ for (const shot of shots) {
   cursor = endSec;
 }
 
-const outputDir = join(dirname(taskPath), "review", round);
+const outputDir = reviewDir;
 await mkdir(outputDir, { recursive: true });
 const plan = {
   mode: "original-segmented",
@@ -99,6 +108,7 @@ const plan = {
   totalDurationSec: cursor,
   timeline,
   cues,
+  subtitleSource: { speed: subtitleSourceTask.options?.ttsSpeed || null, srtPath: subtitleSrtPath },
   audioTreatment: "9 段均未超过异常静音阈值，保留原始段首/段尾和内部语义停顿；不做硬切或交叉淡化",
 };
 const planPath = join(outputDir, "review-plan.json");

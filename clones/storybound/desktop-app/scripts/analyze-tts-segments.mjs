@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -10,8 +10,9 @@ const ffprobe = process.env.FFPROBE_PATH
   || "C:\\Users\\pdb12\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-7.1.1-full_build\\bin\\ffprobe.exe";
 const appRoot = resolve(import.meta.dirname, "..");
 const taskId = process.argv[2];
+const round = process.argv[3] || "segmented-actual";
 
-if (!taskId) throw new Error("用法：node scripts/analyze-tts-segments.mjs <task-id>");
+if (!taskId) throw new Error("用法：node scripts/analyze-tts-segments.mjs <task-id> [round-name]");
 
 function valueAfter(line, marker) {
   const value = Number(line.slice(line.indexOf(marker) + marker.length).trim().split(/[ |]/)[0]);
@@ -60,15 +61,15 @@ async function analyze(filePath, shotId) {
 
 const taskPath = join(appRoot, ".storybound-data", "tasks", taskId, "task.json");
 const task = JSON.parse(await readFile(taskPath, "utf8"));
-const audioDir = join(dirname(taskPath), "audio");
-const files = (await readdir(audioDir))
-  .map((name) => ({ name, match: name.match(/^(\d+)\.mp3$/) }))
-  .filter((item) => item.match)
-  .sort((a, b) => Number(a.match[1]) - Number(b.match[1]));
+const files = (task.media?.audioSegments || [])
+  .filter((item) => item.status === "ready" && item.path)
+  .sort((a, b) => Number(a.shotId) - Number(b.shotId));
+if (!files.length) throw new Error("任务没有可分析的逐镜 TTS 文件");
 const segments = [];
-for (const file of files) segments.push(await analyze(join(audioDir, file.name), Number(file.match[1])));
+for (const file of files) segments.push(await analyze(file.path, Number(file.shotId)));
 const report = {
   taskId,
+  round,
   voiceId: task.options?.ttsVoiceId || null,
   speed: task.options?.ttsSpeed || null,
   threshold: { silenceDb: -45, minimumSilenceSec: 0.04, abnormalLeadingSec: 0.35, abnormalTrailingSec: 0.55 },
@@ -77,7 +78,7 @@ const report = {
   totalTrailingSilenceSec: Number(segments.reduce((sum, item) => sum + item.trailingSilenceSec, 0).toFixed(3)),
   segments,
 };
-const outputDir = join(dirname(taskPath), "review", "segmented-actual", "qc");
+const outputDir = join(dirname(taskPath), "review", round, "qc");
 await mkdir(outputDir, { recursive: true });
 const jsonPath = join(outputDir, "tts-segment-analysis.json");
 const markdownPath = join(outputDir, "tts-segment-analysis.md");

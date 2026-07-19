@@ -51,7 +51,9 @@ const qcDir = join(outputDir, "qc");
 const sceneMap = JSON.parse(await readFile(join(outputDir, "scene-voice-map.json"), "utf8"));
 const transcript = JSON.parse(await readFile(join(qcDir, "transcript.json"), "utf8"));
 const segments = Array.isArray(transcript.segments) ? transcript.segments : [];
-const words = segments.flatMap((segment) => Array.isArray(segment.words) ? segment.words : []);
+const words = segments
+  .flatMap((segment) => Array.isArray(segment.words) ? segment.words : [])
+  .filter((word) => normalize(word.word));
 
 const sceneComparisons = sceneMap.map((scene) => {
   const matchingWords = words.filter((word) => {
@@ -70,8 +72,15 @@ const sceneComparisons = sceneMap.map((scene) => {
 });
 const expectedFull = sceneMap.map((scene) => scene.voice).join("");
 const full = compare(expectedFull, transcript.text);
-const lastSpeechEndSec = Math.max(0, ...segments.map((segment) => Number(segment.end || 0)));
 const videoDurationSec = sceneMap.at(-1).endSec;
+const lastSpeechEndSec = Math.min(
+  videoDurationSec,
+  Math.max(
+    0,
+    ...words.map((word) => Number(word.end || 0)),
+    ...segments.filter((segment) => normalize(segment.text)).map((segment) => Number(segment.end || 0)),
+  ),
+);
 const result = {
   taskId,
   round,

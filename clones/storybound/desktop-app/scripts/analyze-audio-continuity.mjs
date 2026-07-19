@@ -34,6 +34,12 @@ const videoPath = join(outputDir, `pocket-watch-${round}.mp4`);
 const sceneMap = JSON.parse(await readFile(join(outputDir, "scene-voice-map.json"), "utf8"));
 const transcript = JSON.parse(await readFile(join(qcDir, "transcript.json"), "utf8"));
 const words = transcript.segments.flatMap((segment) => segment.words || []).sort((a, b) => a.start - b.start);
+let ttsAnalysis = null;
+try {
+  ttsAnalysis = JSON.parse(await readFile(join(qcDir, "tts-segment-analysis.json"), "utf8"));
+} catch (error) {
+  if (error.code !== "ENOENT") throw error;
+}
 const seams = [];
 
 for (let index = 0; index < sceneMap.length - 1; index += 1) {
@@ -43,16 +49,25 @@ for (let index = 0; index < sceneMap.length - 1; index += 1) {
   const previous = previousWords.at(-1);
   const next = nextWords[0];
   if (!previous || !next) continue;
-  const beforeMeanDb = await meanVolume(videoPath, Math.max(0, previous.end - 0.8), previous.end);
-  const afterMeanDb = await meanVolume(videoPath, next.start, Math.min(next.start + 0.8, transcript.duration));
+  const previousTts = ttsAnalysis?.segments?.find((segment) => Number(segment.shotId) === index + 1);
+  const nextTts = ttsAnalysis?.segments?.find((segment) => Number(segment.shotId) === index + 2);
+  const previousSpeechEndSec = previousTts
+    ? boundarySec - Number(previousTts.trailingSilenceSec || 0)
+    : Number(previous.end);
+  const nextSpeechStartSec = nextTts
+    ? boundarySec + Number(nextTts.leadingSilenceSec || 0)
+    : Number(next.start);
+  const beforeMeanDb = await meanVolume(videoPath, Math.max(0, previousSpeechEndSec - 0.8), previousSpeechEndSec);
+  const afterMeanDb = await meanVolume(videoPath, nextSpeechStartSec, Math.min(nextSpeechStartSec + 0.8, transcript.duration));
   seams.push({
     seam: `${index + 1}→${index + 2}`,
     boundarySec,
     previousWord: previous.word,
-    previousSpeechEndSec: Number(previous.end),
+    previousSpeechEndSec: Number(previousSpeechEndSec.toFixed(3)),
     nextWord: next.word,
-    nextSpeechStartSec: Number(next.start),
-    silenceSec: Number(Math.max(0, Number(next.start) - Number(previous.end)).toFixed(3)),
+    nextSpeechStartSec: Number(nextSpeechStartSec.toFixed(3)),
+    silenceSec: Number(Math.max(0, nextSpeechStartSec - previousSpeechEndSec).toFixed(3)),
+    silenceSource: previousTts && nextTts ? "逐镜音频段尾+下一段段首实测" : "ASR 字级时间戳",
     beforeMeanDb,
     afterMeanDb,
     loudnessJumpDb: Number.isFinite(beforeMeanDb) && Number.isFinite(afterMeanDb)

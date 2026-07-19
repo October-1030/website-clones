@@ -1,4 +1,4 @@
-# Storybound 原版逐镜 TTS 验收（怀表测试）
+# Storybound 原版逐镜 TTS 1.0× 验收（怀表测试）
 
 日期：2026-07-19
 任务：`6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d`
@@ -7,7 +7,9 @@
 
 - 原作者任务截图显示正式流程为分镜级生成：33 个分镜、33 张图片、33 段 TTS，再生成剪映草稿。
 - 因此默认模式恢复为“原版复刻 · 逐镜 TTS”：每镜独立图片、独立 TTS、独立字幕组，并按音频文件实测时长对齐。
+- 原客户端配音实验室明确默认选中 `1.0×`；怀表项目和新建任务的原版逐镜模式均以 `1.0×` 为默认语速。
 - “连续旁白 · 增强模式”仅作为减少语调重启的可选方案，不属于原版逐镜结构。
+- 原 1.1× 实测版不覆盖，标记为“紧凑节奏可选版”，只用于最终听感对照。
 - 当前没有原站同一文案的真实导出成片，不能宣称逐帧完全一致；本报告只验证已取得证据支持的结构契约和客观技术质量。
 
 ## 结构复刻验收
@@ -17,31 +19,32 @@
 - 44 条可读字幕，归属于 9 个逐镜字幕组：通过。
 - 画面、音频、字幕组按同一 9 段边界排列：通过。
 - 轨道无重叠、无非预期空隙：通过。
-- 最后一句“重新去找到它”完整覆盖至 60.516 秒：通过。
-- 剪映草稿时长：60.516 秒。
+- 最后一句“重新去找到它”完整覆盖至 67.536 秒：通过。
+- 剪映草稿时长：67.536 秒。
 
-结构报告：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/segmented-actual/qc/draft-structure-validation.json`
+结构报告：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/original-segmented-1.0x/qc/draft-structure-validation.json`
 
 ## 客观技术验收
 
-- 成片：1080 × 1920、30 fps、H.264 High、AAC 48 kHz、60.533 秒容器时长。
+- 成片：1080 × 1920、30 fps、H.264 High、AAC 48 kHz、67.467 秒容器时长；与 67.536 秒目标差 0.069 秒。
 - 全片解码：通过。
 - 29 张开头、中段、结尾及切镜前后关键帧：无黑帧、异常拉伸或占位画面。
 - 字幕：44 条，位于手机底部安全区；关键帧检查未见越界或遮挡核心主体。
-- ASR 全文字符错误率：5.46%；第 6、8、9 镜为 0%，末句完整。
-- 最后语音结束：60.18 秒；尾部余量：0.336 秒。
-- 9 段原始 TTS 首部静音 0.140–0.214 秒、尾部静音 0.212–0.377 秒，均属于自然范围，本轮未裁剪。
+- ASR 全文字符错误率：1.02%；第 4、6、7、8、9 镜为 0%，末句完整。
+- 最后语音结束：67.160 秒；尾部余量：0.376 秒。Whisper 在音频结束后产生的纯标点幻觉已从“最后发声”统计中排除。
+- 9 段 1.0× 原始 TTS 首部静音 0.157–0.227 秒、尾部静音 0.211–0.299 秒，均属于自然范围，本轮未裁剪。
 - 旧字数估时版为 73.160 秒，比 9 段真实总长 60.516 秒多 12.644 秒；正式流水线已禁止这种补长。
-- 逐镜实测版 8 接缝：平均静音 0.180 秒、最大 0.420 秒、最大响度跳变 4.2 dB。
+- 1.0× 逐镜实测版 8 接缝：平均自然静音 0.449 秒、最大 0.494 秒、最大短窗响度跳变 5.5 dB。
+- 1.1× 紧凑节奏可选版 8 接缝（按同一算法重算）：平均自然静音 0.442 秒、最大 0.525 秒、最大短窗响度跳变 3.9 dB。
 - 旧补时版 8 接缝：平均静音 1.686 秒、最大 2.700 秒、最大响度跳变 8.7 dB。
 
-关键帧总览：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/segmented-actual/qc/contact-sheet.jpg`
+关键帧总览：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/original-segmented-1.0x/qc/contact-sheet.jpg`
 
-客观 QC：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/segmented-actual/qc/qc-data.json`
+客观 QC：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/original-segmented-1.0x/qc/qc-data.json`
 
-ASR 对照：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/segmented-actual/qc/transcript-comparison.json`
+ASR 对照：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/original-segmented-1.0x/qc/transcript-comparison.json`
 
-接缝指标：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/segmented-actual/qc/audio-continuity.json`
+接缝指标：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review/original-segmented-1.0x/qc/audio-continuity.json`
 
 ## 主观听感验收
 
@@ -49,11 +52,11 @@ ASR 对照：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review
 
 请依次试听：
 
-1. 原版逐镜实测版完整成片；
-2. 原版逐镜实测版与连续旁白增强版的 8 接缝汇总；
-3. 若某处仍不自然，再听该编号的 2.5 秒单独接缝前后对照。
+1. 1.0× 原版逐镜默认版完整成片；
+2. 1.1× 紧凑节奏可选版完整成片；
+3. 两个速度的 8 接缝汇总；若某处仍不自然，再听该编号的 2.5 秒单独接缝对照。
 
-逐镜版遵守原作者结构，但 MiniMax 每次独立请求仍可能产生轻微语调重启；连续旁白版通常更连贯，但不属于原版正式结构。两者必须作为不同维度验收。
+两个版本都遵守原作者逐镜结构；MiniMax 每次独立请求仍可能产生轻微语调重启。客观指标已通过，但不能替代人工从头到尾实听；默认交付固定为 1.0×，不再继续试验其他速度。
 
 ## 回归结果
 
@@ -61,4 +64,4 @@ ASR 对照：`.storybound-data/tasks/6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d/review
 - `npm run lint`：通过。
 - `npm run smoke:task`：通过（逐镜草稿闭环）。
 - `npm run smoke:continuous`：通过（连续旁白可选模式）。
-- 本地 UI：默认选中“原版复刻 · 逐镜 TTS”，连续旁白明确标注为增强模式。
+- 本地 UI：默认选中“原版复刻 · 逐镜 TTS”和 `默认 1.0×`，可见语速档位与原客户端一致；连续旁白明确标注为增强模式。
