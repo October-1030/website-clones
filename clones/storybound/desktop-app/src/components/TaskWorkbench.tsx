@@ -1,4 +1,5 @@
 import { pipelineSteps } from "../data/app-data";
+import { draftTemplateById } from "../data/draft-templates";
 import type { PipelineStatus } from "../types/app";
 import type { ImagePrompt, StoryboardShot } from "../types/llm";
 import type { StoredImage, StoryboundTask, TaskTimelineEntry } from "../types/task";
@@ -36,9 +37,93 @@ function cloneTask(task: StoryboundTask): StoryboundTask {
   return structuredClone(task);
 }
 
+type SopCheckLevel = "pass" | "advice" | "attention" | "info";
+
+interface SopCheck {
+  level: SopCheckLevel;
+  label: string;
+  detail: string;
+}
+
+function countChineseCharacters(value: string): number {
+  return (value.match(/[\u3400-\u9fff]/g) || []).length;
+}
+
+function sopQualityChecks(task: StoryboundTask): SopCheck[] {
+  const shots = task.artifacts.storyboard?.shots || [];
+  const timeline = task.media.timeline || [];
+  const template = draftTemplateById(task.options.draftTemplateId || "default-portrait-9-16").config;
+  const tutorialMode = task.options.ttsMode === "continuous";
+  const readyImages = task.media.images.filter((image) => image.status === "ready" || image.status === "borrowed").length;
+  const narrationVolume = task.options.narrationVolume ?? template.audio.narrationVolume;
+  const bgmVolume = task.options.bgmVolume ?? template.audio.bgmVolume;
+  const checks: SopCheck[] = [];
+
+  checks.push(template.canvas.width === 1080 && template.canvas.height === 1920
+    ? { level: "pass", label: "导出画布", detail: "1080 × 1920；草稿固定为 30 fps。" }
+    : { level: "attention", label: "导出画布", detail: `当前为 ${template.canvas.width} × ${template.canvas.height}；教程人物故事基准是竖屏 1080P / 30 fps。` });
+
+  checks.push(template.caption.fontSize >= 11 && template.caption.fontSize <= 15
+    ? { level: "pass", label: "字幕可读性", detail: `字号 ${template.caption.fontSize}，落在教程建议的 11–15 范围。` }
+    : { level: "attention", label: "字幕可读性", detail: `字号 ${template.caption.fontSize}，教程建议 11–15，建议回到模板设置调整。` });
+
+  if (tutorialMode) {
+    const overlong = timeline.filter((item) => item.durationSec > 7.5);
+    const tooShort = timeline.filter((item) => item.durationSec < 4.5);
+    checks.push(overlong.length || tooShort.length
+      ? { level: "advice", label: "连续旁白镜头节奏", detail: `${overlong.length} 镜超过 7.5 秒、${tooShort.length} 镜低于 4.5 秒；教程建议每张图片约 5–7 秒，可在时间线拆镜并补图。` }
+      : { level: "pass", label: "连续旁白镜头节奏", detail: `${timeline.length} 镜均落在约 5–7 秒的教程建议范围。` });
+    const alignedWords = task.media.continuousAudio?.alignment?.words.length || 0;
+    checks.push(alignedWords
+      ? { level: "pass", label: "音画对齐依据", detail: `已取得 ${alignedWords} 个 MiniMax 词级时间戳；不用字数估算时长。` }
+      : { level: "attention", label: "音画对齐依据", detail: "连续旁白缺少词级时间戳，无法按教程的字幕标记逻辑可靠对齐。" });
+    checks.push(Math.min(9, template.caption.maxCharsPerLine) <= 9
+      ? { level: "pass", label: "显示字幕分句", detail: "连续模式会按自然停顿限制为不超过 9 个汉字。" }
+      : { level: "attention", label: "显示字幕分句", detail: "连续模式必须将显示字幕限制为不超过 9 个汉字。" });
+  } else if (shots.length) {
+    const readyAudio = task.media.audioSegments.filter((audio) => audio.status === "ready").length;
+    checks.push(readyAudio === shots.length
+      ? { level: "pass", label: "原客户端逐镜结构", detail: `${shots.length} 镜图片/字幕对应 ${readyAudio} 段独立 TTS。` }
+      : { level: "attention", label: "原客户端逐镜结构", detail: `${shots.length} 镜但只有 ${readyAudio} 段可用 TTS；需补齐后再打包。` });
+  }
+
+  if (timeline.length > 1) {
+    const discontinuities = timeline.slice(1).filter((item, index) => Math.abs(item.startSec - timeline[index].endSec) > 0.12);
+    checks.push(discontinuities.length
+      ? { level: "attention", label: "时间线连续性", detail: `${discontinuities.length} 处存在重叠或空隙；检查前一镜结束和后一镜开始时间。` }
+      : { level: "pass", label: "时间线连续性", detail: `${timeline.length} 个镜头首尾连续，无非预期空隙或重叠。` });
+  } else {
+    checks.push({ level: "info", label: "时间线连续性", detail: "配音生成后会显示可检查的镜头时间线。" });
+  }
+
+  checks.push(shots.length === 0 || readyImages === shots.length
+    ? { level: "pass", label: "分镜图片", detail: shots.length ? `${readyImages}/${shots.length} 张图片已可用，并按镜头编号对应。` : "等待生成分镜。" }
+    : { level: "attention", label: "分镜图片", detail: `${readyImages}/${shots.length} 张图片可用；缺图不能作为成片交付。` });
+
+  const hasCover = task.media.coverImages.some((image) => image.status === "ready") || (tutorialMode && readyImages > 0);
+  checks.push(hasCover
+    ? { level: "pass", label: "封面首帧", detail: task.media.coverImages.some((image) => image.status === "ready") ? "使用独立封面图；草稿只占极短首帧。" : "使用第 1 镜作封面；草稿只占极短首帧。" }
+    : { level: "advice", label: "封面首帧", detail: "教程要求从分镜中选择一张可表达内容的画面作为首帧封面。" });
+
+  if (!task.media.bgm?.path) {
+    checks.push({ level: "info", label: "背景音乐", detail: "BGM 是可选项；如添加，请上传拥有使用权的纯音乐，系统会独立铺轨并淡出。" });
+  } else {
+    checks.push(bgmVolume < narrationVolume
+      ? { level: "pass", label: "背景音乐", detail: `BGM 音量 ${bgmVolume} 低于旁白 ${narrationVolume}，不会按模板直接盖住旁白。` }
+      : { level: "attention", label: "背景音乐", detail: `BGM 音量 ${bgmVolume} 不低于旁白 ${narrationVolume}，教程要求 BGM 不得淹没文案音频。` });
+  }
+
+  const oversizedText = task.artifacts.rewrite?.subtitle?.find((line) => countChineseCharacters(line) > 9);
+  if (tutorialMode && oversizedText) {
+    checks.push({ level: "info", label: "封面副标题", detail: "封面副标题可长于 9 字；9 字限制只作用于最终显示字幕。" });
+  }
+  return checks;
+}
+
 export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, onCancel, onRunFromStep, onSaveArtifact, onRegenerateImage, onUploadImage, onUploadDynamicVideo, onBorrowImage, onRepairFailedImages, onRegenerateAudio, onUpdateImageCrop, onUpdateTimeline, onRepackDraft }: TaskWorkbenchProps) {
   const finishedCount = task.stepStatuses.filter((status) => status === "done" || status === "skipped").length;
   const failedImages = task.media.images.filter((image) => image.status === "failed");
+  const qualityChecks = sopQualityChecks(task);
   const updatePrecheck = (cleanText: string) => {
     const next = cloneTask(task);
     if (next.artifacts.precheck) next.artifacts.precheck.cleanText = cleanText;
@@ -119,6 +204,8 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
       {task.media.externalAudio ? <div className="pipeline-audio"><div><strong>外部配音已接入</strong><span>{task.media.externalAudio.fileName} · 字幕按分镜时间线写入</span></div><audio controls src={task.media.externalAudio.url} /><a href={task.media.externalAudio.url} download={task.media.externalAudio.fileName}>下载</a></div> : null}
 
       {task.media.timeline?.length ? <div className="artifact-editor timeline-editor"><div className="artifact-editor__head"><div><strong>可编辑字幕时间线</strong><span>{task.media.timeline.length} 段 · 修改后只需重新打包草稿</span></div><button type="button" className="secondary-button" disabled={busy} onClick={onRepackDraft}>保存并重新打包</button></div><div className="timeline-editor__list">{task.media.timeline.map((item, index) => <article key={`${item.shotId}-${index}`}><strong>#{item.shotId}</strong><input className="text-input" value={item.text} onChange={(event) => onUpdateTimeline(index, { text: event.target.value })} /><label>开始<input className="text-input" type="number" min="0" step="0.1" value={item.startSec} onChange={(event) => onUpdateTimeline(index, { startSec: Number(event.target.value) || 0 })} /></label><label>结束<input className="text-input" type="number" min="0.1" step="0.1" value={item.endSec} onChange={(event) => onUpdateTimeline(index, { endSec: Number(event.target.value) || item.endSec })} /></label></article>)}</div></div> : null}
+
+      {task.artifacts.storyboard || task.media.timeline?.length ? <section className="sop-quality-gate"><header><div><strong>教程成片检查</strong><span>依据《剪辑基础篇》与《剪辑进阶篇》；建议项不会阻止打包，客观错误会明确标红。</span></div><a href="https://aipoju.com/docx/63b1a44a-8060-4928-bf33-a9a4d9caf849/LKF4d2PoforF3ex2lZLcca2in7c?from=from_copylink" target="_blank" rel="noreferrer">查看参考 SOP ↗</a></header><div className="sop-quality-gate__checks">{qualityChecks.map((check) => <article key={`${check.label}-${check.detail}`} className={`sop-quality-gate__check sop-quality-gate__check--${check.level}`}><span>{check.level === "pass" ? "✓" : check.level === "attention" ? "!" : check.level === "advice" ? "△" : "i"}</span><div><strong>{check.label}</strong><p>{check.detail}</p></div></article>)}</div></section> : null}
 
       {task.draft?.ready ? <div className="draft-result"><div><strong>真实剪映草稿已生成</strong><span>{task.draft.projectName} · {task.draft.durationSec.toFixed(1)} 秒 · {task.draft.trackCount} 条轨道 · {task.draft.fileCount} 个文件</span><small>{task.draft.projectDir}</small></div><button type="button" className="secondary-button" disabled={busy} onClick={onRepackDraft}>只重新打包</button><a className="primary-button" href={task.draft.zipUrl}>下载剪映草稿 ZIP</a></div> : task.stepStatuses[5] === "done" ? <div className="draft-result draft-result--pending"><div><strong>音频和图片已经齐备</strong><span>可以直接重新执行 Step 7，不会重复调用 AI、出图或 TTS。</span></div><button type="button" className="primary-button" disabled={busy} onClick={onRepackDraft}>生成剪映草稿</button></div> : null}
     </section>
