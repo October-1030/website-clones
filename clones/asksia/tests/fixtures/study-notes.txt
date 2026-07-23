@@ -1,0 +1,9 @@
+Photosynthesis Study Notes
+
+Photosynthesis converts light energy into chemical energy stored in glucose. It occurs mainly in the chloroplasts of plant cells.
+
+Chlorophyll absorbs light energy. During the light-dependent reactions, water molecules split and oxygen is released.
+
+The Calvin cycle uses carbon dioxide and chemical energy to build glucose. Temperature, light intensity, and carbon dioxide concentration can limit the rate of photosynthesis.
+
+A useful review connection is that cellular respiration releases the chemical energy that photosynthesis stores in glucose.

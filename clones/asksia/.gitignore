@@ -1,0 +1,7 @@
+# Local runtime data and browser evidence
+.studypal-data/
+docs/evidence/
+
+# Environment files may contain secrets
+.env*
+!.env.example

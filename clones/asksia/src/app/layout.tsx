@@ -2,9 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AskSia Pro APP",
-  description: "Your AI Study Copilot.",
-  icons: { icon: "/seo/asksia.ico" },
+  title: "StudyPal AI",
+  description: "你的个人大学学习 AI 助手。",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

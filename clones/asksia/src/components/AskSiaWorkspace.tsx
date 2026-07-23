@@ -37,6 +37,8 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import StudyFileWorkspace from "@/components/StudyFileWorkspace";
+import { STUDY_SESSION_STORAGE_KEY } from "@/lib/study/types";
 
 type Mode = "default" | "homework";
 type AppTab = "everywhere" | "library";
@@ -48,7 +50,7 @@ type ToolKey = "homework" | "transcribe" | "file" | "video" | "quiz" | "study-gu
 const toolDetails: Record<ToolKey, { label: string; description: string }> = {
   homework: { label: "Homework solver", description: "Work through a problem step by step." },
   transcribe: { label: "Live transcribe", description: "Choose a microphone or browser tab." },
-  file: { label: "File summary", description: "Summarize PDF, Word, PowerPoint, audio, or video." },
+  file: { label: "File summary", description: "Extract and summarize PDF or TXT study materials." },
   video: { label: "Video Link summary", description: "Paste a video or podcast URL." },
   quiz: { label: "Quiz", description: "Choose material, questions, and difficulty." },
   "study-guide": { label: "Study guide", description: "Turn your material into a focused review guide." },
@@ -90,6 +92,7 @@ function Composer({
   status,
   onSend,
   onToast,
+  onSelectTool,
 }: {
   input: string;
   setInput: (value: string) => void;
@@ -98,6 +101,7 @@ function Composer({
   status: GenerationStatus;
   onSend: () => void;
   onToast: (message: string) => void;
+  onSelectTool: (tool: ToolKey) => void;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
   const [deepThink, setDeepThink] = useState(false);
@@ -120,8 +124,8 @@ function Composer({
       value={input}
       onChange={(event) => setInput(event.target.value)}
       onKeyDown={handleKeyDown}
-      placeholder={mode === "homework" ? "Ask Sia anything about your homework" : "Ask about your lecture, homework, or readings..."}
-      aria-label={mode === "homework" ? "Ask Sia anything about your homework" : "Ask about your lecture, homework, or readings..."}
+      placeholder={mode === "homework" ? "Ask StudyPal anything about your homework" : "Ask about your lecture, homework, or readings..."}
+      aria-label={mode === "homework" ? "Ask StudyPal anything about your homework" : "Ask about your lecture, homework, or readings..."}
       rows={2}
       disabled={busy}
     />
@@ -130,7 +134,7 @@ function Composer({
         <button type="button" className="composer-tool-button" title="Tools" onClick={() => setToolsOpen(!toolsOpen)}><span className="tool-sliders">☷</span><span>Tools</span><ChevronDown size={13} /></button>
         <button type="button" className={`composer-tool-button${deepThink ? " tool-selected" : ""}`} title="Deep think" onClick={() => setDeepThink(!deepThink)}><Zap size={14} /><span>Deep think</span></button>
         {mode === "homework" && <><span className="composer-divider" /><span className="mode-chip"><BookOpenCheck size={14} />Homework solver</span><button type="button" className="clear-mode" aria-label="Clear input mode" onClick={() => setMode("default")}><X size={14} /></button></>}
-        {toolsOpen && <div className="tools-popover"><button type="button" onClick={() => onToast("File summary is ready for local demo")}>File summary</button><button type="button" onClick={() => onToast("Live transcribe is a local preview")}>Live transcribe</button><button type="button" onClick={() => onToast("Video Link summary is a local preview")}>Video Link summary</button></div>}
+        {toolsOpen && <div className="tools-popover"><button type="button" onClick={() => { onSelectTool("file"); setToolsOpen(false); }}>File summary</button><button type="button" onClick={() => onToast("Live transcribe 尚未开放")}>Live transcribe</button><button type="button" onClick={() => onToast("Video Link summary 尚未开放")}>Video Link summary</button></div>}
       </div>
       <div className="composer-actions">
         <button type="button" className="composer-icon-button" aria-label="Upload image" onClick={() => onToast("Image upload is disabled in this local clone")}><ImageIcon size={16} /></button>
@@ -163,12 +167,12 @@ function HomePanel({ tab, setTab, onToast, onSelectTool }: { tab: AppTab; setTab
   return <>
     <ToolShortcuts onSelectTool={onSelectTool} />
     <div className="home-tabs" role="tablist" aria-label="Home content">
-      <button type="button" role="tab" aria-selected={tab === "everywhere"} className={tab === "everywhere" ? "home-tab-active" : ""} onClick={() => setTab("everywhere")}>Get Sia everywhere</button>
+      <button type="button" role="tab" aria-selected={tab === "everywhere"} className={tab === "everywhere" ? "home-tab-active" : ""} onClick={() => setTab("everywhere")}>Get StudyPal everywhere</button>
       <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "home-tab-active" : ""} onClick={() => setTab("library")}>Library</button>
     </div>
     {tab === "everywhere" ? <div className="everywhere-panel" role="tabpanel">
-      <div className="everywhere-copy"><span className="everywhere-kicker">AskSia Extension</span><h2>The Extension that keeps you in flow</h2><p>Summarize articles, get instant answers, and stay in flow — right in your browser.</p></div>
-      <div className="extension-preview"><div className="preview-sidebar"><span className="preview-brand">A</span><span /><span /><span /><span /></div><div className="preview-window"><div className="preview-bar"><i /><i /><i /></div><div className="preview-lines"><b>AskSia</b><span>Summarize this page</span><span>Key ideas and useful context</span></div></div></div>
+      <div className="everywhere-copy"><span className="everywhere-kicker">StudyPal Extension</span><h2>The Extension that keeps you in flow</h2><p>Summarize articles, get instant answers, and stay in flow — right in your browser.</p></div>
+      <div className="extension-preview"><div className="preview-sidebar"><span className="preview-brand">S</span><span /><span /><span /><span /></div><div className="preview-window"><div className="preview-bar"><i /><i /><i /></div><div className="preview-lines"><b>StudyPal AI</b><span>Summarize this page</span><span>Key ideas and useful context</span></div></div></div>
       <div className="carousel-dots"><i /><i /><i className="dot-active" /></div>
     </div> : <div className="library-panel" role="tabpanel"><div className="library-panel-heading"><div><span className="everywhere-kicker">Your library</span><h2>Everything you are learning</h2></div><div className="library-actions"><select aria-label="School filter" value={selectedSchool} onChange={(event) => setSelectedSchool(event.target.value)}>{schools.map((school) => <option key={school}>{school}</option>)}</select><button type="button" onClick={() => onToast("Library search is a local preview")}><Search size={15} /> Search</button></div></div><div className="library-grid"><article><GraduationCap size={18} /><b>Calculus II</b><span>{selectedSchool} · 28 documents</span></article><article><Folder size={18} /><b>Behavioral Economics</b><span>{selectedSchool} · 17 documents</span></article><article><FileText size={18} /><b>Lecture notes</b><span>12 recordings · 30 flashcards</span></article></div><button type="button" className="view-more" onClick={() => onToast("Course support is a local preview")}>View more</button></div>}
   </>;
@@ -257,6 +261,13 @@ export default function AskSiaWorkspace() {
     return () => window.clearTimeout(timeout);
   }, [toast]);
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      if (window.localStorage.getItem(STUDY_SESSION_STORAGE_KEY)) setActiveTool("file");
+    }, 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
   function beginGeneration(question: string, consumeUsage = true) {
     setSubmitted(question);
     setInput("");
@@ -284,10 +295,10 @@ export default function AskSiaWorkspace() {
       setToast("Homework solver mode selected");
     } else if (tool === "transcribe") {
       setTranscribeOpen(true);
-      setToast("Choose your audio source");
+      setToast("Live transcribe 尚未开放，本轮不请求音频权限");
     } else {
       setMode("default");
-      setToast(`${toolDetails[tool].label} is a local preview`);
+      setToast(tool === "file" ? "请选择 PDF 或 TXT 学习资料" : `${toolDetails[tool].label} 尚未开放`);
     }
   }
 
@@ -298,14 +309,14 @@ export default function AskSiaWorkspace() {
   function copyAnswer() {
     setCopied(true);
     setToast("Answer copied to clipboard");
-    if (typeof navigator !== "undefined" && navigator.clipboard) void navigator.clipboard.writeText("AskSia local answer");
+    if (typeof navigator !== "undefined" && navigator.clipboard) void navigator.clipboard.writeText("StudyPal AI local answer");
   }
 
   return (
     <main className="workspace-page">
       <aside className="workspace-rail">
-        <div className="rail-logo" aria-label="AskSia">A</div>
-        <nav className="rail-nav" aria-label="AskSia navigation">
+        <div className="rail-logo" aria-label="StudyPal AI">S</div>
+        <nav className="rail-nav" aria-label="StudyPal AI navigation">
           <RailButton label="Home" active={activeRail === "home"} onClick={() => { setActiveRail("home"); setActiveTool(null); setSubmitted(null); setStatus("idle"); }}><PanelLeft size={17} /></RailButton>
           <RailButton label="New chat" onClick={() => { setActiveTool(null); setSubmitted(null); setInput(""); setStatus("idle"); }}><Plus size={18} /></RailButton>
           <RailButton label="Search" active={activeRail === "search"} onClick={() => { setActiveRail("search"); setToast("Search is a local preview"); }}><Search size={17} /></RailButton>
@@ -336,16 +347,18 @@ export default function AskSiaWorkspace() {
                 </>
               )}
             </div>
-            <Composer input={input} setInput={setInput} mode="homework" setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} />
+            <Composer input={input} setInput={setInput} mode="homework" setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
           </div>
         ) : (
           <div className="home-stage">
             <div className="welcome-panel"><div className="welcome-orb"><Sparkles size={23} /></div><h1>Hi Elv, what are we studying today?</h1></div>
             {bannerVisible && <div className="usage-banner"><span>You have <strong>{usage}</strong> usage left. Upgrade to enjoy seamless study journey.</span><button type="button" className="upgrade-button" onClick={() => setToast("Upgrade is disabled in this local clone")}>Upgrade</button><button type="button" className="banner-close" aria-label="Close usage banner" onClick={() => setBannerVisible(false)}><X size={17} /></button></div>}
-            <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} />
-            {activeTool && activeTool !== "homework" && <ToolEmptyState tool={activeTool} onToast={setToast} />}
-            <HomePanel tab={tab} setTab={setTab} onToast={setToast} onSelectTool={selectTool} />
-            <div className="onboarding-card"><div className="onboarding-orb"><Sparkles size={20} /></div><div><strong>Get started with AskSia</strong><span>0/2</span><div className="progress-track"><i /></div></div></div>
+            <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
+            {activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : <>
+              {activeTool && activeTool !== "homework" && <ToolEmptyState tool={activeTool} onToast={setToast} />}
+              <HomePanel tab={tab} setTab={setTab} onToast={setToast} onSelectTool={selectTool} />
+              <div className="onboarding-card"><div className="onboarding-orb"><Sparkles size={20} /></div><div><strong>Get started with StudyPal AI</strong><span>0/2</span><div className="progress-track"><i /></div></div></div>
+            </>}
           </div>
         )}
       </section>
