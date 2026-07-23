@@ -263,7 +263,8 @@ export default function AskSiaWorkspace() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      if (window.localStorage.getItem(STUDY_SESSION_STORAGE_KEY)) setActiveTool("file");
+      const hasServerSession = new URLSearchParams(window.location.search).has('session');
+      if (hasServerSession || window.localStorage.getItem(STUDY_SESSION_STORAGE_KEY)) setActiveTool('file');
     }, 0);
     return () => window.clearTimeout(timeout);
   }, []);

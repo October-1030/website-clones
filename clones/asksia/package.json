@@ -1,6 +1,6 @@
 {
   "name": "studypal-ai",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "StudyPal AI local study workspace",
   "author": "StudyPal AI",
@@ -12,10 +12,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:local": "node scripts/start-local.mjs",
+    "local": "npm run build && npm run start:local",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/**/*.test.ts",
     "test:e2e:p1": "node e2e/p1-study-flow.cjs",
+    "test:e2e:p2": "node e2e/p2-study-flow.cjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

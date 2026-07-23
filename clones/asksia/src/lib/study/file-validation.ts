@@ -12,9 +12,7 @@ const allowedMimeTypes: Record<StudyFileKind, Set<string>> = {
 export function validateStudyFile(file: StudyFileMetadata | null | undefined): StudyFileValidation {
   if (!file) return { valid: false, code: "missing", error: "请选择一份 PDF 或 TXT 学习资料。" };
   if (file.size <= 0) return { valid: false, code: "empty", error: "文件为空，请重新选择。" };
-  if (file.size > MAX_STUDY_FILE_BYTES) {
-    return { valid: false, code: "too_large", error: "文件不能超过 10 MB。" };
-  }
+  if (file.size > MAX_STUDY_FILE_BYTES) return { valid: false, code: "too_large", error: "文件不能超过 10 MB。" };
 
   const extension = file.name.toLowerCase().split(".").pop();
   const kind: StudyFileKind | null = extension === "pdf" ? "pdf" : extension === "txt" ? "txt" : null;
@@ -24,7 +22,6 @@ export function validateStudyFile(file: StudyFileMetadata | null | undefined): S
   if (normalizedType && !allowedMimeTypes[kind].has(normalizedType)) {
     return { valid: false, code: "type_mismatch", error: "文件扩展名与内容类型不匹配，请检查后重试。" };
   }
-
   return { valid: true, kind };
 }
 

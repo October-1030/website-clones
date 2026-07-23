@@ -20,7 +20,6 @@ function capPages(pages: StudySourcePage[]): { pages: StudySourcePage[]; truncat
   let remaining = MAX_EXTRACTED_CHARS;
   let truncated = false;
   const capped: StudySourcePage[] = [];
-
   for (const page of pages) {
     if (remaining <= 0) {
       truncated = true;
@@ -31,14 +30,12 @@ function capPages(pages: StudySourcePage[]): { pages: StudySourcePage[]; truncat
     if (text.trim()) capped.push({ ...page, text });
     remaining -= text.length;
   }
-
   return { pages: capped, truncated };
 }
 
 export async function extractStudyDocument(bytes: Uint8Array, kind: StudyFileKind): Promise<ExtractedStudyDocument> {
   let pages: StudySourcePage[];
   let pageCount = 1;
-
   if (kind === "txt") {
     const text = cleanText(assertPlainText(bytes));
     pages = [{ page: null, label: "TXT 片段", text }];
@@ -49,11 +46,7 @@ export async function extractStudyDocument(bytes: Uint8Array, kind: StudyFileKin
       const pdf = await getDocumentProxy(bytes);
       const extracted = await extractText(pdf);
       pageCount = extracted.totalPages;
-      pages = extracted.text.map((text, index) => ({
-        page: index + 1,
-        label: `第 ${index + 1} 页`,
-        text: cleanText(text),
-      }));
+      pages = extracted.text.map((text, index) => ({ page: index + 1, label: `第 ${index + 1} 页`, text: cleanText(text) }));
     } catch (error) {
       if (error instanceof StudyFileError) throw error;
       throw new StudyFileError("PDF 解析失败。文件可能已损坏、加密或不包含可提取文字。", "pdf_parse_failed", 422);
@@ -64,6 +57,5 @@ export async function extractStudyDocument(bytes: Uint8Array, kind: StudyFileKin
   if (!capped.pages.some((page) => page.text.trim().length > 0)) {
     throw new StudyFileError("没有提取到可总结的文字。扫描版 PDF 暂不支持 OCR。", "empty_document", 422);
   }
-
   return { pages: capped.pages, pageCount, truncated: capped.truncated };
 }

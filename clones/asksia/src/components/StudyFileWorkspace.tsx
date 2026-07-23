@@ -8,6 +8,7 @@ import { clearStudySession, loadStudySession, saveStudySession } from "@/lib/stu
 import type { StudyQuestionResult, StudySession } from "@/lib/study/types";
 
 type ProcessingPhase = "idle" | "validating" | "uploading" | "parsing" | "summarizing" | "done" | "error" | "cancelled";
+type RestoreSource = "local" | "server" | null;
 
 const phaseCopy: Record<ProcessingPhase, string> = {
   idle: "等待选择资料",
@@ -31,6 +32,13 @@ function responseError(payload: unknown, fallback: string): string {
   return fallback;
 }
 
+function setSessionInUrl(id: string | null) {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set("session", id);
+  else url.searchParams.delete("session");
+  window.history.replaceState(null, "", url);
+}
+
 export default function StudyFileWorkspace({ onToast }: { onToast: (message: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -39,21 +47,45 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<StudySession | null>(null);
-  const [restored, setRestored] = useState(false);
+  const [restoreSource, setRestoreSource] = useState<RestoreSource>(null);
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [question, setQuestion] = useState("");
   const [asking, setAsking] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
   useEffect(() => {
+    let active = true;
     const stored = loadStudySession(window.localStorage);
     if (stored) {
       setSession(stored);
       setPhase("done");
       setProgress(100);
-      setRestored(true);
+      setRestoreSource("local");
     }
+
+    const urlId = new URLSearchParams(window.location.search).get("session");
+    const sessionId = urlId || stored?.id;
+    if (sessionId) {
+      void fetch(`/api/study/session/${encodeURIComponent(sessionId)}`)
+        .then(async (response) => {
+          if (!response.ok) return null;
+          const payload = await response.json() as { session?: StudySession };
+          return payload.session ?? null;
+        })
+        .then((serverSession) => {
+          if (!active || !serverSession) return;
+          setSession(serverSession);
+          setPhase("done");
+          setProgress(100);
+          setRestoreSource("server");
+          saveStudySession(window.localStorage, serverSession);
+          setSessionInUrl(serverSession.id);
+        })
+        .catch(() => undefined);
+    }
+
     return () => {
+      active = false;
       abortRef.current?.abort();
       if (progressTimerRef.current !== null) window.clearInterval(progressTimerRef.current);
     };
@@ -61,10 +93,11 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
 
   function persist(next: StudySession) {
     setSession(next);
+    setSessionInUrl(next.id);
     try {
       saveStudySession(window.localStorage, next);
     } catch {
-      onToast("资料已处理，但浏览器本地空间不足，无法保存恢复记录");
+      onToast("资料已由本机服务保存，但浏览器本地空间不足。仍可通过当前网址恢复记录。");
     }
   }
 
@@ -78,7 +111,7 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
   async function processFile(file: File) {
     abortRef.current?.abort();
     clearTimer();
-    setRestored(false);
+    setRestoreSource(null);
     setLastFile(file);
     setError(null);
     setSession(null);
@@ -116,12 +149,12 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
       setProgress(100);
       setPhase("done");
       persist(payload.session);
-      onToast("资料已提取、总结并保存在本机");
+      onToast("资料已提取、总结并保存在本机服务");
     } catch (caught) {
       clearTimer();
       if (caught instanceof DOMException && caught.name === "AbortError") {
         setPhase("cancelled");
-        setError("已取消本次处理。你可以重新选择文件。 ");
+        setError("已取消本次处理。你可以重新选择文件。");
       } else {
         setPhase("error");
         setError(caught instanceof Error ? caught.message : "资料处理失败，请重试。");
@@ -149,17 +182,27 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
     abortRef.current?.abort();
   }
 
-  function resetSession() {
+  async function resetSession() {
+    const sessionId = session?.id;
     abortRef.current?.abort();
     clearTimer();
     clearStudySession(window.localStorage);
+    setSessionInUrl(null);
     setSession(null);
     setLastFile(null);
     setQuestion("");
     setError(null);
     setProgress(0);
     setPhase("idle");
-    setRestored(false);
+    setRestoreSource(null);
+    if (sessionId) {
+      try {
+        await fetch(`/api/study/session/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+      } catch {
+        onToast("浏览器记录已清除，但本机服务记录暂时无法删除。");
+        return;
+      }
+    }
     onToast("本机学习记录已清除");
   }
 
@@ -169,6 +212,7 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
     if (!session || !cleanQuestion || asking) return;
     setAsking(true);
     setError(null);
+    const originalSession = session;
     const now = new Date().toISOString();
     const userMessage = { id: crypto.randomUUID(), role: "user" as const, content: cleanQuestion, createdAt: now };
     const pendingSession = { ...session, messages: [...session.messages, userMessage], updatedAt: now };
@@ -179,19 +223,25 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
       const response = await fetch("/api/study/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: cleanQuestion, fileName: session.file.name, pages: session.pages }),
+        body: JSON.stringify({ question: cleanQuestion, sessionId: session.id }),
       });
-      const payload = await response.json() as StudyQuestionResult & { error?: string };
+      const payload = await response.json() as StudyQuestionResult & { session?: StudySession; error?: string };
       if (!response.ok) throw new Error(responseError(payload, "追问失败，请重试。"));
-      const assistantMessage = {
-        id: crypto.randomUUID(),
-        role: "assistant" as const,
-        content: payload.answer,
-        citations: payload.citations,
-        createdAt: new Date().toISOString(),
-      };
-      persist({ ...pendingSession, messages: [...pendingSession.messages, assistantMessage], updatedAt: assistantMessage.createdAt });
+      if (payload.session) {
+        persist(payload.session);
+      } else {
+        const assistantMessage = {
+          id: crypto.randomUUID(),
+          role: "assistant" as const,
+          content: payload.answer,
+          citations: payload.citations,
+          createdAt: new Date().toISOString(),
+        };
+        persist({ ...pendingSession, messages: [...pendingSession.messages, assistantMessage], updatedAt: assistantMessage.createdAt });
+      }
     } catch (caught) {
+      persist(originalSession);
+      setQuestion(cleanQuestion);
       setError(caught instanceof Error ? caught.message : "追问失败，请重试。");
     } finally {
       setAsking(false);
@@ -199,11 +249,12 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
   }
 
   const busy = ["validating", "uploading", "parsing", "summarizing"].includes(phase);
+  const providerBadge = session?.provider.mode === "live" ? "真实 AI 模式" : session ? "演示总结引擎" : "自动选择可用引擎";
 
   return <section className="study-file-workspace" aria-label="资料学习工作区">
     <header className="study-file-header">
-      <div><span className="everywhere-kicker">P1 核心学习闭环</span><h2>用你的资料开始学习</h2><p>支持 PDF 与 UTF-8 TXT，单个文件不超过 10 MB。文件只发送到本机服务处理，不上传第三方。</p></div>
-      <span className="demo-mode-badge">演示总结引擎</span>
+      <div><span className="everywhere-kicker">P2 核心学习闭环</span><h2>用你的资料开始学习</h2><p>支持 PDF 与 UTF-8 TXT，单个文件不超过 10 MB。资料保存在这台电脑的 StudyPal AI 服务中。</p></div>
+      <span className="demo-mode-badge">{providerBadge}</span>
     </header>
 
     {!session && <>
@@ -234,10 +285,10 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
       <div className="study-session-meta">
         <div className="study-file-icon"><FileText size={20} /></div>
         <div><strong>{session.file.name}</strong><span>{session.file.kind.toUpperCase()} · {formatBytes(session.file.size)} · {session.file.pageCount} {session.file.kind === "pdf" ? "页" : "份文本"}</span></div>
-        <div className="study-session-actions">{restored && <span className="restored-badge"><Check size={13} />已从本机恢复</span>}<button type="button" onClick={() => inputRef.current?.click()}><RefreshCw size={14} />换一份</button><button type="button" onClick={resetSession}><Trash2 size={14} />清除</button></div>
+        <div className="study-session-actions">{restoreSource && <span className="restored-badge"><Check size={13} />{restoreSource === "server" ? "已从本机服务恢复" : "已从浏览器恢复"}</span>}<button type="button" onClick={() => inputRef.current?.click()}><RefreshCw size={14} />换一份</button><button type="button" onClick={() => void resetSession()}><Trash2 size={14} />清除</button></div>
         <input ref={inputRef} type="file" accept=".pdf,.txt,application/pdf,text/plain" onChange={selectFile} />
       </div>
-      <div className="study-result-note"><Check size={15} /><span><strong>真实文件解析结果</strong> · {session.provider.label}。总结与回答尚未调用外部 AI。</span></div>
+      <div className="study-result-note"><Check size={15} /><span><strong>真实文件解析结果</strong> · {session.provider.label}。{session.provider.mode === "live" ? "总结与回答由服务端真实模型生成。" : "当前未调用外部 AI。"}</span></div>
       {session.truncated && <div className="study-warning"><AlertCircle size={15} />资料文字较长，本次仅使用前 350,000 个字符。</div>}
 
       <div className="study-summary-grid">
@@ -251,7 +302,7 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
         {session.messages.length > 0 && <div className="study-message-list">{session.messages.map((message) => <div className={`study-message study-message-${message.role}`} key={message.id}><span>{message.role === "user" ? "你" : "StudyPal"}</span><p>{message.content}</p>{message.citations && message.citations.length > 0 && <div className="study-citations">{message.citations.map((citation, index) => <details key={`${message.id}-${index}`}><summary>来源：{citation.label}</summary><blockquote>{citation.excerpt}</blockquote></details>)}</div>}</div>)}</div>}
         <form className="study-question-form" onSubmit={askQuestion}>
           <textarea value={question} onChange={(event) => setQuestion(event.target.value)} maxLength={500} rows={2} placeholder="例如：资料如何解释这个概念？" aria-label="基于资料追问" disabled={asking} />
-          <button type="submit" disabled={!question.trim() || asking}>{asking ? <LoaderCircle size={15} className="spin" /> : <MessageSquareText size={15} />}{asking ? "查找资料中…" : "发送追问"}</button>
+          <button type="submit" disabled={!question.trim() || asking}>{asking ? <LoaderCircle size={15} className="spin" /> : <MessageSquareText size={15} />}{asking ? "正在查找资料…" : "发送追问"}</button>
         </form>
         {error && <div className="study-error compact" role="alert"><AlertCircle size={16} /><span>{error}</span></div>}
       </div>
