@@ -1,8 +1,12 @@
 import { cpSync, existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { loadEnvFile } from "node:process";
 
 const root = process.cwd();
+const localEnvPath = path.join(root, ".env.local");
+if (existsSync(localEnvPath)) loadEnvFile(localEnvPath);
+
 const candidates = [
   path.join(root, ".next", "standalone", "server.js"),
   path.join(root, ".next", "standalone", "clones", "asksia", "server.js"),

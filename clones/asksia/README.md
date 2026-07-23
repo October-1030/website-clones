@@ -17,16 +17,19 @@ npm run local
 
 ## AI 模式
 
-默认配置是 `demo`，不调用外部模型。演示模式仍会执行真实文件解析、资料检索、引用和服务端会话保存，但总结和回答由本地确定性 provider 生成。
+默认配置是 `demo`，不调用外部模型。演示模式仍会执行真实文件解析、资料检索、引用和服务端会话保存，但总结和回答由本地确定性 provider 生成。当前推荐的真实模型是中国区 MiniMax M3。
 
-要启用真实 AI：
+启用 MiniMax M3：
 
 1. 复制 `.env.example` 为 `.env.local`；
-2. 设置 `STUDYPAL_AI_PROVIDER=openai`；
-3. 在服务端填写 `OPENAI_API_KEY` 与 `OPENAI_MODEL`；
-4. 重新构建并启动。
+2. 设置 `STUDYPAL_AI_PROVIDER=minimax`；
+3. 在服务端填写 `MINIMAX_API_KEY`；
+4. 保持 `MINIMAX_MODEL=MiniMax-M3` 与 `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`；
+5. 重新构建并启动。
 
-密钥只从服务端环境读取，不会进入浏览器包、学习记录、日志、测试 fixture 或 Git。项目使用 OpenAI Responses API 的结构化输出，并设置 `store: false`。如果真实模式配置不完整或请求失败，系统会明确报错，不会伪装成真实 AI 成功。
+如果 `.env.local` 只有 `MINIMAX_API_KEY` 与 `MINIMAX_BASE_URL`，系统也会自动选择 MiniMax，并默认使用 `MiniMax-M3`。仍可通过 `STUDYPAL_AI_PROVIDER=openai` 及 `OPENAI_*` 变量使用 OpenAI Responses API。
+
+密钥只从服务端环境读取，不会进入浏览器包、学习记录、日志、测试 fixture 或 Git。MiniMax 与 OpenAI 都通过 Responses API 调用并设置 `store: false`；OpenAI 使用 JSON Schema，MiniMax 使用官方 text 模式、严格 JSON 合约提示和服务端结构校验。如果真实模式配置不完整或请求失败，系统会明确报错，不会伪装成真实 AI 成功。
 
 ## 本机学习记录
 

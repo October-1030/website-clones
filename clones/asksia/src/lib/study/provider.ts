@@ -191,6 +191,9 @@ interface OpenAIProviderOptions {
   model: string;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
+  providerIdPrefix?: string;
+  providerLabel?: string;
+  structuredOutputMode?: "json_schema" | "prompt_json";
 }
 
 interface OpenAIResponsePayload {
@@ -208,12 +211,56 @@ function responseText(payload: OpenAIResponsePayload): string {
   throw new StudyProviderError(refusal || "真实 AI 没有返回可用内容。", "live_empty_response");
 }
 
+function parseStructuredText(text: string): unknown {
+  const trimmed = text.trim();
+  const candidates = [trimmed];
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1];
+  if (fenced) candidates.push(fenced);
+  const firstObject = trimmed.indexOf("{");
+  const lastObject = trimmed.lastIndexOf("}");
+  if (firstObject >= 0 && lastObject > firstObject) candidates.push(trimmed.slice(firstObject, lastObject + 1));
+  for (const candidate of [...new Set(candidates)]) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try the next bounded representation.
+    }
+  }
+  throw new StudyProviderError("真实 AI 返回的结构无法解析。", "live_invalid_response");
+}
+
+function isStringArray(value: unknown, min: number, max: number): value is string[] {
+  return Array.isArray(value)
+    && value.length >= min
+    && value.length <= max
+    && value.every((item) => typeof item === "string" && item.trim().length > 0);
+}
+
+function isStudySummary(value: unknown): value is StudySummary {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<StudySummary>;
+  return typeof candidate.overview === "string"
+    && candidate.overview.trim().length > 0
+    && isStringArray(candidate.keyConcepts, 3, 7)
+    && isStringArray(candidate.reviewQuestions, 3, 6);
+}
+
+function isGroundedPayload(value: unknown): value is { answer: string; sourceIds: string[] } {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { answer?: unknown; sourceIds?: unknown };
+  return typeof candidate.answer === "string"
+    && candidate.answer.trim().length > 0
+    && Array.isArray(candidate.sourceIds)
+    && candidate.sourceIds.length <= 12
+    && candidate.sourceIds.every((item) => typeof item === "string");
+}
+
 function validateBaseUrl(value: string): string {
   let url: URL;
   try {
     url = new URL(value.endsWith("/") ? value : `${value}/`);
   } catch {
-    throw new StudyProviderError("OPENAI_BASE_URL 不是有效网址。", "live_invalid_base_url", 503);
+    throw new StudyProviderError("真实 AI 的 BASE_URL 不是有效网址。", "live_invalid_base_url", 503);
   }
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
   if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
@@ -230,14 +277,16 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
   private readonly model: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly structuredOutputMode: "json_schema" | "prompt_json";
 
   constructor(options: OpenAIProviderOptions) {
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.baseUrl = validateBaseUrl(options.baseUrl || "https://api.openai.com/v1");
     this.fetchImpl = options.fetchImpl ?? fetch;
-    this.id = `openai-responses:${this.model}`;
-    this.label = `真实 AI · ${this.model}`;
+    this.structuredOutputMode = options.structuredOutputMode || "json_schema";
+    this.id = `${options.providerIdPrefix || "openai-responses"}:${this.model}`;
+    this.label = `${options.providerLabel || "真实 AI"} · ${this.model}`;
   }
 
   private async structuredRequest<T>(name: string, schema: Record<string, unknown>, instructions: string, input: string): Promise<T> {
@@ -245,17 +294,24 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
     const timeout = setTimeout(() => controller.abort(), 60_000);
     try {
       const endpoint = new URL("responses", this.baseUrl);
+      const promptJson = this.structuredOutputMode === "prompt_json";
+      const requestBody: Record<string, unknown> = {
+        model: this.model,
+        instructions: promptJson
+          ? `${instructions}\n\nReturn only valid JSON with no Markdown or commentary. The JSON must match this schema exactly:\n${JSON.stringify(schema)}`
+          : instructions,
+        input,
+        store: false,
+        max_output_tokens: 2_400,
+        text: promptJson
+          ? { format: { type: "text" } }
+          : { format: { type: "json_schema", name, strict: true, schema } },
+      };
+      if (promptJson) requestBody.reasoning = { effort: "none" };
       const response = await this.fetchImpl(endpoint, {
         method: "POST",
         headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          instructions,
-          input,
-          store: false,
-          max_output_tokens: 2_400,
-          text: { format: { type: "json_schema", name, strict: true, schema } },
-        }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
       const payload = await response.json().catch(() => ({})) as OpenAIResponsePayload;
@@ -263,12 +319,7 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
         const detail = payload.error?.message ? `：${clip(payload.error.message, 180)}` : "";
         throw new StudyProviderError(`真实 AI 请求失败（HTTP ${response.status}）${detail}`, "live_request_failed", 502);
       }
-      const text = responseText(payload);
-      try {
-        return JSON.parse(text) as T;
-      } catch {
-        throw new StudyProviderError("真实 AI 返回的结构无法解析。", "live_invalid_response");
-      }
+      return parseStructuredText(responseText(payload)) as T;
     } catch (error) {
       if (error instanceof StudyProviderError) throw error;
       if (error instanceof Error && error.name === "AbortError") throw new StudyProviderError("真实 AI 请求超时，请重试。", "live_timeout", 504);
@@ -280,7 +331,7 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
 
   async summarize(document: StudyDocumentInput): Promise<StudySummary> {
     const sources = selectSummaryChunks(document.pages).map((chunk) => `[${chunk.id}] [${chunk.label}]\n${chunk.text}`).join("\n\n");
-    return this.structuredRequest<StudySummary>(
+    const summary = await this.structuredRequest<unknown>(
       "study_summary",
       {
         type: "object",
@@ -295,6 +346,10 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
       "You are StudyPal AI. Summarize only the supplied study material. Preserve the document's primary language. Do not add outside facts. Return a concise overview, key concepts, and useful review questions.",
       `File: ${document.fileName}\n\nStudy material:\n${sources}`,
     );
+    if (!isStudySummary(summary)) {
+      throw new StudyProviderError("真实 AI 返回的总结结构不完整。", "live_invalid_response");
+    }
+    return summary;
   }
 
   async answer(document: StudyDocumentInput, question: string): Promise<StudyQuestionResult> {
@@ -305,7 +360,7 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
     }
     const sourceById = new Map(selected.map((chunk) => [chunk.id, chunk]));
     const sources = selected.map((chunk) => `[${chunk.id}] [${chunk.label}]\n${chunk.text}`).join("\n\n");
-    const result = await this.structuredRequest<{ answer: string; sourceIds: string[] }>(
+    const result = await this.structuredRequest<unknown>(
       "grounded_study_answer",
       {
         type: "object",
@@ -316,6 +371,9 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
       "Answer only from the supplied source fragments. If the fragments do not support an answer, say so and return an empty sourceIds array. Never invent source IDs, page numbers, or facts. Use the question's language.",
       `Question: ${question}\n\nSource fragments:\n${sources}`,
     );
+    if (!isGroundedPayload(result)) {
+      throw new StudyProviderError("真实 AI 返回的回答结构不完整。", "live_invalid_response");
+    }
     const cited = [...new Set(result.sourceIds)].map((id) => sourceById.get(id)).filter((chunk): chunk is StudyChunk => Boolean(chunk));
     return {
       answer: result.answer,
@@ -329,15 +387,35 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
 export const demoStudyProvider: StudyProvider = new DeterministicStudyProvider();
 
 export function getStudyProvider(environment: NodeJS.ProcessEnv = process.env): StudyProvider {
-  const requested = (environment.STUDYPAL_AI_PROVIDER || "demo").trim().toLowerCase();
+  const configuredProvider = environment.STUDYPAL_AI_PROVIDER?.trim().toLowerCase();
+  const requested = configuredProvider || (environment.MINIMAX_API_KEY?.trim() ? "minimax" : "demo");
   if (requested === "demo") return demoStudyProvider;
-  if (requested !== "openai") throw new StudyProviderError("STUDYPAL_AI_PROVIDER 仅支持 demo 或 openai。", "live_unknown_provider", 503);
-  const apiKey = environment.OPENAI_API_KEY?.trim();
-  const model = environment.OPENAI_MODEL?.trim();
-  if (!apiKey || !model) {
-    throw new StudyProviderError("真实 AI 模式尚未完成配置：需要在服务端设置 OPENAI_API_KEY 和 OPENAI_MODEL。", "live_not_configured", 503);
+
+  if (requested === "minimax") {
+    const apiKey = environment.MINIMAX_API_KEY?.trim();
+    if (!apiKey) {
+      throw new StudyProviderError("MiniMax 模式尚未完成配置：需要在服务端设置 MINIMAX_API_KEY。", "live_not_configured", 503);
+    }
+    return new OpenAIResponsesStudyProvider({
+      apiKey,
+      model: environment.MINIMAX_MODEL?.trim() || "MiniMax-M3",
+      baseUrl: environment.MINIMAX_BASE_URL?.trim() || "https://api.minimaxi.com/v1",
+      providerIdPrefix: "minimax-responses",
+      providerLabel: "MiniMax",
+      structuredOutputMode: "prompt_json",
+    });
   }
-  return new OpenAIResponsesStudyProvider({ apiKey, model, baseUrl: environment.OPENAI_BASE_URL?.trim() || undefined });
+
+  if (requested === "openai") {
+    const apiKey = environment.OPENAI_API_KEY?.trim();
+    const model = environment.OPENAI_MODEL?.trim();
+    if (!apiKey || !model) {
+      throw new StudyProviderError("OpenAI 模式尚未完成配置：需要在服务端设置 OPENAI_API_KEY 和 OPENAI_MODEL。", "live_not_configured", 503);
+    }
+    return new OpenAIResponsesStudyProvider({ apiKey, model, baseUrl: environment.OPENAI_BASE_URL?.trim() || undefined });
+  }
+
+  throw new StudyProviderError("STUDYPAL_AI_PROVIDER 仅支持 demo、minimax 或 openai。", "live_unknown_provider", 503);
 }
 
 // Kept for deterministic fixtures. Request handlers resolve the configured provider per request.

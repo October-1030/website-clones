@@ -62,6 +62,28 @@ describe("OpenAI Responses provider boundary", () => {
     assert.equal(new Headers(requests[0]?.init?.headers).get("Authorization"), "Bearer test-secret");
   });
 
+  it("uses MiniMax text mode with a JSON contract and accepts fenced JSON", async () => {
+    const requests: Array<{ init?: RequestInit }> = [];
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      requests.push({ init });
+      return new Response(JSON.stringify({ output_text: "```json\n{\"overview\":\"M3 overview\",\"keyConcepts\":[\"A\",\"B\",\"C\"],\"reviewQuestions\":[\"Q1?\",\"Q2?\",\"Q3?\"]}\n```" }), { status: 200, headers: { "Content-Type": "application/json" } });
+    };
+    const provider = new OpenAIResponsesStudyProvider({
+      apiKey: "test-secret",
+      model: "MiniMax-M3",
+      baseUrl: "https://api.minimaxi.com/v1",
+      fetchImpl,
+      providerIdPrefix: "minimax-responses",
+      providerLabel: "MiniMax",
+      structuredOutputMode: "prompt_json",
+    });
+    assert.equal((await provider.summarize({ fileName: "notes.txt", pages: [{ page: null, label: "TXT 片段", text: "Grounded material." }] })).overview, "M3 overview");
+    const body = JSON.parse(String(requests[0]?.init?.body)) as { instructions: string; reasoning: { effort: string }; text: { format: { type: string } } };
+    assert.equal(body.text.format.type, "text");
+    assert.equal(body.reasoning.effort, "none");
+    assert.match(body.instructions, /Return only valid JSON/);
+  });
+
   it("maps only retrieved source IDs into citations", async () => {
     const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({ output: [{ content: [{ type: "output_text", text: JSON.stringify({ answer: "Chlorophyll absorbs light.", sourceIds: ["S1", "invented-source"] }) }] }] }), { status: 200, headers: { "Content-Type": "application/json" } });
     const provider = new OpenAIResponsesStudyProvider({ apiKey: "test-secret", model: "test-model", baseUrl: "https://example.test/v1", fetchImpl });
@@ -70,9 +92,23 @@ describe("OpenAI Responses provider boundary", () => {
     assert.equal(result.citations[0]?.label, "第 2 页");
   });
 
-  it("requires explicit server configuration for live mode", () => {
+  it("selects demo, MiniMax M3, and OpenAI without leaking configuration", () => {
     assert.equal(getStudyProvider({ ...process.env, STUDYPAL_AI_PROVIDER: "demo" }).mode, "demo");
+    const minimax = getStudyProvider({ ...process.env, MINIMAX_API_KEY: "minimax-test-secret" });
+    assert.equal(minimax.mode, "live");
+    assert.equal(minimax.id, "minimax-responses:MiniMax-M3");
+    assert.equal(minimax.label, "MiniMax · MiniMax-M3");
+    const explicitMiniMax = getStudyProvider({
+      ...process.env,
+      STUDYPAL_AI_PROVIDER: "minimax",
+      MINIMAX_API_KEY: "minimax-test-secret",
+      MINIMAX_MODEL: "MiniMax-M3",
+      MINIMAX_BASE_URL: "https://api.minimaxi.com/v1",
+    });
+    assert.equal(explicitMiniMax.id, "minimax-responses:MiniMax-M3");
+    assert.throws(() => getStudyProvider({ ...process.env, STUDYPAL_AI_PROVIDER: "minimax", MINIMAX_API_KEY: "" }), /MINIMAX_API_KEY/);
     assert.throws(() => getStudyProvider({ ...process.env, STUDYPAL_AI_PROVIDER: "openai", OPENAI_API_KEY: "", OPENAI_MODEL: "" }), /需要在服务端设置/);
+    assert.throws(() => getStudyProvider({ ...process.env, STUDYPAL_AI_PROVIDER: "unknown" }), /demo、minimax 或 openai/);
   });
 });
 

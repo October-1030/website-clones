@@ -17,13 +17,16 @@ P2 不扩建视频、转录、账户或付款功能，只加强 P1 的核心闭�
 
 | 变量 | 说明 |
 | --- | --- |
-| `STUDYPAL_AI_PROVIDER` | `demo` 或 `openai`，默认 `demo` |
-| `OPENAI_API_KEY` | 仅服务端读取；真实模式必需 |
-| `OPENAI_MODEL` | 真实模式使用的模型名 |
-| `OPENAI_BASE_URL` | 默认 `https://api.openai.com/v1`；仅 localhost 允许 HTTP |
+| `STUDYPAL_AI_PROVIDER` | `demo`、`minimax` 或 `openai`，默认 `demo`；有 MiniMax key 时可自动识别 |
+| `MINIMAX_API_KEY` | 仅服务端读取；MiniMax 模式必需 |
+| `MINIMAX_MODEL` | 默认 `MiniMax-M3` |
+| `MINIMAX_BASE_URL` | 中国区默认 `https://api.minimaxi.com/v1` |
+| `OPENAI_API_KEY` | 仅服务端读取；OpenAI 模式必需 |
+| `OPENAI_MODEL` | OpenAI 模式使用的模型名 |
+| `OPENAI_BASE_URL` | OpenAI 默认 `https://api.openai.com/v1`；仅 localhost 允许 HTTP |
 | `STUDYPAL_DATA_DIR` | 服务端会话目录，默认 `.studypal-data` |
 
-真实 provider 使用 OpenAI Responses API 的 JSON Schema 结构化输出，并显式设置 `store: false`。没有密钥时系统保持演示模式；如果用户明确选择 `openai` 但配置不完整，则返回 `503 live_not_configured`，不会静默降级并假装真实结果。
+真实 provider 使用 Responses API，并显式设置 `store: false`。OpenAI 使用 JSON Schema 结构化输出；MiniMax M3 按官方能力使用 text 格式，通过严格 JSON 合约提示、容错解析和服务端字段校验形成结构化结果。MiniMax 使用中国区端点，模型默认 `MiniMax-M3`。没有密钥时系统保持演示模式；如果用户明确选择真实 provider 但配置不完整，则返回 `503 live_not_configured`，不会静默降级并假装真实结果。
 
 ## 资料分段与引用规则
 
@@ -87,4 +90,4 @@ Playwright P2 验收在桌面与 390px 移动视口覆盖：
 - P1 可回滚 checkpoint：`b601bbd`；
 - P2 完成后建立独立 checkpoint，不与 P1 混合。
 
-真实模型联网验收只有在用户自行提供服务端密钥后才执行；无密钥的当前验收使用合成 Responses fixture，不伪装成真实调用。
+真实模型联网验收只在用户明确授权并提供服务端密钥后执行；无密钥验收使用合成 Responses fixture，不伪装成真实调用。
