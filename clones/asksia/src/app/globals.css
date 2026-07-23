@@ -422,3 +422,45 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(103, 99, 
   .study-question-form { align-items: stretch; flex-direction: column; }
   .study-question-form button { width: 100%; }
 }
+
+/* P3 Homework Solver */
+.homework-workspace { margin-top: 0; }
+.homework-problem-form { padding: 18px; border: 1px solid var(--studio-orange-100); border-radius: 18px; background: linear-gradient(145deg,#fffaf5,#fff); }
+.homework-problem-form > label { display: block; margin-bottom: 9px; color: var(--studio-ink); font-size: 12px; font-weight: 800; }
+.homework-problem-form > textarea { width: 100%; min-height: 132px; padding: 13px 14px; resize: vertical; border: 1px solid var(--studio-orange-200); border-radius: 13px; outline: 0; color: var(--studio-ink); background: #fff; font: 13px/1.65 "Inter","Noto Sans SC",sans-serif; }
+.homework-problem-form > textarea:focus { border-color: var(--studio-orange-400); box-shadow: 0 0 0 3px rgba(249,115,22,.1); }
+.homework-problem-form > textarea:disabled { opacity: .68; }
+.homework-form-footer { margin-top: 10px; display: flex; align-items: center; gap: 8px; }
+.homework-form-footer > span { margin-right: auto; color: #9b8778; font-size: 10px; font-variant-numeric: tabular-nums; }
+.homework-form-footer button { min-height: 36px; padding: 8px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border-radius: 10px; font-size: 11px; font-weight: 800; }
+.homework-secondary-button { border: 1px solid var(--studio-orange-100); color: #7f6656; background: #fff; }
+.homework-solve-button { color: #fff; background: linear-gradient(135deg,var(--studio-orange-500),var(--studio-amber-400)); box-shadow: 0 7px 18px rgba(249,115,22,.2); }
+.homework-form-footer button:disabled { cursor: not-allowed; opacity: .48; }
+.homework-result { margin-top: 17px; display: grid; gap: 13px; }
+.homework-problem-card, .homework-context-grid article, .homework-steps, .homework-answer-grid article { min-width: 0; padding: 17px; border: 1px solid var(--studio-orange-100); border-radius: 16px; background: #fff; box-shadow: 0 7px 18px rgba(121,78,42,.045); }
+.homework-problem-card > span, .homework-context-grid article > span, .homework-answer-grid article > span { color: var(--studio-orange-600); font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: .05em; }
+.homework-problem-card p, .homework-context-grid p, .homework-answer-grid p { margin: 9px 0 0; color: #5f5148; font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
+.homework-context-grid, .homework-answer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
+.homework-context-grid ul { margin: 9px 0 0; padding-left: 18px; color: #5f5148; font-size: 12px; line-height: 1.7; }
+.homework-section-heading { display: flex; align-items: flex-start; gap: 9px; color: var(--studio-orange-600); }
+.homework-section-heading > div { display: grid; gap: 2px; }
+.homework-section-heading strong { color: var(--studio-ink); font-size: 13px; }
+.homework-section-heading span { color: #9b8778; font-size: 10px; }
+.homework-steps ol { margin: 17px 0 0; padding: 0; display: grid; gap: 11px; list-style: none; }
+.homework-steps li { display: grid; grid-template-columns: 29px minmax(0,1fr); gap: 11px; }
+.homework-steps li > span { width: 27px; height: 27px; display: grid; place-items: center; border-radius: 9px; color: #c2410c; background: var(--studio-orange-100); font-size: 11px; font-weight: 900; }
+.homework-steps h3 { margin: 3px 0 5px; color: var(--studio-ink); font-size: 13px; }
+.homework-steps p { margin: 0; color: #6f5d51; font-size: 12px; line-height: 1.65; }
+.homework-steps pre { max-width: 100%; margin: 9px 0 0; padding: 10px 11px; overflow-x: auto; border-radius: 10px; color: #3f352e; background: #fff8f1; font: 12px/1.6 "Cascadia Code","SFMono-Regular",Consolas,monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.homework-final-answer { border-color: #fdba74 !important; background: linear-gradient(145deg,#fff7ed,#fff) !important; }
+.homework-final-answer p { color: #7c2d12; font-size: 15px; font-weight: 800; }
+.homework-verification { background: #fffdfa !important; }
+
+@media (max-width: 760px) {
+  .homework-workspace { margin-top: 0; }
+  .homework-form-footer { align-items: stretch; flex-wrap: wrap; }
+  .homework-form-footer > span { width: 100%; margin-right: 0; }
+  .homework-form-footer button { flex: 1 1 145px; }
+  .homework-context-grid, .homework-answer-grid { grid-template-columns: 1fr; }
+  .homework-steps { padding: 14px; }
+}

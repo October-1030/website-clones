@@ -1,6 +1,6 @@
 # StudyPal AI
 
-StudyPal AI 是一个本地优先的大学学习工作区。当前 P2 已打通完整资料学习闭环：上传 PDF/TXT、提取文字、生成结构化总结、基于资料追问、显示受服务器约束的引用，以及从本机服务恢复学习记录。
+StudyPal AI 是一个本地优先的大学学习工作区。当前已完成两条真实 AI 闭环：P2 文件资料总结与引用追问，以及 P3 Homework Solver 的分步解题、最终答案、独立验算和本机会话恢复。
 
 ## 最简单的本地启动方式
 
@@ -46,9 +46,11 @@ npm run local
 - 文件：PDF、UTF-8 TXT，最大 10 MB；
 - PDF：仅支持可提取文字，扫描件暂不做 OCR；
 - 提取文字上限：350,000 字符；
-- 真实 AI 输入：先在本地切分和检索，再发送受限片段；
+- 真实 AI 输入：资料问答先在本地切分和检索，再发送受限片段；
 - 引用：模型只能返回服务器提供的 source ID，服务器会丢弃伪造 ID；
-- 暂不包含视频总结、音频转录、LMS 同步、账户、配额或付款。
+- Homework Solver：支持 3–4,000 字符的文本题目，输出题意、已知量、方法、2–8 个步骤、最终答案、验算及必要假设；
+- Homework 会话：保存在 `.studypal-data/homework/`，并可通过网址中的 `homeworkSession` 恢复；
+- 暂不包含图片识题、视频总结、音频转录、LMS 同步、账户、配额或付款。
 
 ## 质量检查
 
@@ -56,8 +58,9 @@ npm run local
 npm test
 npm run check
 npm run test:e2e:p2
+npm run test:e2e:p3
 ```
 
-`npm run check` 执行 lint、TypeScript、单元/API 集成测试和生产构建。`npm run test:e2e:p2` 使用本机已有 Playwright 与 Chrome，验证 1440px 桌面和 390px 移动视口，并将截图、trace、版本和诊断保存在 `docs/evidence/p2-playwright/`。
+`npm run check` 执行 lint、TypeScript、单元/API 集成测试和生产构建。P2 与 P3 的 E2E 都使用本机已有 Playwright 与 Chrome，验证 1440px 桌面和 390px 移动视口，并保存截图、trace、版本和诊断。
 
-技术说明见 [P2 provider 与服务端会话](docs/P2-live-provider-and-session.md)。历史竞品研究仍保留在 `docs/research/`、`public/images/asksia/` 和 `scripts/`；这些名称仅表示研究来源，运行产品品牌是 StudyPal AI。
+技术说明见 [P2 provider 与服务端会话](docs/P2-live-provider-and-session.md) 与 [P3 Homework Solver](docs/P3-homework-solver.md)。历史竞品研究仍保留在 `docs/research/`、`public/images/asksia/` 和 `scripts/`；这些名称仅表示研究来源，运行产品品牌是 StudyPal AI。

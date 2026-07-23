@@ -37,7 +37,9 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import HomeworkWorkspace from "@/components/HomeworkWorkspace";
 import StudyFileWorkspace from "@/components/StudyFileWorkspace";
+import { HOMEWORK_SESSION_STORAGE_KEY } from "@/lib/homework/types";
 import { STUDY_SESSION_STORAGE_KEY } from "@/lib/study/types";
 
 type Mode = "default" | "homework";
@@ -263,8 +265,15 @@ export default function AskSiaWorkspace() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      const hasServerSession = new URLSearchParams(window.location.search).has('session');
-      if (hasServerSession || window.localStorage.getItem(STUDY_SESSION_STORAGE_KEY)) setActiveTool('file');
+      const parameters = new URLSearchParams(window.location.search);
+      const hasHomeworkSession = parameters.has("homeworkSession") || window.localStorage.getItem(HOMEWORK_SESSION_STORAGE_KEY);
+      const hasStudySession = parameters.has("session") || window.localStorage.getItem(STUDY_SESSION_STORAGE_KEY);
+      if (hasHomeworkSession) {
+        setActiveTool("homework");
+        setMode("homework");
+      } else if (hasStudySession) {
+        setActiveTool("file");
+      }
     }, 0);
     return () => window.clearTimeout(timeout);
   }, []);
@@ -352,11 +361,13 @@ export default function AskSiaWorkspace() {
           </div>
         ) : (
           <div className="home-stage">
-            <div className="welcome-panel"><div className="welcome-orb"><Sparkles size={23} /></div><h1>Hi Elv, what are we studying today?</h1></div>
-            {bannerVisible && <div className="usage-banner"><span>You have <strong>{usage}</strong> usage left. Upgrade to enjoy seamless study journey.</span><button type="button" className="upgrade-button" onClick={() => setToast("Upgrade is disabled in this local clone")}>Upgrade</button><button type="button" className="banner-close" aria-label="Close usage banner" onClick={() => setBannerVisible(false)}><X size={17} /></button></div>}
-            <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
-            {activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : <>
-              {activeTool && activeTool !== "homework" && <ToolEmptyState tool={activeTool} onToast={setToast} />}
+            {activeTool !== "homework" && <>
+              <div className="welcome-panel"><div className="welcome-orb"><Sparkles size={23} /></div><h1>Hi Elv, what are we studying today?</h1></div>
+              {bannerVisible && <div className="usage-banner"><span>You have <strong>{usage}</strong> usage left. Upgrade to enjoy seamless study journey.</span><button type="button" className="upgrade-button" onClick={() => setToast("Upgrade is disabled in this local clone")}>Upgrade</button><button type="button" className="banner-close" aria-label="Close usage banner" onClick={() => setBannerVisible(false)}><X size={17} /></button></div>}
+              <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
+            </>}
+            {activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace onToast={setToast} /> : <>
+              {activeTool && <ToolEmptyState tool={activeTool} onToast={setToast} />}
               <HomePanel tab={tab} setTab={setTab} onToast={setToast} onSelectTool={selectTool} />
               <div className="onboarding-card"><div className="onboarding-orb"><Sparkles size={20} /></div><div><strong>Get started with StudyPal AI</strong><span>0/2</span><div className="progress-track"><i /></div></div></div>
             </>}

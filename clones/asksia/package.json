@@ -19,6 +19,7 @@
     "test": "tsx --test tests/**/*.test.ts",
     "test:e2e:p1": "node e2e/p1-study-flow.cjs",
     "test:e2e:p2": "node e2e/p2-study-flow.cjs",
+    "test:e2e:p3": "node e2e/p3-homework-flow.cjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

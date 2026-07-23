@@ -1,3 +1,4 @@
+import type { HomeworkSolution } from "../homework/types";
 import type { StudyCitation, StudyProviderMode, StudyQuestionResult, StudySourcePage, StudySummary } from "./types";
 
 export interface StudyDocumentInput {
@@ -11,6 +12,7 @@ export interface StudyProvider {
   readonly label: string;
   summarize(document: StudyDocumentInput): Promise<StudySummary>;
   answer(document: StudyDocumentInput, question: string): Promise<StudyQuestionResult>;
+  solveHomework(problem: string): Promise<HomeworkSolution>;
 }
 
 export interface StudyChunk {
@@ -184,6 +186,23 @@ class DeterministicStudyProvider implements StudyProvider {
       provider,
     };
   }
+
+  async solveHomework(problem: string): Promise<HomeworkSolution> {
+    return {
+      subject: "演示模式",
+      problemRestatement: problem,
+      knowns: ["当前运行的是本地演示引擎，未调用外部模型。"],
+      method: "识别已知条件、选择定义或公式、逐步代入，并用原关系检查结果。",
+      steps: [
+        { title: "整理题目", explanation: "明确题目给出的信息和要求求出的量。", expression: "" },
+        { title: "应用方法", explanation: "选择适合该学科问题的定义、公式或论证路径。", expression: "" },
+        { title: "检查结果", explanation: "检查单位、边界条件以及结果是否满足原题。", expression: "" },
+      ],
+      finalAnswer: "演示模式不会伪造具体答案。配置真实模型后可生成完整分步解答。",
+      verification: "当前仅验证了解题流程结构，没有执行真实模型计算。",
+      assumptions: ["演示输出不能替代真实解题结果。"],
+    };
+  }
 }
 
 interface OpenAIProviderOptions {
@@ -255,6 +274,29 @@ function isGroundedPayload(value: unknown): value is { answer: string; sourceIds
     && candidate.sourceIds.every((item) => typeof item === "string");
 }
 
+function isHomeworkSolution(value: unknown): value is HomeworkSolution {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<HomeworkSolution>;
+  return typeof candidate.subject === "string"
+    && typeof candidate.problemRestatement === "string"
+    && candidate.problemRestatement.trim().length > 0
+    && isStringArray(candidate.knowns, 0, 12)
+    && typeof candidate.method === "string"
+    && candidate.method.trim().length > 0
+    && Array.isArray(candidate.steps)
+    && candidate.steps.length >= 2
+    && candidate.steps.length <= 8
+    && candidate.steps.every((step) => step
+      && typeof step.title === "string"
+      && typeof step.explanation === "string"
+      && typeof step.expression === "string")
+    && typeof candidate.finalAnswer === "string"
+    && candidate.finalAnswer.trim().length > 0
+    && typeof candidate.verification === "string"
+    && candidate.verification.trim().length > 0
+    && isStringArray(candidate.assumptions, 0, 8);
+}
+
 function validateBaseUrl(value: string): string {
   let url: URL;
   try {
@@ -291,35 +333,47 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
 
   private async structuredRequest<T>(name: string, schema: Record<string, unknown>, instructions: string, input: string): Promise<T> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000);
+    const timeout = setTimeout(() => controller.abort(), 90_000);
     try {
       const endpoint = new URL("responses", this.baseUrl);
       const promptJson = this.structuredOutputMode === "prompt_json";
-      const requestBody: Record<string, unknown> = {
-        model: this.model,
-        instructions: promptJson
-          ? `${instructions}\n\nReturn only valid JSON with no Markdown or commentary. The JSON must match this schema exactly:\n${JSON.stringify(schema)}`
-          : instructions,
-        input,
-        store: false,
-        max_output_tokens: 2_400,
-        text: promptJson
-          ? { format: { type: "text" } }
-          : { format: { type: "json_schema", name, strict: true, schema } },
-      };
-      if (promptJson) requestBody.reasoning = { effort: "none" };
-      const response = await this.fetchImpl(endpoint, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
-      });
-      const payload = await response.json().catch(() => ({})) as OpenAIResponsePayload;
-      if (!response.ok) {
-        const detail = payload.error?.message ? `：${clip(payload.error.message, 180)}` : "";
-        throw new StudyProviderError(`真实 AI 请求失败（HTTP ${response.status}）${detail}`, "live_request_failed", 502);
+      const attemptCount = promptJson ? 2 : 1;
+      for (let attempt = 0; attempt < attemptCount; attempt += 1) {
+        const retryInstruction = attempt > 0
+          ? "\n\nFORMAT RETRY: The previous response was not parseable JSON. Output one complete JSON object only. Do not use Markdown fences, comments, trailing commas, or text outside the object."
+          : "";
+        const requestBody: Record<string, unknown> = {
+          model: this.model,
+          instructions: promptJson
+            ? `${instructions}\n\nReturn only valid JSON with no Markdown or commentary. The JSON must match this schema exactly:\n${JSON.stringify(schema)}${retryInstruction}`
+            : instructions,
+          input,
+          store: false,
+          max_output_tokens: 2_400,
+          text: promptJson
+            ? { format: { type: "text" } }
+            : { format: { type: "json_schema", name, strict: true, schema } },
+        };
+        if (promptJson) requestBody.reasoning = { effort: "none" };
+        const response = await this.fetchImpl(endpoint, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${this.apiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody),
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({})) as OpenAIResponsePayload;
+        if (!response.ok) {
+          const detail = payload.error?.message ? `：${clip(payload.error.message, 180)}` : "";
+          throw new StudyProviderError(`真实 AI 请求失败（HTTP ${response.status}）${detail}`, "live_request_failed", 502);
+        }
+        try {
+          return parseStructuredText(responseText(payload)) as T;
+        } catch (error) {
+          const retryableFormatError = error instanceof StudyProviderError && error.code === "live_invalid_response";
+          if (!retryableFormatError || attempt + 1 >= attemptCount) throw error;
+        }
       }
-      return parseStructuredText(responseText(payload)) as T;
+      throw new StudyProviderError("真实 AI 返回的结构无法解析。", "live_invalid_response");
     } catch (error) {
       if (error instanceof StudyProviderError) throw error;
       if (error instanceof Error && error.name === "AbortError") throw new StudyProviderError("真实 AI 请求超时，请重试。", "live_timeout", 504);
@@ -381,6 +435,47 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
       grounded: cited.length > 0,
       provider,
     };
+  }
+
+  async solveHomework(problem: string): Promise<HomeworkSolution> {
+    const solution = await this.structuredRequest<unknown>(
+      "homework_solution",
+      {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          subject: { type: "string" },
+          problemRestatement: { type: "string" },
+          knowns: { type: "array", items: { type: "string" }, minItems: 0, maxItems: 12 },
+          method: { type: "string" },
+          steps: {
+            type: "array",
+            minItems: 2,
+            maxItems: 8,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                title: { type: "string" },
+                explanation: { type: "string" },
+                expression: { type: "string" },
+              },
+              required: ["title", "explanation", "expression"],
+            },
+          },
+          finalAnswer: { type: "string" },
+          verification: { type: "string" },
+          assumptions: { type: "array", items: { type: "string" }, minItems: 0, maxItems: 8 },
+        },
+        required: ["subject", "problemRestatement", "knowns", "method", "steps", "finalAnswer", "verification", "assumptions"],
+      },
+      "You are StudyPal AI Homework Solver. Solve the supplied problem for learning, not merely with a final answer. Restate the problem, identify known quantities, explain the method, show 2–8 logically complete steps, provide the final answer, and independently verify it. Preserve the problem's language. Keep units and mathematical notation explicit. Never invent missing values; record necessary assumptions.",
+      `Homework problem:\n${problem}`,
+    );
+    if (!isHomeworkSolution(solution)) {
+      throw new StudyProviderError("真实 AI 返回的作业解答结构不完整。", "live_invalid_response");
+    }
+    return solution;
   }
 }
 
