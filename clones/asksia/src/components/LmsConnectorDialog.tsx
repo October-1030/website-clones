@@ -6,7 +6,7 @@ import { BookOpenCheck, LoaderCircle, RefreshCw, ShieldCheck, Trash2, Unplug, X 
 
 interface Connection {
   id: string;
-  provider: "canvas";
+  provider: "canvas" | "blackboard";
   instanceUrl: string;
   accountLabel: string;
   status: "connected" | "expired" | "error";
@@ -27,6 +27,7 @@ interface LmsStatus {
   }>;
   providers: {
     canvas: { manualToken: boolean; oauthConfigured: boolean; readOnly: boolean };
+    blackboard: { configured: boolean; readOnly: boolean; administratorManaged: boolean };
   };
   error?: string;
 }
@@ -92,6 +93,21 @@ export default function LmsConnectorDialog({
     }
   }
 
+  async function connectBlackboard() {
+    setBusy("blackboard-connect");
+    setError(null);
+    try {
+      const response = await fetch("/api/lms/blackboard/connect", { method: "POST" });
+      const payload = await response.json() as { connection?: Connection; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Blackboard connection failed.");
+      onChanged("Blackboard connected with an administrator-managed read-only integration.");
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Blackboard connection failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
   async function sync(connection: Connection) {
     setBusy(`sync:${connection.id}`);
     setError(null);
@@ -138,6 +154,7 @@ export default function LmsConnectorDialog({
     <div className="settings-dialog-heading"><BookOpenCheck size={19} /><div><h2>LMS connections</h2><p>Read-only Canvas synchronization imports course structure, pages, assignments, and file metadata. StudyPal never writes grades, submissions, or messages back to Canvas.</p></div></div>
     {!status && !error && <div className="cloud-loading"><LoaderCircle size={17} className="spin" />Checking LMS configuration...</div>}
     {status?.authenticated && status.providers.canvas.oauthConfigured && <button type="button" className="settings-save" onClick={() => { window.location.href = "/api/lms/canvas/oauth/start"; }}><ShieldCheck size={14} />Connect Canvas with OAuth</button>}
+    {status?.authenticated && status.providers.blackboard.configured && <button type="button" className="settings-save" onClick={() => void connectBlackboard()} disabled={busy !== null}>{busy === "blackboard-connect" ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}Connect Blackboard Learn</button>}
     {status?.authenticated && <form className="cloud-auth-form" onSubmit={connect}>
       <label>Canvas URL<input type="url" value={instanceUrl} onChange={(event) => setInstanceUrl(event.target.value)} placeholder="https://school.instructure.com" autoComplete="url" /></label>
       <label>Account label<input type="text" value={accountLabel} onChange={(event) => setAccountLabel(event.target.value)} maxLength={120} /></label>
@@ -151,7 +168,7 @@ export default function LmsConnectorDialog({
       {connection.lastError && <div className="portrait-error" role="alert">{connection.lastError}</div>}
     </div>)}
     {status && !status.authenticated && <div className="cloud-not-configured"><ShieldCheck size={18} /><div><strong>Sign in to StudyPal cloud first</strong><span>Open Cloud account & sync, sign in, then return here to connect Canvas. No LMS data is exposed while signed out.</span></div></div>}
-    {status?.authenticated && status.connections.length === 0 && <div className="cloud-not-configured"><Unplug size={18} /><div><strong>No LMS connected</strong><span>Verify a read-only Canvas token or use OAuth when your school provides a Developer Key.</span></div></div>}
+    {status?.authenticated && status.connections.length === 0 && <div className="cloud-not-configured"><Unplug size={18} /><div><strong>No LMS connected</strong><span>Verify a read-only Canvas token, use Canvas OAuth, or connect an administrator-configured Blackboard integration.</span></div></div>}
     {error && <div className="portrait-error" role="alert">{error}</div>}
   </section></div>;
 }

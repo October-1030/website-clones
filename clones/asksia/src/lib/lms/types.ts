@@ -1,4 +1,4 @@
-export type LmsProvider = "canvas";
+export type LmsProvider = "canvas" | "blackboard";
 
 export interface LmsConnectionRecord {
   id: string;

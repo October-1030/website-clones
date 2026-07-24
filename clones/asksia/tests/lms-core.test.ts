@@ -22,7 +22,10 @@ describe("LMS connector core", () => {
     assert.match(encrypted, /^v1\./);
     assert.equal(encrypted.includes("secret-canvas-token"), false);
     assert.equal(decryptLmsToken(encrypted, encryptionEnvironment), "secret-canvas-token");
-    const tampered = `${encrypted.slice(0, -1)}${encrypted.endsWith("A") ? "B" : "A"}`;
+    const envelope = encrypted.split(".");
+    const tamperedBytes = Buffer.from(envelope[3], "base64url");
+    tamperedBytes[0] ^= 1;
+    const tampered = [envelope[0], envelope[1], envelope[2], tamperedBytes.toString("base64url")].join(".");
     assert.throws(() => decryptLmsToken(tampered, encryptionEnvironment), /could not be decrypted/);
     assert.throws(
       () => encryptLmsToken("token", { NODE_ENV: "test", STUDYPAL_LMS_ENCRYPTION_KEY: "bad" } as NodeJS.ProcessEnv),

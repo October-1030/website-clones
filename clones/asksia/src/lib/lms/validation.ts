@@ -40,6 +40,48 @@ function isUnsafeHost(hostname: string): boolean {
   return false;
 }
 
+export function normalizeBlackboardInstanceUrl(
+  raw: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const clean = raw.trim();
+  if (!clean || clean.length > INSTANCE_URL_MAX) {
+    throw new LmsError("Blackboard URL length is invalid.", "invalid_lms_instance", 400);
+  }
+  let url: URL;
+  try {
+    url = new URL(clean);
+  } catch {
+    throw new LmsError("Enter a complete Blackboard HTTPS URL.", "invalid_lms_instance", 400);
+  }
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.port
+    || isUnsafeHost(url.hostname)
+  ) {
+    throw new LmsError("Blackboard must use an approved public HTTPS host.", "unsafe_lms_instance", 400);
+  }
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const approved = host === "blackboard.com"
+    || host.endsWith(".blackboard.com")
+    || host === "bbhosted.com"
+    || host.endsWith(".bbhosted.com")
+    || configuredHosts(environment).has(host);
+  if (!approved) {
+    throw new LmsError(
+      "This Blackboard host is not approved. Add its exact hostname to STUDYPAL_LMS_ALLOWED_HOSTS.",
+      "lms_host_not_allowed",
+      400,
+    );
+  }
+  url.hostname = host;
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
 export function normalizeCanvasInstanceUrl(
   raw: string,
   environment: NodeJS.ProcessEnv = process.env,

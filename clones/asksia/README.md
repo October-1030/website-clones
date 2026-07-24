@@ -73,11 +73,13 @@ Set `STUDYPAL_DATA_DIR` to change the location. Uploaded document binaries and t
 StudyPal can connect a signed-in cloud account to Canvas in read-only mode. It synchronizes active courses, modules, pages, assignment descriptions and due dates, file metadata, and external links. Tokens are encrypted with AES-256-GCM before cloud storage, Canvas hosts are allowlisted, redirects are blocked, and database RLS isolates every connection and synchronized row.
 
 Manual Canvas tokens work without an OAuth Developer Key. Optional OAuth requires `CANVAS_INSTANCE_URL`, `CANVAS_CLIENT_ID`, `CANVAS_CLIENT_SECRET`, and `CANVAS_REDIRECT_URI`. Custom Canvas domains must be listed in `STUDYPAL_LMS_ALLOWED_HOSTS`.
+
+Blackboard Learn is supported through a school-admin-installed, least-privilege REST integration. Configure BLACKBOARD_INSTANCE_URL, BLACKBOARD_APP_KEY, and BLACKBOARD_APP_SECRET only on the server; StudyPal automatically renews the short-lived access token and never writes content back to Learn.
 ## Important boundaries
 
 The local web product intentionally does not pretend to provide:
 
-- Blackboard, Brightspace, or Moodle synchronization (Canvas read-only synchronization is available);
+- Brightspace or Moodle synchronization (Canvas and Blackboard read-only synchronization are available);
 - subscription, payment, or quota billing;
 - production cloud hosting until a dedicated StudyPal Supabase project and deployment target are approved;
 - mobile operating-system overlays or background translation over other apps;
