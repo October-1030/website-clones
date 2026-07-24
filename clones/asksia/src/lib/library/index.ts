@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { listCloudSessions } from "../cloud/session-repository";
 import { parseStoredHomeworkSession } from "../homework/storage";
 import { parseStoredStudySession } from "../study/storage";
 import { parseStoredTranscribeSession } from "../transcribe/storage";
@@ -99,6 +100,24 @@ async function itemsForKind(kind: LibraryItemKind): Promise<LibraryItem[]> {
 }
 
 export async function listLibraryItems(): Promise<LibraryItem[]> {
+  const cloudRows = await listCloudSessions();
+  if (cloudRows) {
+    return cloudRows.map((row) => ({
+      id: row.client_id,
+      kind: row.kind,
+      title: row.title,
+      subtitle: row.subtitle,
+      providerLabel: row.provider_label,
+      updatedAt: row.updated_at,
+      href: row.kind === "study"
+        ? `/pro/session?session=${encodeURIComponent(row.client_id)}`
+        : row.kind === "homework"
+          ? `/pro/session?homeworkSession=${encodeURIComponent(row.client_id)}`
+          : row.kind === "video"
+            ? `/pro/session?videoSession=${encodeURIComponent(row.client_id)}`
+            : `/pro/session?transcribeSession=${encodeURIComponent(row.client_id)}`,
+    }));
+  }
   const groups = await Promise.all([
     itemsForKind("study"),
     itemsForKind("homework"),

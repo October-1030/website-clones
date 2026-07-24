@@ -7,6 +7,7 @@ import {
   BookOpenCheck,
   Check,
   CircleHelp,
+  Cloud,
   ChevronDown,
   Clipboard,
   Copy,
@@ -35,6 +36,7 @@ import {
 } from "lucide-react";
 import HomeworkWorkspace from "@/components/HomeworkWorkspace";
 import AccountSettingsDialog from "@/components/AccountSettingsDialog";
+import CloudAccountDialog from "@/components/CloudAccountDialog";
 import LearningToolsWorkspace from "@/components/LearningToolsWorkspace";
 import PortraitWorkspace from "@/components/PortraitWorkspace";
 import LibraryPanel from "@/components/LibraryPanel";
@@ -185,12 +187,14 @@ function AccountMenu({
   onToast,
   onClose,
   onOpen,
+  onCloud,
 }: {
   username: string;
   usage: number;
   onToast: (message: string) => void;
   onClose: () => void;
   onOpen: (kind: "account" | "personalization" | "help" | "updates") => void;
+  onCloud: () => void;
 }) {
   const initial = username.trim().charAt(0).toUpperCase() || "S";
   const actions: Array<{ label: string; kind?: "account" | "personalization" | "help" | "updates"; icon: ReactNode }> = [
@@ -201,7 +205,7 @@ function AccountMenu({
     { label: "Personalization", kind: "personalization", icon: <UserRound size={14} /> },
     { label: "Help center", kind: "help", icon: <CircleHelp size={14} /> },
   ];
-  return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">{initial}</div><div><strong>{username}</strong><span>Local plan</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>Usage</span><b>{usage}</b></div><div><span>File Page</span><b>Local</b></div><div><span>Recording</span><b>10 min</b></div><div><span>AI Detection</span><b>10k</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Payments are intentionally disabled in this local build")}><LockKeyhole size={14} />Upgrade unavailable</button><div className="account-links">{actions.map((action) => <button type="button" key={action.label} onClick={() => { if (action.kind) { onOpen(action.kind); onClose(); } else { onToast(action.label === "Credits Used" ? "Local features do not consume paid credits" : "Rewards are not part of this local product"); } }}>{action.icon}{action.label}{action.kind && <ChevronDown size={13} className="account-link-chevron" />}</button>)}<button type="button" onClick={() => onToast("Sign out is unavailable because this local build has no online account")}><LockKeyhole size={14} />Sign out unavailable</button></div></div>;
+  return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">{initial}</div><div><strong>{username}</strong><span>Local plan</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>Usage</span><b>{usage}</b></div><div><span>File Page</span><b>Local</b></div><div><span>Recording</span><b>10 min</b></div><div><span>AI Detection</span><b>10k</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Payments are intentionally disabled in this local build")}><LockKeyhole size={14} />Upgrade unavailable</button><div className="account-links">{actions.map((action) => <button type="button" key={action.label} onClick={() => { if (action.kind) { onOpen(action.kind); onClose(); } else { onToast(action.label === "Credits Used" ? "Local features do not consume paid credits" : "Rewards are not part of this local product"); } }}>{action.icon}{action.label}{action.kind && <ChevronDown size={13} className="account-link-chevron" />}</button>)}<button type="button" onClick={() => { onCloud(); onClose(); }}><Cloud size={14} />Cloud account & sync</button></div></div>;
 }
 
 function MathAnswer() {
@@ -267,6 +271,7 @@ export default function AskSiaWorkspace() {
   const [toast, setToast] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<ToolKey | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [cloudAccountOpen, setCloudAccountOpen] = useState(false);
   const [homeworkDraft, setHomeworkDraft] = useState("");
   const [accountDialog, setAccountDialog] = useState<"account" | "personalization" | "help" | "updates" | null>(null);
   const [username, setUsername] = useState("Elv");
@@ -371,7 +376,7 @@ export default function AskSiaWorkspace() {
           <RailButton label="Explore" active={activeRail === "explore"} onClick={() => { setActiveRail("explore"); setActiveTool(null); setTab("library"); setSubmitted(null); setToast("Explore your saved work and learning tools"); }}><Globe2 size={17} /></RailButton>
         </nav>
         <button type="button" className="profile-avatar" aria-label="Profile" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>{username.trim().charAt(0).toUpperCase() || "S"}</button>
-        {accountOpen && <AccountMenu username={username} usage={usage} onToast={setToast} onClose={() => setAccountOpen(false)} onOpen={setAccountDialog} />}
+        {accountOpen && <AccountMenu username={username} usage={usage} onToast={setToast} onClose={() => setAccountOpen(false)} onOpen={setAccountDialog} onCloud={() => setCloudAccountOpen(true)} />}
       </aside>
 
       <section className={`workspace-content${submitted ? " workspace-content-conversation" : ""}`}>
@@ -408,6 +413,7 @@ export default function AskSiaWorkspace() {
           </div>
         )}
       </section>
+      {cloudAccountOpen && <CloudAccountDialog onClose={() => setCloudAccountOpen(false)} onChanged={setToast} />}
       {accountDialog && <AccountSettingsDialog kind={accountDialog} onClose={() => setAccountDialog(null)} onSaved={(settings) => { setUsername(settings.username); setToast("Local settings saved"); }} />}
       {toast && <div className="workspace-toast" role="status">{toast}</div>}
     </main>

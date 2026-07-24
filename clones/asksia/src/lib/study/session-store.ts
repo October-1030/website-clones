@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { CloudStorageError, deleteCloudSession, loadCloudSession, saveCloudSession } from "../cloud/session-repository";
 import { parseStoredStudySession } from "./storage";
 import type { StudySession } from "./types";
 
@@ -22,41 +23,65 @@ function sessionPath(id: string): string {
   return path.join(dataDirectory(), "sessions", `${id}.json`);
 }
 
+function cloudError(error: unknown): StudySessionStoreError | null {
+  return error instanceof CloudStorageError ? new StudySessionStoreError(error.message, error.code, error.status) : null;
+}
+
 export async function saveServerStudySession(session: StudySession): Promise<void> {
   const target = sessionPath(session.id);
-  await mkdir(path.dirname(target), { recursive: true });
-  const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, JSON.stringify(session), { encoding: "utf8", flag: "wx" });
-    await rename(temporary, target);
+    if (await saveCloudSession("study", session)) return;
+    await mkdir(path.dirname(target), { recursive: true });
+    const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, JSON.stringify(session), { encoding: "utf8", flag: "wx" });
+      await rename(temporary, target);
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined);
+      throw error;
+    }
   } catch (error) {
-    await unlink(temporary).catch(() => undefined);
+    const cloud = cloudError(error);
+    if (cloud) throw cloud;
     if (error instanceof StudySessionStoreError) throw error;
-    throw new StudySessionStoreError("无法保存本机学习记录，请检查磁盘空间和目录权限。", "session_write_failed");
+    throw new StudySessionStoreError("Unable to save the study session.", "session_write_failed");
   }
 }
 
 export async function loadServerStudySession(id: string): Promise<StudySession | null> {
   const target = sessionPath(id);
   try {
+    const cloud = await loadCloudSession<StudySession>("study", id);
+    if (cloud.usedCloud) {
+      if (!cloud.payload) return null;
+      const session = parseStoredStudySession(JSON.stringify(cloud.payload));
+      if (!session || session.id !== id) throw new StudySessionStoreError("The cloud study session is corrupted.", "session_corrupt");
+      return session;
+    }
     const raw = await readFile(target, "utf8");
     const session = parseStoredStudySession(raw);
-    if (!session || session.id !== id) throw new StudySessionStoreError("本机学习记录已损坏。", "session_corrupt", 500);
+    if (!session || session.id !== id) throw new StudySessionStoreError("The local study session is corrupted.", "session_corrupt");
     return session;
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return null;
+    const cloud = cloudError(error);
+    if (cloud) throw cloud;
     if (error instanceof StudySessionStoreError) throw error;
-    throw new StudySessionStoreError("无法读取本机学习记录。", "session_read_failed");
+    throw new StudySessionStoreError("Unable to read the study session.", "session_read_failed");
   }
 }
 
 export async function deleteServerStudySession(id: string): Promise<boolean> {
   const target = sessionPath(id);
   try {
+    const cloud = await deleteCloudSession("study", id);
+    if (cloud.usedCloud) return cloud.deleted;
     await unlink(target);
     return true;
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
-    throw new StudySessionStoreError("无法删除本机学习记录。", "session_delete_failed");
+    const cloud = cloudError(error);
+    if (cloud) throw cloud;
+    throw new StudySessionStoreError("Unable to delete the study session.", "session_delete_failed");
   }
 }

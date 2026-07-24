@@ -794,3 +794,22 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(103, 99, 
   .public-search-results article { flex-direction: column; }
   .portrait-editor { display: grid; }
 }
+
+/* P10 Cloud account, database, and multi-user isolation */
+.cloud-account-dialog { display: grid; gap: 14px; }
+.cloud-loading { min-height: 110px; display: flex; align-items: center; justify-content: center; gap: 8px; color: #8f796a; font-size: 10px; }
+.cloud-not-configured { padding: 14px; display: flex; align-items: flex-start; gap: 10px; border: 1px solid #bbf7d0; border-radius: 12px; color: #047857; background: #f0fdf4; }
+.cloud-not-configured > div { display: grid; gap: 4px; }
+.cloud-not-configured strong { color: #14532d; font-size: 11px; }
+.cloud-not-configured span { color: #47705a; font-size: 9px; line-height: 1.55; }
+.cloud-auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.cloud-auth-tabs button { padding: 9px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--studio-orange-100); border-radius: 9px; color: #8f796a; font-size: 10px; font-weight: 800; }
+.cloud-auth-tabs .cloud-auth-active { color: #9a3412; border-color: var(--studio-orange-300); background: var(--studio-orange-50); }
+.cloud-auth-form { display: grid; gap: 10px; }
+.cloud-auth-form input { padding: 10px 11px; border: 1px solid var(--studio-orange-200); border-radius: 10px; outline: 0; font: 11px/1.4 "Inter","Noto Sans SC",sans-serif; }
+.cloud-signed-in { display: grid; gap: 8px; }
+.cloud-signed-in > div { padding: 12px; display: grid; gap: 3px; border-radius: 10px; background: #f0fdf4; }
+.cloud-signed-in span, .cloud-signed-in small { color: #47705a; font-size: 9px; }
+.cloud-signed-in strong { color: #14532d; font-size: 11px; }
+.cloud-signed-in > button { padding: 9px 11px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--studio-orange-100); border-radius: 9px; color: #7f6656; font-size: 10px; font-weight: 800; }
+.cloud-signed-in .cloud-sign-out { color: #9a3412; border-color: #fecaca; }

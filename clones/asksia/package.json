@@ -1,6 +1,6 @@
 {
   "name": "studypal-ai",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "private": true,
   "description": "StudyPal AI local study workspace",
   "author": "StudyPal AI",
@@ -27,6 +27,8 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
+    "@supabase/ssr": "^0.12.3",
+    "@supabase/supabase-js": "^2.110.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.6.0",

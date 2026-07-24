@@ -220,6 +220,12 @@ async function runDesktop(browser, record) {
   await page.getByRole("button", { name: "Save settings" }).click();
   await page.getByRole("heading", { name: /Hi QA Student/ }).waitFor();
 
+  await page.getByRole("button", { name: "Profile" }).click();
+  await page.getByRole("button", { name: "Cloud account & sync" }).click();
+  await page.getByRole("heading", { name: "StudyPal cloud account" }).waitFor();
+  await page.getByText("Cloud backend is ready for configuration").waitFor();
+  await page.getByRole("button", { name: "Close cloud account" }).click();
+
   await page.getByRole("button", { name: "Library" }).click();
   await page.getByRole("heading", { name: "Everything you have studied" }).waitFor();
   await page.getByLabel("Search saved sessions").fill("no-matching-session");
@@ -285,6 +291,7 @@ async function main() {
         "Allowlisted public search with direct source link",
         "Local-only portrait preview and PNG export",
         "Local account name persistence",
+        "Cloud account configuration boundary and RLS-ready status",
         "Library search and empty state",
         "390px mobile Library and Web Search layouts",
         "No console errors, page errors, or failed requests",

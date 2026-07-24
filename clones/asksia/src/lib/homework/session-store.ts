@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { CloudStorageError, deleteCloudSession, loadCloudSession, saveCloudSession } from "../cloud/session-repository";
 import { parseStoredHomeworkSession } from "./storage";
 import type { HomeworkSession } from "./types";
 
@@ -18,44 +19,68 @@ function dataDirectory(): string {
 }
 
 function sessionPath(id: string): string {
-  if (!SESSION_ID_PATTERN.test(id)) throw new HomeworkSessionStoreError("作业记录 ID 无效。", "invalid_homework_session_id", 400);
+  if (!SESSION_ID_PATTERN.test(id)) throw new HomeworkSessionStoreError("The homework session ID is invalid.", "invalid_homework_session_id", 400);
   return path.join(dataDirectory(), "homework", `${id}.json`);
+}
+
+function cloudError(error: unknown): HomeworkSessionStoreError | null {
+  return error instanceof CloudStorageError ? new HomeworkSessionStoreError(error.message, error.code, error.status) : null;
 }
 
 export async function saveServerHomeworkSession(session: HomeworkSession): Promise<void> {
   const target = sessionPath(session.id);
-  await mkdir(path.dirname(target), { recursive: true });
-  const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, JSON.stringify(session), { encoding: "utf8", flag: "wx" });
-    await rename(temporary, target);
-  } catch {
-    await unlink(temporary).catch(() => undefined);
-    throw new HomeworkSessionStoreError("无法保存本机作业记录，请检查磁盘空间和目录权限。", "homework_session_write_failed");
+    if (await saveCloudSession("homework", session)) return;
+    await mkdir(path.dirname(target), { recursive: true });
+    const temporary = `${target}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, JSON.stringify(session), { encoding: "utf8", flag: "wx" });
+      await rename(temporary, target);
+    } catch (error) {
+      await unlink(temporary).catch(() => undefined);
+      throw error;
+    }
+  } catch (error) {
+    const cloud = cloudError(error);
+    if (cloud) throw cloud;
+    throw new HomeworkSessionStoreError("Unable to save the homework session.", "homework_session_write_failed");
   }
 }
 
 export async function loadServerHomeworkSession(id: string): Promise<HomeworkSession | null> {
   const target = sessionPath(id);
   try {
+    const cloud = await loadCloudSession<HomeworkSession>("homework", id);
+    if (cloud.usedCloud) {
+      if (!cloud.payload) return null;
+      const session = parseStoredHomeworkSession(JSON.stringify(cloud.payload));
+      if (!session || session.id !== id) throw new HomeworkSessionStoreError("The cloud homework session is corrupted.", "homework_session_corrupt");
+      return session;
+    }
     const raw = await readFile(target, "utf8");
     const session = parseStoredHomeworkSession(raw);
-    if (!session || session.id !== id) throw new HomeworkSessionStoreError("本机作业记录已损坏。", "homework_session_corrupt");
+    if (!session || session.id !== id) throw new HomeworkSessionStoreError("The local homework session is corrupted.", "homework_session_corrupt");
     return session;
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return null;
+    const cloud = cloudError(error);
+    if (cloud) throw cloud;
     if (error instanceof HomeworkSessionStoreError) throw error;
-    throw new HomeworkSessionStoreError("无法读取本机作业记录。", "homework_session_read_failed");
+    throw new HomeworkSessionStoreError("Unable to read the homework session.", "homework_session_read_failed");
   }
 }
 
 export async function deleteServerHomeworkSession(id: string): Promise<boolean> {
   const target = sessionPath(id);
   try {
+    const cloud = await deleteCloudSession("homework", id);
+    if (cloud.usedCloud) return cloud.deleted;
     await unlink(target);
     return true;
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false;
-    throw new HomeworkSessionStoreError("无法删除本机作业记录。", "homework_session_delete_failed");
+    const cloud = cloudError(error);
+    if (cloud) throw cloud;
+    throw new HomeworkSessionStoreError("Unable to delete the homework session.", "homework_session_delete_failed");
   }
 }

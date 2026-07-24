@@ -1,6 +1,6 @@
 # StudyPal AI 产品需求文档（PRD）
 
-版本：0.7.0  
+版本：0.8.0
 状态：本地可运行版本  
 更新日期：2026-07-24  
 产品名称：StudyPal AI  
@@ -56,11 +56,11 @@ StudyPal AI 是一个本地优先的学习工作台。它把用户自己的学�
 | Essay | 已完成 | Thesis 方向、六段提纲、草稿指标、修改清单 | localStorage |
 | Writing Signals | 已完成 | 句长、词汇多样性、重复等指标；作者身份永远为不确定 | localStorage |
 | Library | 已完成 | 文件、作业、视频、转录元数据检索、筛选、恢复链接 | 服务端只读索引 |
-| Account/Personalization | 已完成 | 显示名、语言、语气、学习风格、本地记忆开关 | localStorage |
+| Account/Personalization | 已完成 | 本地显示名与个性化；可选 Supabase Auth 云账户 | localStorage + Supabase profiles |
 | Public Search | 已完成 | 英文/中文 Wikipedia 限域检索、直接来源链接 | 最近一次结果 localStorage |
 | Portrait Studio | 已完成 | 本地裁剪、位置、缩放、三种风格、PNG 导出 | 不持久化原图 |
 | Payments/Upgrade | 禁用 | 不付款、不购买、不伪造订阅 | 无 |
-| Sign out/Cloud account | 不适用 | 当前为本地产品，没有云账户 | 无 |
+| Cloud sessions | 代码完成/待开通项目 | 登录后通过 Cookie + RLS 保存四类会话；显式导入本地记录 | Supabase Postgres |
 
 ## 4. 关键用户流程
 
@@ -318,9 +318,9 @@ npm run test:e2e:final
 
 ### 9.3 当前验收结果
 
-版本 0.7.0 的最终套件已通过：
+版本 0.8.0 的本地与云账户边界套件已通过：
 
-- 单元/API 测试：47/47；
+- 单元/API 测试：53/53；
 - TypeScript：通过；
 - ESLint：0 error（仅保留历史研究脚本和本地图像的非阻塞 warning）；
 - Next.js production build：通过；

@@ -31,6 +31,7 @@ http://127.0.0.1:3000/pro/session
 - Writing-signal review that never claims to prove AI authorship or invents a probability.
 - Searchable local Library across file, homework, video, and transcription sessions.
 - Browser-local display name and personalization settings.
+- Optional Supabase cloud accounts with cookie-based SSR auth, indexed Postgres storage, database RLS, and explicit local-session import.
 - Allowlisted English/Chinese Wikipedia search with direct source links.
 - Local-only portrait crop, style preview, and 800 × 800 PNG export. Photos are not uploaded.
 
@@ -72,7 +73,8 @@ Set `STUDYPAL_DATA_DIR` to change the location. Uploaded document binaries and t
 The local web product intentionally does not pretend to provide:
 
 - LMS login or Canvas/Blackboard/Brightspace/Moodle synchronization;
-- cloud accounts, cross-device synchronization, subscription, payment, or quota billing;
+- subscription, payment, or quota billing;
+- production cloud hosting until a dedicated StudyPal Supabase project and deployment target are approved;
 - mobile operating-system overlays or background translation over other apps;
 - a packaged browser extension or native mobile application;
 - OCR for scanned PDFs, full DOCX/PPTX ingestion, or private video transcription;
@@ -92,4 +94,4 @@ npm run test:e2e:final
 
 `test:e2e:final` uses the installed Playwright and Chrome, tests desktop and 390px mobile layouts, and saves screenshots, a trace, browser metadata, and a JSON report under `docs/evidence/final-study-suite/`.
 
-The current product specification is [docs/PRD-studypal-ai.md](docs/PRD-studypal-ai.md).
+The current product specification is [docs/PRD-studypal-ai.md](docs/PRD-studypal-ai.md). Cloud account architecture and setup are documented in [docs/P10-cloud-accounts.md](docs/P10-cloud-accounts.md).
