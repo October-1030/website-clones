@@ -163,7 +163,7 @@ async function runViewport(browser, project) {
 
     await page.screenshot({ path: path.join(RUN_DIR, `${project.name}-study-session.png`), fullPage: true });
     await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
-    assert.match(await readText(page.getByText("已从本机恢复", { exact: false })), /已从本机恢复/);
+    assert.match(await readText(page.locator(".restored-badge")), /已从(浏览器|本机服务)恢复/);
     assert.match(await readText(page.locator(".study-message-user p").last()), /chlorophyll/i);
     assert.match(await readText(page.locator(".study-citations summary").first()), /TXT 片段/);
     diagnostics.assertions.push("localStorage session restored after refresh");

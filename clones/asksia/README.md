@@ -1,89 +1,95 @@
 # StudyPal AI
 
-StudyPal AI 是一个本地优先的大学学习工作区。当前已完成两条真实 AI 闭环：P2 文件资料总结与引用追问，以及 P3 Homework Solver 的分步解题、最终答案、独立验算和本机会话恢复。
+StudyPal AI is a local-first study workspace. It turns your own files, public captions, homework questions, and audio into structured study sessions that can be saved and restored on this computer.
 
-## 最简单的本地启动方式
+The runtime product is branded **StudyPal AI**. Historical competitor research remains under `docs/research/`, `scripts/asksia-*`, and `public/images/asksia/` only as research evidence.
 
-Windows 用户可以双击项目根目录的 `start-studypal.cmd`。它会构建生产版本、在 `http://localhost:3000` 启动服务并打开学习页面。
+## Start locally
 
-也可以在终端运行：
+On Windows, double-click `start-studypal.cmd`, or run:
 
 ```bash
 npm install
 npm run local
 ```
 
-打开 `http://localhost:3000/pro/session`。
+Open:
 
-## AI 模式
+```text
+http://127.0.0.1:3000/pro/session
+```
 
-默认配置是 `demo`，不调用外部模型。演示模式仍会执行真实文件解析、资料检索、引用和服务端会话保存，但总结和回答由本地确定性 provider 生成。当前推荐的真实模型是中国区 MiniMax M3。
+## Working features
 
-启用 MiniMax M3：
+- PDF and UTF-8 TXT extraction, structured summary, cited follow-up questions, and session restore.
+- MiniMax M3 or OpenAI server-side provider boundary; deterministic demo mode when no model is configured.
+- Homework Solver with problem restatement, knowns, method, steps, final answer, and verification.
+- Public YouTube-caption and supported podcast-transcript summaries with timestamped citations.
+- Microphone and browser-tab recording with local Faster-Whisper transcription; temporary audio is deleted.
+- Source-backed Quiz, Study Guide, and Flashcards generated from the latest saved file session.
+- Essay planning and revision metrics without creating a submission-ready paper.
+- Writing-signal review that never claims to prove AI authorship or invents a probability.
+- Searchable local Library across file, homework, video, and transcription sessions.
+- Browser-local display name and personalization settings.
+- Allowlisted English/Chinese Wikipedia search with direct source links.
+- Local-only portrait crop, style preview, and 800 × 800 PNG export. Photos are not uploaded.
 
-1. 复制 `.env.example` 为 `.env.local`；
-2. 设置 `STUDYPAL_AI_PROVIDER=minimax`；
-3. 在服务端填写 `MINIMAX_API_KEY`；
-4. 保持 `MINIMAX_MODEL=MiniMax-M3` 与 `MINIMAX_BASE_URL=https://api.minimaxi.com/v1`；
-5. 重新构建并启动。
+## AI configuration
 
-如果 `.env.local` 只有 `MINIMAX_API_KEY` 与 `MINIMAX_BASE_URL`，系统也会自动选择 MiniMax，并默认使用 `MiniMax-M3`。仍可通过 `STUDYPAL_AI_PROVIDER=openai` 及 `OPENAI_*` 变量使用 OpenAI Responses API。
+Demo mode is safe and requires no key:
 
-密钥只从服务端环境读取，不会进入浏览器包、学习记录、日志、测试 fixture 或 Git。MiniMax 与 OpenAI 都通过 Responses API 调用并设置 `store: false`；OpenAI 使用 JSON Schema，MiniMax 使用官方 text 模式、严格 JSON 合约提示和服务端结构校验。如果真实模式配置不完整或请求失败，系统会明确报错，不会伪装成真实 AI 成功。
+```dotenv
+STUDYPAL_AI_PROVIDER=demo
+```
 
-## 本机学习记录
+China-region MiniMax M3:
 
-- 默认目录：`.studypal-data/sessions/`；
-- 可通过 `STUDYPAL_DATA_DIR` 修改；
-- 文件包含提取文字、总结和聊天记录，不包含原始上传文件二进制、密钥、Cookie 或 Token；
-- 浏览器网址保存 `session` ID，浏览器本地数据丢失后仍可从本机服务恢复；
-- 点击“清除”会同时删除浏览器记录和服务端会话文件。
+```dotenv
+STUDYPAL_AI_PROVIDER=minimax
+MINIMAX_API_KEY=
+MINIMAX_MODEL=MiniMax-M3
+MINIMAX_BASE_URL=https://api.minimaxi.com/v1
+```
 
-`.studypal-data/`、`.env*` 和浏览器验收证据已由项目级 `.gitignore` 排除；`.env.example` 例外，可安全提交。
+Copy `.env.example` to `.env.local` and place the key there. Never put credentials in source code, browser storage, fixtures, logs, or Git. Provider calls use server-side environment variables and request `store: false`.
 
-## 当前能力边界
+## Local data
 
-- 文件：PDF、UTF-8 TXT，最大 10 MB；
-- PDF：仅支持可提取文字，扫描件暂不做 OCR；
-- 提取文字上限：350,000 字符；
-- 真实 AI 输入：资料问答先在本地切分和检索，再发送受限片段；
-- 引用：模型只能返回服务器提供的 source ID，服务器会丢弃伪造 ID；
-- Homework Solver：支持 3–4,000 字符的文本题目，输出题意、已知量、方法、2–8 个步骤、最终答案、验算及必要假设；
-- Homework 会话：保存在 `.studypal-data/homework/`，并可通过网址中的 `homeworkSession` 恢复；
-- 暂不包含图片识题、视频总结、音频转录、LMS 同步、账户、配额或付款。
+By default, server sessions are stored below `.studypal-data/`:
 
-## 质量检查
+```text
+.studypal-data/
+├── sessions/
+├── homework/
+├── video/
+└── transcribe/
+```
+
+Set `STUDYPAL_DATA_DIR` to change the location. Uploaded document binaries and temporary audio are not retained after processing. Browser preferences and generated study tools use localStorage.
+
+## Important boundaries
+
+The local web product intentionally does not pretend to provide:
+
+- LMS login or Canvas/Blackboard/Brightspace/Moodle synchronization;
+- cloud accounts, cross-device synchronization, subscription, payment, or quota billing;
+- mobile operating-system overlays or background translation over other apps;
+- a packaged browser extension or native mobile application;
+- OCR for scanned PDFs, full DOCX/PPTX ingestion, or private video transcription;
+- AI-generated replacement faces or biometric processing.
+
+These require separate products, permissions, infrastructure, legal review, or paid services.
+
+## Verification
 
 ```bash
+npm run typecheck
+npm run lint
 npm test
-npm run check
-npm run test:e2e:p2
-npm run test:e2e:p3
+npm run build
+npm run test:e2e:final
 ```
 
-`npm run check` 执行 lint、TypeScript、单元/API 集成测试和生产构建。P2 与 P3 的 E2E 都使用本机已有 Playwright 与 Chrome，验证 1440px 桌面和 390px 移动视口，并保存截图、trace、版本和诊断。
+`test:e2e:final` uses the installed Playwright and Chrome, tests desktop and 390px mobile layouts, and saves screenshots, a trace, browser metadata, and a JSON report under `docs/evidence/final-study-suite/`.
 
-技术说明见 [P2 provider 与服务端会话](docs/P2-live-provider-and-session.md) 与 [P3 Homework Solver](docs/P3-homework-solver.md)。历史竞品研究仍保留在 `docs/research/`、`public/images/asksia/` 和 `scripts/`；这些名称仅表示研究来源，运行产品品牌是 StudyPal AI。
-
-## P4 — Video Link Summary
-
-The local workspace now supports public YouTube caption summaries and transcript-backed podcast pages:
-
-- HTTPS/domain safety validation and redirect allowlisting;
-- Android Innertube signed-caption retrieval with WEB fallback;
-- MiniMax M3 overview, key concepts, and review questions;
-- grounded follow-up answers with timestamp/section citations;
-- browser and server session restore;
-- explicit errors when a media source has no public transcript.
-
-Run the P4 browser flow:
-
-```bash
-npm run test:e2e:p4
-```
-
-See `docs/P4-video-link-summary.md` for scope, security boundaries, configuration, and verification evidence.
-
-## Live transcription
-
-P5 adds local microphone and browser-tab recording, temporary microphone captions where the browser supports Web Speech, and an authoritative timestamped Faster-Whisper transcript after Stop. Audio is deleted after processing; only text sessions are retained. See `docs/P5-live-transcribe.md`.
+The current product specification is [docs/PRD-studypal-ai.md](docs/PRD-studypal-ai.md).

@@ -26,9 +26,9 @@ function setSessionInUrl(id: string | null) {
   window.history.replaceState(null, "", url);
 }
 
-export default function HomeworkWorkspace({ onToast }: { onToast: (message: string) => void }) {
+export default function HomeworkWorkspace({ onToast, initialProblem = "" }: { onToast: (message: string) => void; initialProblem?: string }) {
   const abortRef = useRef<AbortController | null>(null);
-  const [problem, setProblem] = useState("");
+  const [problem, setProblem] = useState(initialProblem);
   const [session, setSession] = useState<HomeworkSession | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +37,7 @@ export default function HomeworkWorkspace({ onToast }: { onToast: (message: stri
 
   useEffect(() => {
     let active = true;
-    const stored = loadHomeworkSession(window.localStorage);
+    const stored = initialProblem.trim() ? null : loadHomeworkSession(window.localStorage);
     if (stored) {
       setSession(stored);
       setProblem(stored.problem);
@@ -68,7 +68,7 @@ export default function HomeworkWorkspace({ onToast }: { onToast: (message: stri
       active = false;
       abortRef.current?.abort();
     };
-  }, []);
+  }, [initialProblem]);
 
   function persist(next: HomeworkSession) {
     setSession(next);

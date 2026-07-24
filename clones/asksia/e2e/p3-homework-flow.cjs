@@ -124,7 +124,7 @@ async function runViewport(browser, project) {
     await page.getByRole("textbox", { name: "作业题目" }).fill(PROBLEM);
     await page.getByRole("button", { name: "开始解题" }).click();
 
-    assert.match(await textOf(page.getByText("真实解题结果", { exact: false })), /真实解题结果/);
+    assert.match(await textOf(page.getByText("真实解题结果", { exact: true })), /真实解题结果/);
     assert.match(await textOf(page.getByText("题意整理", { exact: true })), /题意整理/);
     assert.match(await textOf(page.getByText("最终答案", { exact: true })), /最终答案/);
     assert.match(await textOf(page.getByText("独立验算", { exact: true })), /独立验算/);

@@ -11,8 +11,6 @@ import {
   Clipboard,
   Copy,
   FileText,
-  Folder,
-  GraduationCap,
   Globe2,
   Image as ImageIcon,
   LibraryBig,
@@ -36,9 +34,16 @@ import {
   Zap,
 } from "lucide-react";
 import HomeworkWorkspace from "@/components/HomeworkWorkspace";
+import AccountSettingsDialog from "@/components/AccountSettingsDialog";
+import LearningToolsWorkspace from "@/components/LearningToolsWorkspace";
+import PortraitWorkspace from "@/components/PortraitWorkspace";
+import LibraryPanel from "@/components/LibraryPanel";
 import StudyFileWorkspace from "@/components/StudyFileWorkspace";
 import TranscribeWorkspace from "@/components/TranscribeWorkspace";
 import VideoSummaryWorkspace from "@/components/VideoSummaryWorkspace";
+import WebSearchWorkspace from "@/components/WebSearchWorkspace";
+import WritingToolsWorkspace from "@/components/WritingToolsWorkspace";
+import { loadAccountSettings } from "@/lib/account/settings";
 import { HOMEWORK_SESSION_STORAGE_KEY } from "@/lib/homework/types";
 import { STUDY_SESSION_STORAGE_KEY } from "@/lib/study/types";
 import { TRANSCRIBE_SESSION_STORAGE_KEY } from "@/lib/transcribe/types";
@@ -159,15 +164,7 @@ function ToolShortcuts({ onSelectTool }: { onSelectTool: (tool: ToolKey) => void
   </div>;
 }
 
-function ToolEmptyState({ tool, onToast }: { tool: ToolKey; onToast: (message: string) => void }) {
-  const detail = toolDetails[tool];
-  const primaryLabel = tool === "transcribe" ? "Choose audio source" : tool === "file" ? "Upload material" : tool === "video" ? "Paste a URL" : tool === "headshot" ? "Preview styles" : "Choose material";
-  return <div className="tool-empty-card"><div className="tool-empty-icon"><Sparkles size={20} /></div><div><span className="everywhere-kicker">Local preview</span><h2>{detail.label}</h2><p>{detail.description}</p>{tool === "detector" && <span className="quota-note">AI Detection · 0/10000 Chars</span>}{tool === "headshot" && <div className="style-pills"><button type="button" onClick={() => onToast("Classic school portrait selected")}>Classic school portrait</button><button type="button" onClick={() => onToast("Leadership portrait selected")}>Leadership portrait</button><button type="button" onClick={() => onToast("Black and white portrait selected")}>Black and white portrait</button></div>}<button type="button" className="empty-primary" onClick={() => onToast(`${detail.label}: local prototype does not execute real upload, URL processing, or generation`)}>{primaryLabel}</button></div></div>;
-}
-
-function HomePanel({ tab, setTab, onToast, onSelectTool }: { tab: AppTab; setTab: (tab: AppTab) => void; onToast: (message: string) => void; onSelectTool: (tool: ToolKey) => void }) {
-  const [selectedSchool, setSelectedSchool] = useState("All schools");
-  const schools = ["All schools", "Adelaide University", "University of Sydney", "McGill University"];
+function HomePanel({ tab, setTab, onSelectTool }: { tab: AppTab; setTab: (tab: AppTab) => void; onSelectTool: (tool: ToolKey) => void }) {
   return <>
     <ToolShortcuts onSelectTool={onSelectTool} />
     <div className="home-tabs" role="tablist" aria-label="Home content">
@@ -175,16 +172,36 @@ function HomePanel({ tab, setTab, onToast, onSelectTool }: { tab: AppTab; setTab
       <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "home-tab-active" : ""} onClick={() => setTab("library")}>Library</button>
     </div>
     {tab === "everywhere" ? <div className="everywhere-panel" role="tabpanel">
-      <div className="everywhere-copy"><span className="everywhere-kicker">StudyPal Extension</span><h2>The Extension that keeps you in flow</h2><p>Summarize articles, get instant answers, and stay in flow — right in your browser.</p></div>
+      <div className="everywhere-copy"><span className="everywhere-kicker">StudyPal Extension</span><h2>Keep your study flow in one place</h2><p>The browser extension is a planned companion. This local app already supports files, homework, video captions, audio transcription, and study tools.</p></div>
       <div className="extension-preview"><div className="preview-sidebar"><span className="preview-brand">S</span><span /><span /><span /><span /></div><div className="preview-window"><div className="preview-bar"><i /><i /><i /></div><div className="preview-lines"><b>StudyPal AI</b><span>Summarize this page</span><span>Key ideas and useful context</span></div></div></div>
       <div className="carousel-dots"><i /><i /><i className="dot-active" /></div>
-    </div> : <div className="library-panel" role="tabpanel"><div className="library-panel-heading"><div><span className="everywhere-kicker">Your library</span><h2>Everything you are learning</h2></div><div className="library-actions"><select aria-label="School filter" value={selectedSchool} onChange={(event) => setSelectedSchool(event.target.value)}>{schools.map((school) => <option key={school}>{school}</option>)}</select><button type="button" onClick={() => onToast("Library search is a local preview")}><Search size={15} /> Search</button></div></div><div className="library-grid"><article><GraduationCap size={18} /><b>Calculus II</b><span>{selectedSchool} · 28 documents</span></article><article><Folder size={18} /><b>Behavioral Economics</b><span>{selectedSchool} · 17 documents</span></article><article><FileText size={18} /><b>Lecture notes</b><span>12 recordings · 30 flashcards</span></article></div><button type="button" className="view-more" onClick={() => onToast("Course support is a local preview")}>View more</button></div>}
+    </div> : <LibraryPanel />}
   </>;
 }
 
-function AccountMenu({ usage, onToast, onClose }: { usage: number; onToast: (message: string) => void; onClose: () => void }) {
-  const actions = ["Credits Used", "Reward", "Update log", "Account settings", "Personalization", "Help center"];
-  return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">E</div><div><strong>Elv</strong><span>Free</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>Usage</span><b>{usage}</b></div><div><span>File Page</span><b>0/100</b></div><div><span>Recording</span><b>0/10 min</b></div><div><span>AI Detection</span><b>0/10000</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Upgrade is disabled in this local clone")}><Zap size={14} />Upgrade</button><div className="account-links">{actions.map((action) => <button type="button" key={action} onClick={() => onToast(`${action} is a local preview`)}>{action === "Account settings" ? <Settings2 size={14} /> : action === "Personalization" ? <UserRound size={14} /> : action === "Help center" ? <CircleHelp size={14} /> : <FileText size={14} />}{action}<ChevronDown size={13} className="account-link-chevron" /></button>)}<button type="button" onClick={() => onToast("Sign out is disabled in this local clone")}><LockKeyhole size={14} />Sign out</button></div></div>;
+function AccountMenu({
+  username,
+  usage,
+  onToast,
+  onClose,
+  onOpen,
+}: {
+  username: string;
+  usage: number;
+  onToast: (message: string) => void;
+  onClose: () => void;
+  onOpen: (kind: "account" | "personalization" | "help" | "updates") => void;
+}) {
+  const initial = username.trim().charAt(0).toUpperCase() || "S";
+  const actions: Array<{ label: string; kind?: "account" | "personalization" | "help" | "updates"; icon: ReactNode }> = [
+    { label: "Credits Used", icon: <FileText size={14} /> },
+    { label: "Reward", icon: <Sparkles size={14} /> },
+    { label: "Update log", kind: "updates", icon: <FileText size={14} /> },
+    { label: "Account settings", kind: "account", icon: <Settings2 size={14} /> },
+    { label: "Personalization", kind: "personalization", icon: <UserRound size={14} /> },
+    { label: "Help center", kind: "help", icon: <CircleHelp size={14} /> },
+  ];
+  return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">{initial}</div><div><strong>{username}</strong><span>Local plan</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>Usage</span><b>{usage}</b></div><div><span>File Page</span><b>Local</b></div><div><span>Recording</span><b>10 min</b></div><div><span>AI Detection</span><b>10k</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Payments are intentionally disabled in this local build")}><LockKeyhole size={14} />Upgrade unavailable</button><div className="account-links">{actions.map((action) => <button type="button" key={action.label} onClick={() => { if (action.kind) { onOpen(action.kind); onClose(); } else { onToast(action.label === "Credits Used" ? "Local features do not consume paid credits" : "Rewards are not part of this local product"); } }}>{action.icon}{action.label}{action.kind && <ChevronDown size={13} className="account-link-chevron" />}</button>)}<button type="button" onClick={() => onToast("Sign out is unavailable because this local build has no online account")}><LockKeyhole size={14} />Sign out unavailable</button></div></div>;
 }
 
 function MathAnswer() {
@@ -250,6 +267,9 @@ export default function AskSiaWorkspace() {
   const [toast, setToast] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<ToolKey | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [homeworkDraft, setHomeworkDraft] = useState("");
+  const [accountDialog, setAccountDialog] = useState<"account" | "personalization" | "help" | "updates" | null>(null);
+  const [username, setUsername] = useState("Elv");
 
   const answerKind = useMemo(() => getAnswerKind(submitted ?? ""), [submitted]);
   const activeSuggestions = answerKind === "physics" ? physicsSuggestions : suggestions;
@@ -263,6 +283,7 @@ export default function AskSiaWorkspace() {
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       const parameters = new URLSearchParams(window.location.search);
+      setUsername(loadAccountSettings(window.localStorage).username);
       const hasHomeworkSession = parameters.has("homeworkSession") || window.localStorage.getItem(HOMEWORK_SESSION_STORAGE_KEY);
       const hasStudySession = parameters.has("session") || window.localStorage.getItem(STUDY_SESSION_STORAGE_KEY);
       const hasVideoSession = parameters.has("videoSession") || window.localStorage.getItem(VIDEO_SESSION_STORAGE_KEY);
@@ -296,26 +317,34 @@ export default function AskSiaWorkspace() {
   function sendCurrent() {
     const question = input.trim();
     if (!question || status === "thinking" || status === "working") return;
-    beginGeneration(question);
+    setHomeworkDraft(question);
+    setInput("");
+    setSubmitted(null);
+    setStatus("idle");
+    setMode("homework");
+    setActiveTool("homework");
+    setToast("Question moved to the real Homework Solver");
   }
 
   function selectTool(tool: ToolKey) {
     setActiveTool(tool);
     setSubmitted(null);
     setStatus("idle");
-    if (tool === "homework") {
-      setMode("homework");
-      setToast("Homework solver mode selected");
-    } else if (tool === "video") {
-      setMode("default");
-      setToast("粘贴带公开字幕的视频链接");
-    } else if (tool === "transcribe") {
-      setMode("default");
-      setToast("Choose an audio source when you are ready to grant permission");
-    } else {
-      setMode("default");
-      setToast(tool === "file" ? "请选择 PDF 或 TXT 学习资料" : `${toolDetails[tool].label} 尚未开放`);
-    }
+    setMode(tool === "homework" ? "homework" : "default");
+    const messages: Partial<Record<ToolKey, string>> = {
+      homework: "Homework Solver is ready",
+      video: "Paste a public video or podcast link with captions",
+      transcribe: "Choose an audio source when you are ready to grant permission",
+      file: "Choose a PDF or TXT study material",
+      quiz: "Quiz will use your latest saved study material",
+      "study-guide": "Study guide will use your latest saved study material",
+      flashcard: "Flashcards will use your latest saved study material",
+      essay: "Plan and revise your own draft",
+      detector: "Review measurable writing signals without a fake AI probability",
+      headshot: "Prepare a portrait locally without uploading it",
+      "web-search": "Search public Wikipedia sources with direct links",
+    };
+    setToast(messages[tool] || `${toolDetails[tool].label} is ready`);
   }
 
   function regenerate() {
@@ -334,15 +363,15 @@ export default function AskSiaWorkspace() {
         <div className="rail-logo" aria-label="StudyPal AI">S</div>
         <nav className="rail-nav" aria-label="StudyPal AI navigation">
           <RailButton label="Home" active={activeRail === "home"} onClick={() => { setActiveRail("home"); setActiveTool(null); setSubmitted(null); setStatus("idle"); }}><PanelLeft size={17} /></RailButton>
-          <RailButton label="New chat" onClick={() => { setActiveTool(null); setSubmitted(null); setInput(""); setStatus("idle"); }}><Plus size={18} /></RailButton>
-          <RailButton label="Search" active={activeRail === "search"} onClick={() => { setActiveRail("search"); setToast("Search is a local preview"); }}><Search size={17} /></RailButton>
-          <RailButton label="Chats" active={activeRail === "chats"} onClick={() => { setActiveRail("chats"); setToast("Chat history is a local preview"); }}><MessageSquareText size={17} /></RailButton>
+          <RailButton label="New chat" onClick={() => { setActiveTool(null); setHomeworkDraft(""); setSubmitted(null); setInput(""); setStatus("idle"); }}><Plus size={18} /></RailButton>
+          <RailButton label="Search" active={activeRail === "search"} onClick={() => { setActiveRail("search"); setActiveTool(null); setTab("library"); setSubmitted(null); setToast("Search your saved sessions in Library"); }}><Search size={17} /></RailButton>
+          <RailButton label="Chats" active={activeRail === "chats"} onClick={() => { setActiveRail("chats"); setActiveTool(null); setTab("library"); setSubmitted(null); setToast("Saved study and homework sessions are available in Library"); }}><MessageSquareText size={17} /></RailButton>
           <RailButton label="Library" active={activeRail === "library"} onClick={() => { setActiveRail("library"); setActiveTool(null); setTab("library"); setSubmitted(null); }}><LibraryBig size={17} /></RailButton>
           <RailButton label="Study tools" active={activeRail === "tools"} onClick={() => { setActiveRail("tools"); setToast("Study tools are ready in the composer"); }}><Sparkles size={17} /></RailButton>
-          <RailButton label="Explore" active={activeRail === "explore"} onClick={() => { setActiveRail("explore"); setToast("Explore is a local preview"); }}><Globe2 size={17} /></RailButton>
+          <RailButton label="Explore" active={activeRail === "explore"} onClick={() => { setActiveRail("explore"); setActiveTool(null); setTab("library"); setSubmitted(null); setToast("Explore your saved work and learning tools"); }}><Globe2 size={17} /></RailButton>
         </nav>
-        <button type="button" className="profile-avatar" aria-label="Profile" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>E</button>
-        {accountOpen && <AccountMenu usage={usage} onToast={setToast} onClose={() => setAccountOpen(false)} />}
+        <button type="button" className="profile-avatar" aria-label="Profile" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>{username.trim().charAt(0).toUpperCase() || "S"}</button>
+        {accountOpen && <AccountMenu username={username} usage={usage} onToast={setToast} onClose={() => setAccountOpen(false)} onOpen={setAccountDialog} />}
       </aside>
 
       <section className={`workspace-content${submitted ? " workspace-content-conversation" : ""}`}>
@@ -368,18 +397,18 @@ export default function AskSiaWorkspace() {
         ) : (
           <div className="home-stage">
             {activeTool !== "homework" && <>
-              <div className="welcome-panel"><div className="welcome-orb"><Sparkles size={23} /></div><h1>Hi Elv, what are we studying today?</h1></div>
+              <div className="welcome-panel"><div className="welcome-orb"><Sparkles size={23} /></div><h1>Hi {username}, what are we studying today?</h1></div>
               {bannerVisible && <div className="usage-banner"><span>You have <strong>{usage}</strong> usage left. Upgrade to enjoy seamless study journey.</span><button type="button" className="upgrade-button" onClick={() => setToast("Upgrade is disabled in this local clone")}>Upgrade</button><button type="button" className="banner-close" aria-label="Close usage banner" onClick={() => setBannerVisible(false)}><X size={17} /></button></div>}
               <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
             </>}
-            {activeTool === "transcribe" ? <TranscribeWorkspace onToast={setToast} /> : activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace onToast={setToast} /> : activeTool === "video" ? <VideoSummaryWorkspace onToast={setToast} /> : <>
-              {activeTool && <ToolEmptyState tool={activeTool} onToast={setToast} />}
-              <HomePanel tab={tab} setTab={setTab} onToast={setToast} onSelectTool={selectTool} />
+            {activeTool === "essay" || activeTool === "detector" ? <WritingToolsWorkspace tool={activeTool} onToast={setToast} /> : activeTool === "quiz" || activeTool === "study-guide" || activeTool === "flashcard" ? <LearningToolsWorkspace tool={activeTool} onToast={setToast} onOpenFileSummary={() => selectTool("file")} /> : activeTool === "headshot" ? <PortraitWorkspace onToast={setToast} /> : activeTool === "web-search" ? <WebSearchWorkspace onToast={setToast} /> : activeTool === "transcribe" ? <TranscribeWorkspace onToast={setToast} /> : activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace key={homeworkDraft} initialProblem={homeworkDraft} onToast={setToast} /> : activeTool === "video" ? <VideoSummaryWorkspace onToast={setToast} /> : <>
+              <HomePanel tab={tab} setTab={setTab} onSelectTool={selectTool} />
               <div className="onboarding-card"><div className="onboarding-orb"><Sparkles size={20} /></div><div><strong>Get started with StudyPal AI</strong><span>0/2</span><div className="progress-track"><i /></div></div></div>
             </>}
           </div>
         )}
       </section>
+      {accountDialog && <AccountSettingsDialog kind={accountDialog} onClose={() => setAccountDialog(null)} onSaved={(settings) => { setUsername(settings.username); setToast("Local settings saved"); }} />}
       {toast && <div className="workspace-toast" role="status">{toast}</div>}
     </main>
   );
