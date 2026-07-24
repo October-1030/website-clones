@@ -6,7 +6,7 @@ import { BookOpenCheck, LoaderCircle, RefreshCw, ShieldCheck, Trash2, Unplug, X 
 
 interface Connection {
   id: string;
-  provider: "canvas" | "blackboard" | "brightspace";
+  provider: "canvas" | "blackboard" | "brightspace" | "moodle";
   instanceUrl: string;
   accountLabel: string;
   status: "connected" | "expired" | "error";
@@ -29,6 +29,7 @@ interface LmsStatus {
     canvas: { manualToken: boolean; oauthConfigured: boolean; readOnly: boolean };
     blackboard: { configured: boolean; readOnly: boolean; administratorManaged: boolean };
     brightspace: { oauthConfigured: boolean; readOnly: boolean; administratorManaged: boolean };
+    moodle: { manualToken: boolean; readOnly: boolean; administratorManaged: boolean };
   };
   error?: string;
 }
@@ -44,6 +45,9 @@ export default function LmsConnectorDialog({
   const [instanceUrl, setInstanceUrl] = useState("");
   const [accountLabel, setAccountLabel] = useState("Canvas");
   const [accessToken, setAccessToken] = useState("");
+  const [moodleInstanceUrl, setMoodleInstanceUrl] = useState("");
+  const [moodleAccountLabel, setMoodleAccountLabel] = useState("Moodle");
+  const [moodleToken, setMoodleToken] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -89,6 +93,36 @@ export default function LmsConnectorDialog({
       await refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Canvas connection failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function connectMoodle(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!moodleInstanceUrl.trim() || !moodleToken.trim()) {
+      setError("Enter your Moodle URL and administrator-issued read-only web service token.");
+      return;
+    }
+    setBusy("moodle-connect");
+    setError(null);
+    try {
+      const response = await fetch("/api/lms/moodle/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instanceUrl: moodleInstanceUrl.trim(),
+          accountLabel: moodleAccountLabel.trim() || "Moodle",
+          accessToken: moodleToken,
+        }),
+      });
+      const payload = await response.json() as { connection?: Connection; error?: string };
+      if (!response.ok) throw new Error(payload.error || "Moodle connection failed.");
+      setMoodleToken("");
+      onChanged("Moodle connected with an encrypted, read-only external-service token.");
+      await refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Moodle connection failed.");
     } finally {
       setBusy(null);
     }
@@ -166,14 +200,20 @@ export default function LmsConnectorDialog({
       <label>Read-only access token<input type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} autoComplete="off" /></label>
       <button type="submit" className="settings-save" disabled={busy !== null}>{busy === "connect" ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}Verify and connect</button>
     </form>}
+    {status?.authenticated && status.providers.moodle.manualToken && <form className="cloud-auth-form" onSubmit={connectMoodle}>
+      <label>Moodle URL<input type="url" value={moodleInstanceUrl} onChange={(event) => setMoodleInstanceUrl(event.target.value)} placeholder="https://school.moodlecloud.com" autoComplete="url" /></label>
+      <label>Moodle account label<input type="text" value={moodleAccountLabel} onChange={(event) => setMoodleAccountLabel(event.target.value)} maxLength={120} /></label>
+      <label>Read-only external-service token<input type="password" value={moodleToken} onChange={(event) => setMoodleToken(event.target.value)} autoComplete="off" /></label>
+      <button type="submit" className="settings-save" disabled={busy !== null}>{busy === "moodle-connect" ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}Verify and connect Moodle</button>
+    </form>}
     {status?.connections.map((connection) => <div className="cloud-signed-in" key={connection.id}>
       <div><span>{connection.provider.toUpperCase()} · {connection.status}</span><strong>{connection.accountLabel}</strong><small>{connection.instanceUrl}{connection.lastSyncedAt ? ` · synced ${new Date(connection.lastSyncedAt).toLocaleString()}` : ""}</small></div>
       <button type="button" onClick={() => void sync(connection)} disabled={busy !== null}>{busy === `sync:${connection.id}` ? <LoaderCircle size={14} className="spin" /> : <RefreshCw size={14} />}Sync courses</button>
       <button type="button" className="cloud-sign-out" onClick={() => void disconnect(connection)} disabled={busy !== null}>{busy === `delete:${connection.id}` ? <LoaderCircle size={14} className="spin" /> : <Trash2 size={14} />}Disconnect</button>
       {connection.lastError && <div className="portrait-error" role="alert">{connection.lastError}</div>}
     </div>)}
-    {status && !status.authenticated && <div className="cloud-not-configured"><ShieldCheck size={18} /><div><strong>Sign in to StudyPal cloud first</strong><span>Open Cloud account & sync, sign in, then return here to connect Canvas. No LMS data is exposed while signed out.</span></div></div>}
-    {status?.authenticated && status.connections.length === 0 && <div className="cloud-not-configured"><Unplug size={18} /><div><strong>No LMS connected</strong><span>Verify a read-only Canvas token, use an approved OAuth connection, or connect an administrator-configured Blackboard integration.</span></div></div>}
+    {status && !status.authenticated && <div className="cloud-not-configured"><ShieldCheck size={18} /><div><strong>Sign in to StudyPal cloud first</strong><span>Open Cloud account & sync, sign in, then return here to connect an LMS. No LMS data is exposed while signed out.</span></div></div>}
+    {status?.authenticated && status.connections.length === 0 && <div className="cloud-not-configured"><Unplug size={18} /><div><strong>No LMS connected</strong><span>Verify a read-only Canvas or Moodle token, use an approved OAuth connection, or connect an administrator-configured Blackboard integration.</span></div></div>}
     {error && <div className="portrait-error" role="alert">{error}</div>}
   </section></div>;
 }

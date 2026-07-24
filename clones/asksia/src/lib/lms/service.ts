@@ -10,6 +10,7 @@ import {
   refreshBrightspaceAccessToken,
 } from "./brightspace";
 import { CanvasClient } from "./canvas";
+import { MoodleClient } from "./moodle";
 import { decryptLmsToken, encryptLmsToken } from "./crypto";
 import type {
   LmsConnectionRecord,
@@ -84,6 +85,37 @@ export async function connectCanvasAccount(
     .select("*")
     .single();
   if (error || !data) throw databaseFailure("Unable to save the Canvas connection.");
+  return {
+    connection: summary(data as LmsConnectionRecord),
+    profile: { displayName: profile.displayName, email: profile.email },
+  };
+}
+
+export async function connectMoodleAccount(
+  context: AuthenticatedCloud,
+  input: { instanceUrl: string; accessToken: string; accountLabel: string },
+  options: { fetchImpl?: typeof fetch; environment?: NodeJS.ProcessEnv } = {},
+): Promise<{ connection: LmsConnectionSummary; profile: { displayName: string; email: string | null } }> {
+  const moodle = new MoodleClient(input.instanceUrl, input.accessToken, { fetchImpl: options.fetchImpl });
+  const profile = await moodle.verifyConnection();
+  const environment = options.environment || process.env;
+  const { data, error } = await context.client
+    .from("lms_connections")
+    .upsert({
+      user_id: context.user.id,
+      provider: "moodle",
+      instance_url: input.instanceUrl,
+      account_label: input.accountLabel,
+      access_token_ciphertext: encryptLmsToken(input.accessToken, environment),
+      refresh_token_ciphertext: null,
+      token_expires_at: null,
+      scopes: ["core_webservice_get_site_info", "core_enrol_get_users_courses", "core_course_get_contents"],
+      status: "connected",
+      last_error: null,
+    }, { onConflict: "user_id,provider,instance_url" })
+    .select("*")
+    .single();
+  if (error || !data) throw databaseFailure("Unable to save the Moodle connection.");
   return {
     connection: summary(data as LmsConnectionRecord),
     profile: { displayName: profile.displayName, email: profile.email },
@@ -312,7 +344,12 @@ async function createProviderClient(
       if (error) throw databaseFailure("Unable to rotate the Brightspace OAuth tokens.");
     }
     return new BrightspaceClient(connection.instance_url, accessToken, config, { fetchImpl: options.fetchImpl });
-  }  throw new LmsError("This LMS provider is not implemented.", "lms_provider_not_supported", 400);
+  }
+  if (connection.provider === "moodle") {
+    const token = decryptLmsToken(connection.access_token_ciphertext, environment);
+    return new MoodleClient(connection.instance_url, token, { fetchImpl: options.fetchImpl });
+  }
+  throw new LmsError("This LMS provider is not implemented.", "lms_provider_not_supported", 400);
 }
 
 export async function syncLmsConnection(
@@ -431,7 +468,7 @@ export async function syncLmsConnection(
       context.client
         .from("lms_connections")
         .update({
-          status: failure.code === "canvas_token_rejected" || failure.code === "blackboard_token_rejected" || failure.code === "brightspace_token_rejected"
+          status: failure.code === "canvas_token_rejected" || failure.code === "blackboard_token_rejected" || failure.code === "brightspace_token_rejected" || failure.code === "moodle_token_rejected"
             ? "expired"
             : "error",
           last_error: failure.message,

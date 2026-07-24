@@ -77,11 +77,14 @@ Manual Canvas tokens work without an OAuth Developer Key. Optional OAuth require
 Blackboard Learn is supported through a school-admin-installed, least-privilege REST integration. Configure BLACKBOARD_INSTANCE_URL, BLACKBOARD_APP_KEY, and BLACKBOARD_APP_SECRET only on the server; StudyPal automatically renews the short-lived access token and never writes content back to Learn.
 
 D2L Brightspace is supported through its recommended OAuth 2.0 authorization-code flow. A school administrator registers the app and enables refresh tokens; StudyPal encrypts both tokens, rotates one-time refresh tokens during synchronization, follows no redirects, and requests only profile, own-enrollment, and table-of-contents read scopes.
+
+Moodle is supported through an administrator-created external service restricted to `core_webservice_get_site_info`, `core_enrol_get_users_courses`, and `core_course_get_contents`. Users paste the issued token into the signed-in StudyPal LMS dialog; the token is sent only in HTTPS POST bodies, encrypted before storage, and never placed in URLs or client logs. Self-hosted Moodle domains must be explicitly allowlisted with `STUDYPAL_LMS_ALLOWED_HOSTS`.
+
 ## Important boundaries
 
 The local web product intentionally does not pretend to provide:
 
-- Moodle synchronization (Canvas, Blackboard, and Brightspace read-only synchronization are available);
+- write access to Canvas, Blackboard, Brightspace, or Moodle (all LMS synchronization is read-only);
 - subscription, payment, or quota billing;
 - production cloud hosting until a dedicated StudyPal Supabase project and deployment target are approved;
 - mobile operating-system overlays or background translation over other apps;

@@ -5,6 +5,7 @@ const INSTANCE_URL_MAX = 500;
 const LABEL_MAX = 120;
 const CANVAS_HOST_SUFFIX = ".instructure.com";
 const BRIGHTSPACE_HOST_SUFFIX = ".brightspace.com";
+const MOODLE_HOST_SUFFIX = ".moodlecloud.com";
 
 function configuredHosts(environment: NodeJS.ProcessEnv): Set<string> {
   return new Set(
@@ -165,6 +166,71 @@ export function normalizeBrightspaceInstanceUrl(
   url.hash = "";
   return url.toString().replace(/\/$/, "");
 }
+
+export function normalizeMoodleInstanceUrl(
+  raw: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const clean = raw.trim();
+  if (!clean || clean.length > INSTANCE_URL_MAX) {
+    throw new LmsError("Moodle URL length is invalid.", "invalid_lms_instance", 400);
+  }
+  let url: URL;
+  try {
+    url = new URL(clean);
+  } catch {
+    throw new LmsError("Enter a complete Moodle HTTPS URL.", "invalid_lms_instance", 400);
+  }
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.port
+    || isUnsafeHost(url.hostname)
+  ) {
+    throw new LmsError("Moodle must use an approved public HTTPS host.", "unsafe_lms_instance", 400);
+  }
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const approved = host === "moodlecloud.com"
+    || host.endsWith(MOODLE_HOST_SUFFIX)
+    || configuredHosts(environment).has(host);
+  if (!approved) {
+    throw new LmsError(
+      "This Moodle host is not approved. Add its exact hostname to STUDYPAL_LMS_ALLOWED_HOSTS.",
+      "lms_host_not_allowed",
+      400,
+    );
+  }
+  url.hostname = host;
+  url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+export function parseMoodleConnectionInput(value: unknown): {
+  instanceUrl: string;
+  accessToken: string;
+  accountLabel: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new LmsError("Moodle connection input is invalid.", "invalid_lms_connection", 400);
+  }
+  const record = value as Record<string, unknown>;
+  const instanceUrl = normalizeMoodleInstanceUrl(typeof record.instanceUrl === "string" ? record.instanceUrl : "");
+  const accessToken = typeof record.accessToken === "string" ? record.accessToken.trim() : "";
+  const accountLabel = typeof record.accountLabel === "string" && record.accountLabel.trim()
+    ? record.accountLabel.trim()
+    : "Moodle";
+  if (!accessToken || accessToken.length > 8_000) {
+    throw new LmsError("Moodle token length is invalid.", "invalid_lms_token", 400);
+  }
+  if (accountLabel.length > LABEL_MAX) {
+    throw new LmsError("Moodle account label is too long.", "invalid_lms_label", 400);
+  }
+  return { instanceUrl, accessToken, accountLabel };
+}
+
 export function parseCanvasConnectionInput(value: unknown): {
   instanceUrl: string;
   accessToken: string;

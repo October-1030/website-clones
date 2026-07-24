@@ -22,8 +22,14 @@ export async function GET() {
         configured: Boolean(getBlackboardConfig()),
         readOnly: true,
         administratorManaged: true,
-      },      brightspace: {
+      },
+      brightspace: {
         oauthConfigured: Boolean(getBrightspaceOauthConfig()),
+        readOnly: true,
+        administratorManaged: true,
+      },
+      moodle: {
+        manualToken: true,
         readOnly: true,
         administratorManaged: true,
       },
