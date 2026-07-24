@@ -6,7 +6,7 @@ import { BookOpenCheck, LoaderCircle, RefreshCw, ShieldCheck, Trash2, Unplug, X 
 
 interface Connection {
   id: string;
-  provider: "canvas" | "blackboard";
+  provider: "canvas" | "blackboard" | "brightspace";
   instanceUrl: string;
   accountLabel: string;
   status: "connected" | "expired" | "error";
@@ -28,6 +28,7 @@ interface LmsStatus {
   providers: {
     canvas: { manualToken: boolean; oauthConfigured: boolean; readOnly: boolean };
     blackboard: { configured: boolean; readOnly: boolean; administratorManaged: boolean };
+    brightspace: { oauthConfigured: boolean; readOnly: boolean; administratorManaged: boolean };
   };
   error?: string;
 }
@@ -108,6 +109,9 @@ export default function LmsConnectorDialog({
       setBusy(null);
     }
   }
+  function connectBrightspace() {
+    window.location.href = "/api/lms/brightspace/oauth/start";
+  }
   async function sync(connection: Connection) {
     setBusy(`sync:${connection.id}`);
     setError(null);
@@ -118,11 +122,11 @@ export default function LmsConnectorDialog({
         materialsSynced?: number;
         error?: string;
       };
-      if (!response.ok) throw new Error(payload.error || "Canvas sync failed.");
+      if (!response.ok) throw new Error(payload.error || "LMS sync failed.");
       onChanged(`Synced ${payload.coursesSynced || 0} courses and ${payload.materialsSynced || 0} materials.`);
       await refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Canvas sync failed.");
+      setError(caught instanceof Error ? caught.message : "LMS sync failed.");
     } finally {
       setBusy(null);
     }
@@ -139,11 +143,11 @@ export default function LmsConnectorDialog({
         body: JSON.stringify({ confirmation: "DISCONNECT_LMS" }),
       });
       const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error || "Canvas disconnect failed.");
-      onChanged("Canvas connection removed.");
+      if (!response.ok) throw new Error(payload.error || "LMS disconnect failed.");
+      onChanged(`${connection.accountLabel} connection removed.`);
       await refresh();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Canvas disconnect failed.");
+      setError(caught instanceof Error ? caught.message : "LMS disconnect failed.");
     } finally {
       setBusy(null);
     }
@@ -151,10 +155,11 @@ export default function LmsConnectorDialog({
 
   return <div className="dialog-backdrop" role="presentation"><section className="account-settings-dialog cloud-account-dialog" role="dialog" aria-modal="true" aria-label="LMS connections">
     <button type="button" className="dialog-close" aria-label="Close LMS connections" onClick={onClose}><X size={16} /></button>
-    <div className="settings-dialog-heading"><BookOpenCheck size={19} /><div><h2>LMS connections</h2><p>Read-only Canvas synchronization imports course structure, pages, assignments, and file metadata. StudyPal never writes grades, submissions, or messages back to Canvas.</p></div></div>
+    <div className="settings-dialog-heading"><BookOpenCheck size={19} /><div><h2>LMS connections</h2><p>Read-only LMS synchronization imports course structure and material metadata. StudyPal never writes grades, submissions, enrollments, or messages back to a school system.</p></div></div>
     {!status && !error && <div className="cloud-loading"><LoaderCircle size={17} className="spin" />Checking LMS configuration...</div>}
     {status?.authenticated && status.providers.canvas.oauthConfigured && <button type="button" className="settings-save" onClick={() => { window.location.href = "/api/lms/canvas/oauth/start"; }}><ShieldCheck size={14} />Connect Canvas with OAuth</button>}
     {status?.authenticated && status.providers.blackboard.configured && <button type="button" className="settings-save" onClick={() => void connectBlackboard()} disabled={busy !== null}>{busy === "blackboard-connect" ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />}Connect Blackboard Learn</button>}
+    {status?.authenticated && status.providers.brightspace.oauthConfigured && <button type="button" className="settings-save" onClick={connectBrightspace} disabled={busy !== null}><ShieldCheck size={14} />Connect D2L Brightspace</button>}
     {status?.authenticated && <form className="cloud-auth-form" onSubmit={connect}>
       <label>Canvas URL<input type="url" value={instanceUrl} onChange={(event) => setInstanceUrl(event.target.value)} placeholder="https://school.instructure.com" autoComplete="url" /></label>
       <label>Account label<input type="text" value={accountLabel} onChange={(event) => setAccountLabel(event.target.value)} maxLength={120} /></label>
@@ -168,7 +173,7 @@ export default function LmsConnectorDialog({
       {connection.lastError && <div className="portrait-error" role="alert">{connection.lastError}</div>}
     </div>)}
     {status && !status.authenticated && <div className="cloud-not-configured"><ShieldCheck size={18} /><div><strong>Sign in to StudyPal cloud first</strong><span>Open Cloud account & sync, sign in, then return here to connect Canvas. No LMS data is exposed while signed out.</span></div></div>}
-    {status?.authenticated && status.connections.length === 0 && <div className="cloud-not-configured"><Unplug size={18} /><div><strong>No LMS connected</strong><span>Verify a read-only Canvas token, use Canvas OAuth, or connect an administrator-configured Blackboard integration.</span></div></div>}
+    {status?.authenticated && status.connections.length === 0 && <div className="cloud-not-configured"><Unplug size={18} /><div><strong>No LMS connected</strong><span>Verify a read-only Canvas token, use an approved OAuth connection, or connect an administrator-configured Blackboard integration.</span></div></div>}
     {error && <div className="portrait-error" role="alert">{error}</div>}
   </section></div>;
 }

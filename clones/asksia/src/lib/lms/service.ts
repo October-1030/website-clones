@@ -4,6 +4,11 @@ import {
   getBlackboardConfig,
   requestBlackboardAccessToken,
 } from "./blackboard";
+import {
+  BrightspaceClient,
+  getBrightspaceOauthConfig,
+  refreshBrightspaceAccessToken,
+} from "./brightspace";
 import { CanvasClient } from "./canvas";
 import { decryptLmsToken, encryptLmsToken } from "./crypto";
 import type {
@@ -150,6 +155,37 @@ export async function saveCanvasOauthConnection(
   return summary(data as LmsConnectionRecord);
 }
 
+export async function saveBrightspaceOauthConnection(
+  context: AuthenticatedCloud,
+  value: {
+    instanceUrl: string;
+    accessToken: string;
+    refreshToken: string | null;
+    expiresAt: string;
+    scopes: string[];
+    accountLabel: string;
+  },
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<LmsConnectionSummary> {
+  const { data, error } = await context.client
+    .from("lms_connections")
+    .upsert({
+      user_id: context.user.id,
+      provider: "brightspace",
+      instance_url: value.instanceUrl,
+      account_label: value.accountLabel,
+      access_token_ciphertext: encryptLmsToken(value.accessToken, environment),
+      refresh_token_ciphertext: value.refreshToken ? encryptLmsToken(value.refreshToken, environment) : null,
+      token_expires_at: value.expiresAt,
+      scopes: value.scopes,
+      status: "connected",
+      last_error: null,
+    }, { onConflict: "user_id,provider,instance_url" })
+    .select("*")
+    .single();
+  if (error || !data) throw databaseFailure("Unable to save the Brightspace OAuth connection.");
+  return summary(data as LmsConnectionRecord);
+}
 export async function listLmsConnections(context: AuthenticatedCloud): Promise<{
   connections: LmsConnectionSummary[];
   courses: Array<{
@@ -249,7 +285,34 @@ async function createProviderClient(
     if (error) throw databaseFailure("Unable to refresh the Blackboard token.");
     return new BlackboardClient(connection.instance_url, token.accessToken, { fetchImpl: options.fetchImpl });
   }
-  throw new LmsError("This LMS provider is not implemented.", "lms_provider_not_supported", 400);
+  if (connection.provider === "brightspace") {
+    const config = getBrightspaceOauthConfig(environment);
+    if (!config || config.instanceUrl !== connection.instance_url) {
+      throw new LmsError("Brightspace OAuth configuration no longer matches this connection.", "brightspace_not_configured", 503);
+    }
+    let accessToken = decryptLmsToken(connection.access_token_ciphertext, environment);
+    const expiresAt = connection.token_expires_at ? new Date(connection.token_expires_at).valueOf() : Number.POSITIVE_INFINITY;
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now() + 5 * 60_000) {
+      if (!connection.refresh_token_ciphertext) {
+        throw new LmsError("Brightspace needs to be authorized again.", "brightspace_token_rejected", 401);
+      }
+      const currentRefreshToken = decryptLmsToken(connection.refresh_token_ciphertext, environment);
+      const token = await refreshBrightspaceAccessToken(config, currentRefreshToken, options.fetchImpl);
+      accessToken = token.accessToken;
+      const { error } = await context.client
+        .from("lms_connections")
+        .update({
+          access_token_ciphertext: encryptLmsToken(token.accessToken, environment),
+          refresh_token_ciphertext: encryptLmsToken(token.refreshToken || currentRefreshToken, environment),
+          token_expires_at: token.expiresAt,
+          status: "connected",
+          last_error: null,
+        })
+        .eq("id", connection.id);
+      if (error) throw databaseFailure("Unable to rotate the Brightspace OAuth tokens.");
+    }
+    return new BrightspaceClient(connection.instance_url, accessToken, config, { fetchImpl: options.fetchImpl });
+  }  throw new LmsError("This LMS provider is not implemented.", "lms_provider_not_supported", 400);
 }
 
 export async function syncLmsConnection(
@@ -368,7 +431,7 @@ export async function syncLmsConnection(
       context.client
         .from("lms_connections")
         .update({
-          status: failure.code === "canvas_token_rejected" || failure.code === "blackboard_token_rejected"
+          status: failure.code === "canvas_token_rejected" || failure.code === "blackboard_token_rejected" || failure.code === "brightspace_token_rejected"
             ? "expired"
             : "error",
           last_error: failure.message,

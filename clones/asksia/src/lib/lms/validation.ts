@@ -4,6 +4,7 @@ import { LmsError } from "./types";
 const INSTANCE_URL_MAX = 500;
 const LABEL_MAX = 120;
 const CANVAS_HOST_SUFFIX = ".instructure.com";
+const BRIGHTSPACE_HOST_SUFFIX = ".brightspace.com";
 
 function configuredHosts(environment: NodeJS.ProcessEnv): Set<string> {
   return new Set(
@@ -123,6 +124,47 @@ export function normalizeCanvasInstanceUrl(
   return url.toString().replace(/\/$/, "");
 }
 
+
+export function normalizeBrightspaceInstanceUrl(
+  raw: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  const clean = raw.trim();
+  if (!clean || clean.length > INSTANCE_URL_MAX) {
+    throw new LmsError("Brightspace URL length is invalid.", "invalid_lms_instance", 400);
+  }
+  let url: URL;
+  try {
+    url = new URL(clean);
+  } catch {
+    throw new LmsError("Enter a complete Brightspace HTTPS URL.", "invalid_lms_instance", 400);
+  }
+  if (
+    url.protocol !== "https:"
+    || url.username
+    || url.password
+    || url.port
+    || isUnsafeHost(url.hostname)
+  ) {
+    throw new LmsError("Brightspace must use an approved public HTTPS host.", "unsafe_lms_instance", 400);
+  }
+  const host = url.hostname.toLowerCase().replace(/\.$/, "");
+  const approved = host === "brightspace.com"
+    || host.endsWith(BRIGHTSPACE_HOST_SUFFIX)
+    || configuredHosts(environment).has(host);
+  if (!approved) {
+    throw new LmsError(
+      "This Brightspace host is not approved. Add its exact hostname to STUDYPAL_LMS_ALLOWED_HOSTS.",
+      "lms_host_not_allowed",
+      400,
+    );
+  }
+  url.hostname = host;
+  url.pathname = "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
 export function parseCanvasConnectionInput(value: unknown): {
   instanceUrl: string;
   accessToken: string;

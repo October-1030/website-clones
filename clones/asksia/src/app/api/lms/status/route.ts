@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { CloudAuthError, getCloudAuthContext } from "@/lib/cloud/server";
 import { getBlackboardConfig } from "@/lib/lms/blackboard";
+import { getBrightspaceOauthConfig } from "@/lib/lms/brightspace";
 import { getCanvasOauthConfig } from "@/lib/lms/oauth";
 import { listLmsConnections } from "@/lib/lms/service";
 import { LmsError } from "@/lib/lms/types";
@@ -19,6 +20,10 @@ export async function GET() {
       },
       blackboard: {
         configured: Boolean(getBlackboardConfig()),
+        readOnly: true,
+        administratorManaged: true,
+      },      brightspace: {
+        oauthConfigured: Boolean(getBrightspaceOauthConfig()),
         readOnly: true,
         administratorManaged: true,
       },

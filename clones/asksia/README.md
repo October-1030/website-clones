@@ -75,11 +75,13 @@ StudyPal can connect a signed-in cloud account to Canvas in read-only mode. It s
 Manual Canvas tokens work without an OAuth Developer Key. Optional OAuth requires `CANVAS_INSTANCE_URL`, `CANVAS_CLIENT_ID`, `CANVAS_CLIENT_SECRET`, and `CANVAS_REDIRECT_URI`. Custom Canvas domains must be listed in `STUDYPAL_LMS_ALLOWED_HOSTS`.
 
 Blackboard Learn is supported through a school-admin-installed, least-privilege REST integration. Configure BLACKBOARD_INSTANCE_URL, BLACKBOARD_APP_KEY, and BLACKBOARD_APP_SECRET only on the server; StudyPal automatically renews the short-lived access token and never writes content back to Learn.
+
+D2L Brightspace is supported through its recommended OAuth 2.0 authorization-code flow. A school administrator registers the app and enables refresh tokens; StudyPal encrypts both tokens, rotates one-time refresh tokens during synchronization, follows no redirects, and requests only profile, own-enrollment, and table-of-contents read scopes.
 ## Important boundaries
 
 The local web product intentionally does not pretend to provide:
 
-- Brightspace or Moodle synchronization (Canvas and Blackboard read-only synchronization are available);
+- Moodle synchronization (Canvas, Blackboard, and Brightspace read-only synchronization are available);
 - subscription, payment, or quota billing;
 - production cloud hosting until a dedicated StudyPal Supabase project and deployment target are approved;
 - mobile operating-system overlays or background translation over other apps;
