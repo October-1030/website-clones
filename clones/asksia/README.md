@@ -64,3 +64,22 @@ npm run test:e2e:p3
 `npm run check` 执行 lint、TypeScript、单元/API 集成测试和生产构建。P2 与 P3 的 E2E 都使用本机已有 Playwright 与 Chrome，验证 1440px 桌面和 390px 移动视口，并保存截图、trace、版本和诊断。
 
 技术说明见 [P2 provider 与服务端会话](docs/P2-live-provider-and-session.md) 与 [P3 Homework Solver](docs/P3-homework-solver.md)。历史竞品研究仍保留在 `docs/research/`、`public/images/asksia/` 和 `scripts/`；这些名称仅表示研究来源，运行产品品牌是 StudyPal AI。
+
+## P4 — Video Link Summary
+
+The local workspace now supports public YouTube caption summaries and transcript-backed podcast pages:
+
+- HTTPS/domain safety validation and redirect allowlisting;
+- Android Innertube signed-caption retrieval with WEB fallback;
+- MiniMax M3 overview, key concepts, and review questions;
+- grounded follow-up answers with timestamp/section citations;
+- browser and server session restore;
+- explicit errors when a media source has no public transcript.
+
+Run the P4 browser flow:
+
+```bash
+npm run test:e2e:p4
+```
+
+See `docs/P4-video-link-summary.md` for scope, security boundaries, configuration, and verification evidence.

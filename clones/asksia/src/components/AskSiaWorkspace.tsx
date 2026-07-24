@@ -39,8 +39,10 @@ import {
 } from "lucide-react";
 import HomeworkWorkspace from "@/components/HomeworkWorkspace";
 import StudyFileWorkspace from "@/components/StudyFileWorkspace";
+import VideoSummaryWorkspace from "@/components/VideoSummaryWorkspace";
 import { HOMEWORK_SESSION_STORAGE_KEY } from "@/lib/homework/types";
 import { STUDY_SESSION_STORAGE_KEY } from "@/lib/study/types";
+import { VIDEO_SESSION_STORAGE_KEY } from "@/lib/video/types";
 
 type Mode = "default" | "homework";
 type AppTab = "everywhere" | "library";
@@ -136,7 +138,7 @@ function Composer({
         <button type="button" className="composer-tool-button" title="Tools" onClick={() => setToolsOpen(!toolsOpen)}><span className="tool-sliders">☷</span><span>Tools</span><ChevronDown size={13} /></button>
         <button type="button" className={`composer-tool-button${deepThink ? " tool-selected" : ""}`} title="Deep think" onClick={() => setDeepThink(!deepThink)}><Zap size={14} /><span>Deep think</span></button>
         {mode === "homework" && <><span className="composer-divider" /><span className="mode-chip"><BookOpenCheck size={14} />Homework solver</span><button type="button" className="clear-mode" aria-label="Clear input mode" onClick={() => setMode("default")}><X size={14} /></button></>}
-        {toolsOpen && <div className="tools-popover"><button type="button" onClick={() => { onSelectTool("file"); setToolsOpen(false); }}>File summary</button><button type="button" onClick={() => onToast("Live transcribe 尚未开放")}>Live transcribe</button><button type="button" onClick={() => onToast("Video Link summary 尚未开放")}>Video Link summary</button></div>}
+        {toolsOpen && <div className="tools-popover"><button type="button" onClick={() => { onSelectTool("file"); setToolsOpen(false); }}>File summary</button><button type="button" onClick={() => onToast("Live transcribe 尚未开放")}>Live transcribe</button><button type="button" onClick={() => { onSelectTool("video"); setToolsOpen(false); }}>Video Link summary</button></div>}
       </div>
       <div className="composer-actions">
         <button type="button" className="composer-icon-button" aria-label="Upload image" onClick={() => onToast("Image upload is disabled in this local clone")}><ImageIcon size={16} /></button>
@@ -268,7 +270,10 @@ export default function AskSiaWorkspace() {
       const parameters = new URLSearchParams(window.location.search);
       const hasHomeworkSession = parameters.has("homeworkSession") || window.localStorage.getItem(HOMEWORK_SESSION_STORAGE_KEY);
       const hasStudySession = parameters.has("session") || window.localStorage.getItem(STUDY_SESSION_STORAGE_KEY);
-      if (hasHomeworkSession) {
+      const hasVideoSession = parameters.has("videoSession") || window.localStorage.getItem(VIDEO_SESSION_STORAGE_KEY);
+      if (hasVideoSession) {
+        setActiveTool("video");
+      } else if (hasHomeworkSession) {
         setActiveTool("homework");
         setMode("homework");
       } else if (hasStudySession) {
@@ -303,6 +308,9 @@ export default function AskSiaWorkspace() {
     if (tool === "homework") {
       setMode("homework");
       setToast("Homework solver mode selected");
+    } else if (tool === "video") {
+      setMode("default");
+      setToast("粘贴带公开字幕的视频链接");
     } else if (tool === "transcribe") {
       setTranscribeOpen(true);
       setToast("Live transcribe 尚未开放，本轮不请求音频权限");
@@ -366,7 +374,7 @@ export default function AskSiaWorkspace() {
               {bannerVisible && <div className="usage-banner"><span>You have <strong>{usage}</strong> usage left. Upgrade to enjoy seamless study journey.</span><button type="button" className="upgrade-button" onClick={() => setToast("Upgrade is disabled in this local clone")}>Upgrade</button><button type="button" className="banner-close" aria-label="Close usage banner" onClick={() => setBannerVisible(false)}><X size={17} /></button></div>}
               <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
             </>}
-            {activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace onToast={setToast} /> : <>
+            {activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace onToast={setToast} /> : activeTool === "video" ? <VideoSummaryWorkspace onToast={setToast} /> : <>
               {activeTool && <ToolEmptyState tool={activeTool} onToast={setToast} />}
               <HomePanel tab={tab} setTab={setTab} onToast={setToast} onSelectTool={selectTool} />
               <div className="onboarding-card"><div className="onboarding-orb"><Sparkles size={20} /></div><div><strong>Get started with StudyPal AI</strong><span>0/2</span><div className="progress-track"><i /></div></div></div>
