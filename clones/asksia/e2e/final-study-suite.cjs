@@ -226,6 +226,11 @@ async function runDesktop(browser, record) {
   await page.getByRole("button", { name: "Sign in", exact: true }).last().waitFor();
   await page.getByRole("button", { name: "Close cloud account" }).click();
 
+  await page.getByRole("button", { name: "Connect Canvas LMS" }).click();
+  await page.getByRole("heading", { name: "LMS connections" }).waitFor();
+  await page.getByText("Sign in to StudyPal cloud first").waitFor();
+  await page.getByRole("button", { name: "Close LMS connections" }).click();
+
   await page.getByRole("button", { name: "Library" }).click();
   await page.getByRole("heading", { name: "Everything you have studied" }).waitFor();
   await page.getByLabel("Search saved sessions").fill("no-matching-session");

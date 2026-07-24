@@ -68,11 +68,16 @@ By default, server sessions are stored below `.studypal-data/`:
 
 Set `STUDYPAL_DATA_DIR` to change the location. Uploaded document binaries and temporary audio are not retained after processing. Browser preferences and generated study tools use localStorage.
 
+## Canvas LMS connector
+
+StudyPal can connect a signed-in cloud account to Canvas in read-only mode. It synchronizes active courses, modules, pages, assignment descriptions and due dates, file metadata, and external links. Tokens are encrypted with AES-256-GCM before cloud storage, Canvas hosts are allowlisted, redirects are blocked, and database RLS isolates every connection and synchronized row.
+
+Manual Canvas tokens work without an OAuth Developer Key. Optional OAuth requires `CANVAS_INSTANCE_URL`, `CANVAS_CLIENT_ID`, `CANVAS_CLIENT_SECRET`, and `CANVAS_REDIRECT_URI`. Custom Canvas domains must be listed in `STUDYPAL_LMS_ALLOWED_HOSTS`.
 ## Important boundaries
 
 The local web product intentionally does not pretend to provide:
 
-- LMS login or Canvas/Blackboard/Brightspace/Moodle synchronization;
+- Blackboard, Brightspace, or Moodle synchronization (Canvas read-only synchronization is available);
 - subscription, payment, or quota billing;
 - production cloud hosting until a dedicated StudyPal Supabase project and deployment target are approved;
 - mobile operating-system overlays or background translation over other apps;

@@ -37,6 +37,7 @@ import {
 import HomeworkWorkspace from "@/components/HomeworkWorkspace";
 import AccountSettingsDialog from "@/components/AccountSettingsDialog";
 import CloudAccountDialog from "@/components/CloudAccountDialog";
+import LmsConnectorDialog from "@/components/LmsConnectorDialog";
 import LearningToolsWorkspace from "@/components/LearningToolsWorkspace";
 import PortraitWorkspace from "@/components/PortraitWorkspace";
 import LibraryPanel from "@/components/LibraryPanel";
@@ -166,7 +167,7 @@ function ToolShortcuts({ onSelectTool }: { onSelectTool: (tool: ToolKey) => void
   </div>;
 }
 
-function HomePanel({ tab, setTab, onSelectTool }: { tab: AppTab; setTab: (tab: AppTab) => void; onSelectTool: (tool: ToolKey) => void }) {
+function HomePanel({ tab, setTab, onSelectTool, onLms }: { tab: AppTab; setTab: (tab: AppTab) => void; onSelectTool: (tool: ToolKey) => void; onLms: () => void }) {
   return <>
     <ToolShortcuts onSelectTool={onSelectTool} />
     <div className="home-tabs" role="tablist" aria-label="Home content">
@@ -174,7 +175,7 @@ function HomePanel({ tab, setTab, onSelectTool }: { tab: AppTab; setTab: (tab: A
       <button type="button" role="tab" aria-selected={tab === "library"} className={tab === "library" ? "home-tab-active" : ""} onClick={() => setTab("library")}>Library</button>
     </div>
     {tab === "everywhere" ? <div className="everywhere-panel" role="tabpanel">
-      <div className="everywhere-copy"><span className="everywhere-kicker">StudyPal Extension</span><h2>Keep your study flow in one place</h2><p>The browser extension is a planned companion. This local app already supports files, homework, video captions, audio transcription, and study tools.</p></div>
+      <div className="everywhere-copy"><span className="everywhere-kicker">StudyPal Extension</span><h2>Keep your study flow in one place</h2><p>The browser extension is a planned companion. Connect Canvas now to synchronize course structure and materials into StudyPal.</p><button type="button" className="tool-shortcut" onClick={onLms}>Connect Canvas LMS</button></div>
       <div className="extension-preview"><div className="preview-sidebar"><span className="preview-brand">S</span><span /><span /><span /><span /></div><div className="preview-window"><div className="preview-bar"><i /><i /><i /></div><div className="preview-lines"><b>StudyPal AI</b><span>Summarize this page</span><span>Key ideas and useful context</span></div></div></div>
       <div className="carousel-dots"><i /><i /><i className="dot-active" /></div>
     </div> : <LibraryPanel />}
@@ -188,6 +189,7 @@ function AccountMenu({
   onClose,
   onOpen,
   onCloud,
+  onLms,
 }: {
   username: string;
   usage: number;
@@ -195,6 +197,7 @@ function AccountMenu({
   onClose: () => void;
   onOpen: (kind: "account" | "personalization" | "help" | "updates") => void;
   onCloud: () => void;
+  onLms: () => void;
 }) {
   const initial = username.trim().charAt(0).toUpperCase() || "S";
   const actions: Array<{ label: string; kind?: "account" | "personalization" | "help" | "updates"; icon: ReactNode }> = [
@@ -205,7 +208,7 @@ function AccountMenu({
     { label: "Personalization", kind: "personalization", icon: <UserRound size={14} /> },
     { label: "Help center", kind: "help", icon: <CircleHelp size={14} /> },
   ];
-  return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">{initial}</div><div><strong>{username}</strong><span>Local plan</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>Usage</span><b>{usage}</b></div><div><span>File Page</span><b>Local</b></div><div><span>Recording</span><b>10 min</b></div><div><span>AI Detection</span><b>10k</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Payments are intentionally disabled in this local build")}><LockKeyhole size={14} />Upgrade unavailable</button><div className="account-links">{actions.map((action) => <button type="button" key={action.label} onClick={() => { if (action.kind) { onOpen(action.kind); onClose(); } else { onToast(action.label === "Credits Used" ? "Local features do not consume paid credits" : "Rewards are not part of this local product"); } }}>{action.icon}{action.label}{action.kind && <ChevronDown size={13} className="account-link-chevron" />}</button>)}<button type="button" onClick={() => { onCloud(); onClose(); }}><Cloud size={14} />Cloud account & sync</button></div></div>;
+  return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">{initial}</div><div><strong>{username}</strong><span>Local plan</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>Usage</span><b>{usage}</b></div><div><span>File Page</span><b>Local</b></div><div><span>Recording</span><b>10 min</b></div><div><span>AI Detection</span><b>10k</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Payments are intentionally disabled in this local build")}><LockKeyhole size={14} />Upgrade unavailable</button><div className="account-links">{actions.map((action) => <button type="button" key={action.label} onClick={() => { if (action.kind) { onOpen(action.kind); onClose(); } else { onToast(action.label === "Credits Used" ? "Local features do not consume paid credits" : "Rewards are not part of this local product"); } }}>{action.icon}{action.label}{action.kind && <ChevronDown size={13} className="account-link-chevron" />}</button>)}<button type="button" onClick={() => { onCloud(); onClose(); }}><Cloud size={14} />Cloud account & sync</button><button type="button" onClick={() => { onLms(); onClose(); }}><BookOpenCheck size={14} />LMS connections</button></div></div>;
 }
 
 function MathAnswer() {
@@ -272,6 +275,7 @@ export default function AskSiaWorkspace() {
   const [activeTool, setActiveTool] = useState<ToolKey | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [cloudAccountOpen, setCloudAccountOpen] = useState(false);
+  const [lmsOpen, setLmsOpen] = useState(false);
   const [homeworkDraft, setHomeworkDraft] = useState("");
   const [accountDialog, setAccountDialog] = useState<"account" | "personalization" | "help" | "updates" | null>(null);
   const [username, setUsername] = useState("Elv");
@@ -376,7 +380,7 @@ export default function AskSiaWorkspace() {
           <RailButton label="Explore" active={activeRail === "explore"} onClick={() => { setActiveRail("explore"); setActiveTool(null); setTab("library"); setSubmitted(null); setToast("Explore your saved work and learning tools"); }}><Globe2 size={17} /></RailButton>
         </nav>
         <button type="button" className="profile-avatar" aria-label="Profile" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>{username.trim().charAt(0).toUpperCase() || "S"}</button>
-        {accountOpen && <AccountMenu username={username} usage={usage} onToast={setToast} onClose={() => setAccountOpen(false)} onOpen={setAccountDialog} onCloud={() => setCloudAccountOpen(true)} />}
+        {accountOpen && <AccountMenu username={username} usage={usage} onToast={setToast} onClose={() => setAccountOpen(false)} onOpen={setAccountDialog} onCloud={() => setCloudAccountOpen(true)} onLms={() => setLmsOpen(true)} />}
       </aside>
 
       <section className={`workspace-content${submitted ? " workspace-content-conversation" : ""}`}>
@@ -407,13 +411,14 @@ export default function AskSiaWorkspace() {
               <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
             </>}
             {activeTool === "essay" || activeTool === "detector" ? <WritingToolsWorkspace tool={activeTool} onToast={setToast} /> : activeTool === "quiz" || activeTool === "study-guide" || activeTool === "flashcard" ? <LearningToolsWorkspace tool={activeTool} onToast={setToast} onOpenFileSummary={() => selectTool("file")} /> : activeTool === "headshot" ? <PortraitWorkspace onToast={setToast} /> : activeTool === "web-search" ? <WebSearchWorkspace onToast={setToast} /> : activeTool === "transcribe" ? <TranscribeWorkspace onToast={setToast} /> : activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace key={homeworkDraft} initialProblem={homeworkDraft} onToast={setToast} /> : activeTool === "video" ? <VideoSummaryWorkspace onToast={setToast} /> : <>
-              <HomePanel tab={tab} setTab={setTab} onSelectTool={selectTool} />
+              <HomePanel tab={tab} setTab={setTab} onSelectTool={selectTool} onLms={() => setLmsOpen(true)} />
               <div className="onboarding-card"><div className="onboarding-orb"><Sparkles size={20} /></div><div><strong>Get started with StudyPal AI</strong><span>0/2</span><div className="progress-track"><i /></div></div></div>
             </>}
           </div>
         )}
       </section>
       {cloudAccountOpen && <CloudAccountDialog onClose={() => setCloudAccountOpen(false)} onChanged={setToast} />}
+      {lmsOpen && <LmsConnectorDialog onClose={() => setLmsOpen(false)} onChanged={setToast} />}
       {accountDialog && <AccountSettingsDialog kind={accountDialog} onClose={() => setAccountDialog(null)} onSaved={(settings) => { setUsername(settings.username); setToast("Local settings saved"); }} />}
       {toast && <div className="workspace-toast" role="status">{toast}</div>}
     </main>
