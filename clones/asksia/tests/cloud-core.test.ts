@@ -57,4 +57,14 @@ describe("StudyPal cloud account core", () => {
     assert.doesNotMatch(sql, /service[_-]?role/i);
     assert.doesNotMatch(sql, /grant all/i);
   });
+
+  it("keeps the auth trigger function out of the public RPC surface", async () => {
+    const sql = await readFile(
+      path.resolve("supabase/migrations/20260724020000_revoke_auth_trigger_execute.sql"),
+      "utf8",
+    );
+    assert.match(sql, /revoke execute on function public\.handle_new_user\(\) from public/i);
+    assert.match(sql, /revoke execute on function public\.handle_new_user\(\) from anon/i);
+    assert.match(sql, /revoke execute on function public\.handle_new_user\(\) from authenticated/i);
+  });
 });

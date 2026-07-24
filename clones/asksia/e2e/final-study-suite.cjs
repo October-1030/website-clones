@@ -223,7 +223,7 @@ async function runDesktop(browser, record) {
   await page.getByRole("button", { name: "Profile" }).click();
   await page.getByRole("button", { name: "Cloud account & sync" }).click();
   await page.getByRole("heading", { name: "StudyPal cloud account" }).waitFor();
-  await page.getByText("Cloud backend is ready for configuration").waitFor();
+  await page.getByRole("button", { name: "Sign in", exact: true }).last().waitFor();
   await page.getByRole("button", { name: "Close cloud account" }).click();
 
   await page.getByRole("button", { name: "Library" }).click();
