@@ -17,10 +17,8 @@ import {
   Image as ImageIcon,
   LibraryBig,
   LockKeyhole,
-  Mic,
   MessageSquareText,
   MoreHorizontal,
-  MonitorUp,
   PanelLeft,
   Plus,
   RefreshCw,
@@ -39,9 +37,11 @@ import {
 } from "lucide-react";
 import HomeworkWorkspace from "@/components/HomeworkWorkspace";
 import StudyFileWorkspace from "@/components/StudyFileWorkspace";
+import TranscribeWorkspace from "@/components/TranscribeWorkspace";
 import VideoSummaryWorkspace from "@/components/VideoSummaryWorkspace";
 import { HOMEWORK_SESSION_STORAGE_KEY } from "@/lib/homework/types";
 import { STUDY_SESSION_STORAGE_KEY } from "@/lib/study/types";
+import { TRANSCRIBE_SESSION_STORAGE_KEY } from "@/lib/transcribe/types";
 import { VIDEO_SESSION_STORAGE_KEY } from "@/lib/video/types";
 
 type Mode = "default" | "homework";
@@ -138,7 +138,7 @@ function Composer({
         <button type="button" className="composer-tool-button" title="Tools" onClick={() => setToolsOpen(!toolsOpen)}><span className="tool-sliders">☷</span><span>Tools</span><ChevronDown size={13} /></button>
         <button type="button" className={`composer-tool-button${deepThink ? " tool-selected" : ""}`} title="Deep think" onClick={() => setDeepThink(!deepThink)}><Zap size={14} /><span>Deep think</span></button>
         {mode === "homework" && <><span className="composer-divider" /><span className="mode-chip"><BookOpenCheck size={14} />Homework solver</span><button type="button" className="clear-mode" aria-label="Clear input mode" onClick={() => setMode("default")}><X size={14} /></button></>}
-        {toolsOpen && <div className="tools-popover"><button type="button" onClick={() => { onSelectTool("file"); setToolsOpen(false); }}>File summary</button><button type="button" onClick={() => onToast("Live transcribe 尚未开放")}>Live transcribe</button><button type="button" onClick={() => { onSelectTool("video"); setToolsOpen(false); }}>Video Link summary</button></div>}
+        {toolsOpen && <div className="tools-popover"><button type="button" onClick={() => { onSelectTool("file"); setToolsOpen(false); }}>File summary</button><button type="button" onClick={() => { onSelectTool("transcribe"); setToolsOpen(false); }}>Live transcribe</button><button type="button" onClick={() => { onSelectTool("video"); setToolsOpen(false); }}>Video Link summary</button></div>}
       </div>
       <div className="composer-actions">
         <button type="button" className="composer-icon-button" aria-label="Upload image" onClick={() => onToast("Image upload is disabled in this local clone")}><ImageIcon size={16} /></button>
@@ -185,10 +185,6 @@ function HomePanel({ tab, setTab, onToast, onSelectTool }: { tab: AppTab; setTab
 function AccountMenu({ usage, onToast, onClose }: { usage: number; onToast: (message: string) => void; onClose: () => void }) {
   const actions = ["Credits Used", "Reward", "Update log", "Account settings", "Personalization", "Help center"];
   return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">E</div><div><strong>Elv</strong><span>Free</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>Usage</span><b>{usage}</b></div><div><span>File Page</span><b>0/100</b></div><div><span>Recording</span><b>0/10 min</b></div><div><span>AI Detection</span><b>0/10000</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Upgrade is disabled in this local clone")}><Zap size={14} />Upgrade</button><div className="account-links">{actions.map((action) => <button type="button" key={action} onClick={() => onToast(`${action} is a local preview`)}>{action === "Account settings" ? <Settings2 size={14} /> : action === "Personalization" ? <UserRound size={14} /> : action === "Help center" ? <CircleHelp size={14} /> : <FileText size={14} />}{action}<ChevronDown size={13} className="account-link-chevron" /></button>)}<button type="button" onClick={() => onToast("Sign out is disabled in this local clone")}><LockKeyhole size={14} />Sign out</button></div></div>;
-}
-
-function TranscribeDialog({ onClose, onToast }: { onClose: () => void; onToast: (message: string) => void }) {
-  return <div className="dialog-backdrop" role="presentation"><div className="transcribe-dialog" role="dialog" aria-modal="true" aria-labelledby="transcribe-title"><button type="button" className="dialog-close" aria-label="Close audio source dialog" onClick={onClose}><X size={16} /></button><div className="dialog-icon"><Mic size={20} /></div><h2 id="transcribe-title">Choose your audio source</h2><p>Pick a source for the local preview. No microphone or browser permission is requested.</p><div className="audio-source-grid"><button type="button" onClick={() => onToast("Microphone permission is intentionally not requested")}><Mic size={19} /><strong>Microphone</strong><span>Record a lecture</span></button><button type="button" onClick={() => onToast("Browser Tab permission is intentionally not requested")}><MonitorUp size={19} /><strong>Browser Tab</strong><span>Capture a tab preview</span></button></div><button type="button" className="dialog-cancel" onClick={onClose}>Cancel</button></div></div>;
 }
 
 function MathAnswer() {
@@ -253,7 +249,6 @@ export default function AskSiaWorkspace() {
   const [copied, setCopied] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<ToolKey | null>(null);
-  const [transcribeOpen, setTranscribeOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
 
   const answerKind = useMemo(() => getAnswerKind(submitted ?? ""), [submitted]);
@@ -271,7 +266,10 @@ export default function AskSiaWorkspace() {
       const hasHomeworkSession = parameters.has("homeworkSession") || window.localStorage.getItem(HOMEWORK_SESSION_STORAGE_KEY);
       const hasStudySession = parameters.has("session") || window.localStorage.getItem(STUDY_SESSION_STORAGE_KEY);
       const hasVideoSession = parameters.has("videoSession") || window.localStorage.getItem(VIDEO_SESSION_STORAGE_KEY);
-      if (hasVideoSession) {
+      const hasTranscribeSession = parameters.has("transcribeSession") || window.localStorage.getItem(TRANSCRIBE_SESSION_STORAGE_KEY);
+      if (hasTranscribeSession) {
+        setActiveTool("transcribe");
+      } else if (hasVideoSession) {
         setActiveTool("video");
       } else if (hasHomeworkSession) {
         setActiveTool("homework");
@@ -312,8 +310,8 @@ export default function AskSiaWorkspace() {
       setMode("default");
       setToast("粘贴带公开字幕的视频链接");
     } else if (tool === "transcribe") {
-      setTranscribeOpen(true);
-      setToast("Live transcribe 尚未开放，本轮不请求音频权限");
+      setMode("default");
+      setToast("Choose an audio source when you are ready to grant permission");
     } else {
       setMode("default");
       setToast(tool === "file" ? "请选择 PDF 或 TXT 学习资料" : `${toolDetails[tool].label} 尚未开放`);
@@ -374,7 +372,7 @@ export default function AskSiaWorkspace() {
               {bannerVisible && <div className="usage-banner"><span>You have <strong>{usage}</strong> usage left. Upgrade to enjoy seamless study journey.</span><button type="button" className="upgrade-button" onClick={() => setToast("Upgrade is disabled in this local clone")}>Upgrade</button><button type="button" className="banner-close" aria-label="Close usage banner" onClick={() => setBannerVisible(false)}><X size={17} /></button></div>}
               <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
             </>}
-            {activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace onToast={setToast} /> : activeTool === "video" ? <VideoSummaryWorkspace onToast={setToast} /> : <>
+            {activeTool === "transcribe" ? <TranscribeWorkspace onToast={setToast} /> : activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace onToast={setToast} /> : activeTool === "video" ? <VideoSummaryWorkspace onToast={setToast} /> : <>
               {activeTool && <ToolEmptyState tool={activeTool} onToast={setToast} />}
               <HomePanel tab={tab} setTab={setTab} onToast={setToast} onSelectTool={selectTool} />
               <div className="onboarding-card"><div className="onboarding-orb"><Sparkles size={20} /></div><div><strong>Get started with StudyPal AI</strong><span>0/2</span><div className="progress-track"><i /></div></div></div>
@@ -382,7 +380,6 @@ export default function AskSiaWorkspace() {
           </div>
         )}
       </section>
-      {transcribeOpen && <TranscribeDialog onClose={() => setTranscribeOpen(false)} onToast={(message) => { setToast(message); setTranscribeOpen(false); }} />}
       {toast && <div className="workspace-toast" role="status">{toast}</div>}
     </main>
   );

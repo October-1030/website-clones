@@ -20,8 +20,10 @@ if (!serverPath) {
 const standaloneRoot = path.dirname(serverPath);
 const publicSource = path.join(root, "public");
 const staticSource = path.join(root, ".next", "static");
+const transcribeScriptSource = path.join(root, "scripts", "transcribe-audio.py");
 if (existsSync(publicSource)) cpSync(publicSource, path.join(standaloneRoot, "public"), { recursive: true, force: true });
 if (existsSync(staticSource)) cpSync(staticSource, path.join(standaloneRoot, ".next", "static"), { recursive: true, force: true });
+if (existsSync(transcribeScriptSource)) cpSync(transcribeScriptSource, path.join(standaloneRoot, "scripts", "transcribe-audio.py"), { force: true });
 
 const configuredDataDirectory = process.env.STUDYPAL_DATA_DIR?.trim();
 const dataDirectory = configuredDataDirectory

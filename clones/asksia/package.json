@@ -1,6 +1,6 @@
 {
   "name": "studypal-ai",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "StudyPal AI local study workspace",
   "author": "StudyPal AI",
@@ -21,7 +21,8 @@
     "test:e2e:p2": "node e2e/p2-study-flow.cjs",
     "test:e2e:p3": "node e2e/p3-homework-flow.cjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
-    "test:e2e:p4": "node e2e/p4-video-flow.cjs"
+    "test:e2e:p4": "node e2e/p4-video-flow.cjs",
+    "test:e2e:p5": "node e2e/p5-transcribe-flow.cjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

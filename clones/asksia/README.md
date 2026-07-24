@@ -83,3 +83,7 @@ npm run test:e2e:p4
 ```
 
 See `docs/P4-video-link-summary.md` for scope, security boundaries, configuration, and verification evidence.
+
+## Live transcription
+
+P5 adds local microphone and browser-tab recording, temporary microphone captions where the browser supports Web Speech, and an authoritative timestamped Faster-Whisper transcript after Stop. Audio is deleted after processing; only text sessions are retained. See `docs/P5-live-transcribe.md`.
