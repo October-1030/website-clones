@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyUsageChanged } from "@/lib/usage/client";
+
 import { useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
@@ -171,6 +173,7 @@ export default function TranscribeWorkspace({ onToast }: { onToast: (message: st
       setInterimText("");
       saveTranscribeSession(window.localStorage, payload.session);
       setSessionInUrl(payload.session.id);
+      notifyUsageChanged();
       onToast("Final transcript saved. The temporary audio was deleted.");
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") setError("Transcription was cancelled. Temporary audio was deleted.");

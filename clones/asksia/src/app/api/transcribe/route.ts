@@ -1,6 +1,7 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { consumeAccountUsage, UsageAccountingError } from "@/lib/usage/service";
 import { transcribeAudio, TranscribeRunnerError, type TranscribeRunnerResult } from "@/lib/transcribe/runner";
 import {
   saveServerTranscribeSession,
@@ -20,7 +21,7 @@ export const runtime = "nodejs";
 type Transcriber = (audioPath: string, signal?: AbortSignal) => Promise<TranscribeRunnerResult>;
 
 function errorResponse(error: unknown) {
-  if (error instanceof TranscribeValidationError || error instanceof TranscribeRunnerError || error instanceof TranscribeSessionStoreError) {
+  if (error instanceof TranscribeValidationError || error instanceof TranscribeRunnerError || error instanceof TranscribeSessionStoreError || error instanceof UsageAccountingError) {
     return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   }
   return NextResponse.json({ error: "Unable to transcribe this recording.", code: "transcribe_failed" }, { status: 500 });
@@ -53,6 +54,7 @@ export async function handleTranscribeRequest(request: Request, transcriber: Tra
     if (!result.text || result.segments.length === 0) {
       throw new TranscribeValidationError("No speech was detected in this recording.", "no_speech_detected", 422);
     }
+    const usage = await consumeAccountUsage({ recordingSeconds: Math.max(1, Math.ceil(result.durationSeconds)) });
     const now = new Date().toISOString();
     const session: TranscribeSession = {
       version: 1,
@@ -74,7 +76,7 @@ export async function handleTranscribeRequest(request: Request, transcriber: Tra
       updatedAt: now,
     };
     await saveServerTranscribeSession(session);
-    return NextResponse.json({ session }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ session, usage }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return errorResponse(error);
   } finally {

@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
+import { consumeAccountUsage, UsageAccountingError } from "@/lib/usage/service";
 import { StudyProviderError } from "@/lib/study/provider";
 import { loadServerVideoSession, saveServerVideoSession, VideoSessionStoreError } from "@/lib/video/session-store";
 import { askVideoSession } from "@/lib/video/service";
 
 function errorResponse(error: unknown) {
-  if (error instanceof StudyProviderError || error instanceof VideoSessionStoreError) {
+  if (error instanceof StudyProviderError || error instanceof VideoSessionStoreError || error instanceof UsageAccountingError) {
     return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   }
   if (error instanceof RangeError) {
@@ -22,8 +23,9 @@ export async function POST(request: Request) {
     const session = await loadServerVideoSession(body.sessionId);
     if (!session) return NextResponse.json({ error: "视频学习记录不存在。", code: "video_session_not_found" }, { status: 404 });
     const result = await askVideoSession(session, body.question);
+    const usage = await consumeAccountUsage({ aiRequests: 1 });
     await saveServerVideoSession(result.session);
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, usage });
   } catch (error) {
     if (error instanceof SyntaxError) {
       return NextResponse.json({ error: "请求内容不是有效 JSON。", code: "invalid_json" }, { status: 400 });

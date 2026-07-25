@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyUsageChanged } from "@/lib/usage/client";
+
 import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -131,6 +133,7 @@ export default function VideoSummaryWorkspace({ onToast }: { onToast: (message: 
       const payload = await response.json() as { session?: VideoSession; error?: string };
       if (!response.ok || !payload.session) throw new Error(responseError(payload, "视频总结失败，请重试。"));
       persist(payload.session);
+      notifyUsageChanged();
       onToast("字幕总结和时间戳来源已保存");
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") setError("已停止本次视频读取。");
@@ -159,6 +162,7 @@ export default function VideoSummaryWorkspace({ onToast }: { onToast: (message: 
       const payload = await response.json() as { session?: VideoSession; error?: string };
       if (!response.ok || !payload.session) throw new Error(responseError(payload, "无法回答该问题，请重试。"));
       persist(payload.session);
+      notifyUsageChanged();
       setQuestion("");
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") setError("已停止本次追问。");

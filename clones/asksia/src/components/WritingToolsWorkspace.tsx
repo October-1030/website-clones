@@ -8,12 +8,14 @@ import {
   Check,
   Clipboard,
   FilePenLine,
+  LoaderCircle,
   RefreshCw,
   ScanText,
   Sparkles,
   Trash2,
 } from "lucide-react";
-import { analyzeWritingSignals, createEssayArtifact } from "@/lib/writing-tools/analyzer";
+import { createEssayArtifact } from "@/lib/writing-tools/analyzer";
+import { notifyUsageChanged } from "@/lib/usage/client";
 import {
   deleteWritingArtifact,
   findWritingArtifact,
@@ -29,6 +31,7 @@ export default function WritingToolsWorkspace({ tool, onToast }: { tool: Writing
   const [essay, setEssay] = useState<EssayArtifact | null>(null);
   const [detector, setDetector] = useState<DetectorArtifact | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -46,9 +49,10 @@ export default function WritingToolsWorkspace({ tool, onToast }: { tool: Writing
     return () => window.clearTimeout(timeout);
   }, [tool]);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    setBusy(true);
     try {
       if (tool === "essay") {
         const artifact = createEssayArtifact(topic, text);
@@ -56,16 +60,24 @@ export default function WritingToolsWorkspace({ tool, onToast }: { tool: Writing
         saveWritingArtifact(window.localStorage, artifact);
         onToast("Essay plan and revision review saved locally.");
       } else {
-        const artifact = analyzeWritingSignals(text);
-        setDetector(artifact);
-        saveWritingArtifact(window.localStorage, artifact);
+        const response = await fetch("/api/writing/detector", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        const payload = await response.json() as { artifact?: DetectorArtifact; error?: string };
+        if (!response.ok || !payload.artifact) throw new Error(payload.error || "Unable to analyze this text.");
+        setDetector(payload.artifact);
+        saveWritingArtifact(window.localStorage, payload.artifact);
+        notifyUsageChanged();
         onToast("Writing-signal review saved locally.");
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to analyze this text.");
+    } finally {
+      setBusy(false);
     }
   }
-
   function clear() {
     const artifact = tool === "essay" ? essay : detector;
     if (artifact) deleteWritingArtifact(window.localStorage, artifact.id);
@@ -100,7 +112,7 @@ export default function WritingToolsWorkspace({ tool, onToast }: { tool: Writing
     <form className="writing-form" onSubmit={submit}>
       {tool === "essay" && <label>Essay topic or question<input value={topic} onChange={(event) => setTopic(event.target.value)} maxLength={500} placeholder="e.g. Evaluate how monetary policy affects inflation expectations" /></label>}
       <label>{tool === "essay" ? "Optional draft for revision feedback" : "Text to review"}<textarea value={text} onChange={(event) => setText(event.target.value)} maxLength={MAX_WRITING_CHARS} rows={9} placeholder={tool === "essay" ? "Paste your own draft here. Factual claims and citations will still require manual verification." : "Paste at least 80 characters. This review cannot determine authorship or prove AI use."} /></label>
-      <div className="writing-form-footer"><span>{text.length.toLocaleString()}/{MAX_WRITING_CHARS.toLocaleString()} characters</span>{artifact && <button type="button" className="writing-secondary" onClick={clear}><Trash2 size={14} />Clear</button>}<button type="submit" className="writing-submit"><Sparkles size={14} />{artifact ? "Analyze again" : tool === "essay" ? "Build plan" : "Review signals"}</button></div>
+      <div className="writing-form-footer"><span>{text.length.toLocaleString()}/{MAX_WRITING_CHARS.toLocaleString()} characters</span>{artifact && <button type="button" className="writing-secondary" onClick={clear}><Trash2 size={14} />Clear</button>}<button type="submit" className="writing-submit" disabled={busy}>{busy ? <LoaderCircle size={14} className="spin" /> : <Sparkles size={14} />}{busy ? "Working…" : artifact ? "Analyze again" : tool === "essay" ? "Build plan" : "Review signals"}</button></div>
     </form>
     {error && <div className="study-error" role="alert"><AlertCircle size={18} /><div><strong>More text is needed</strong><span>{error}</span></div></div>}
 

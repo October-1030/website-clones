@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { RequestOriginError, requireSameOriginMutation } from "@/lib/http/same-origin";
 import { CloudAuthError, requireCloudUser } from "@/lib/cloud/server";
 import { createExtensionToken } from "@/lib/extension/service";
 import { ExtensionSyncError } from "@/lib/extension/types";
-import { parseExtensionLabel, requireSameOriginMutation } from "@/lib/extension/validation";
+import { parseExtensionLabel } from "@/lib/extension/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
-    if (error instanceof CloudAuthError || error instanceof ExtensionSyncError) {
+    if (error instanceof CloudAuthError || error instanceof ExtensionSyncError || error instanceof RequestOriginError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
     return NextResponse.json({ error: "Unable to create extension token.", code: "extension_token_create_failed" }, { status: 503 });

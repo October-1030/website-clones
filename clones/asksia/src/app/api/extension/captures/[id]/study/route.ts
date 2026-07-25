@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { RequestOriginError, requireSameOriginMutation } from "@/lib/http/same-origin";
 import { CloudAuthError, requireCloudUser } from "@/lib/cloud/server";
 import { summarizeExtensionCapture } from "@/lib/extension/service";
 import { ExtensionSyncError } from "@/lib/extension/types";
-import { parseExtensionId, requireSameOriginMutation } from "@/lib/extension/validation";
+import { parseExtensionId } from "@/lib/extension/validation";
 import { StudyProviderError } from "@/lib/study/provider";
+import { UsageAccountingError } from "@/lib/usage/service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,9 +18,9 @@ export async function POST(request: Request, context: RouteContext) {
     const { id } = await context.params;
     const cloud = await requireCloudUser();
     const result = await summarizeExtensionCapture(cloud, parseExtensionId(id));
-    return NextResponse.json({ sessionId: result.session.id, href: result.href });
+    return NextResponse.json({ sessionId: result.session.id, href: result.href, usage: result.usage });
   } catch (error) {
-    if (error instanceof CloudAuthError || error instanceof ExtensionSyncError || error instanceof StudyProviderError) {
+    if (error instanceof CloudAuthError || error instanceof ExtensionSyncError || error instanceof RequestOriginError || error instanceof StudyProviderError || error instanceof UsageAccountingError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
     return NextResponse.json({ error: "Unable to summarize the captured webpage.", code: "extension_summary_failed" }, { status: 503 });

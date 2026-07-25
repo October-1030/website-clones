@@ -1,6 +1,6 @@
 {
   "name": "studypal-ai",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "private": true,
   "description": "StudyPal AI local study workspace",
   "author": "StudyPal AI",
@@ -25,7 +25,8 @@
     "test:e2e:p5": "node e2e/p5-transcribe-flow.cjs",
     "test:e2e:final": "node e2e/final-study-suite.cjs",
     "test:e2e:p15": "node e2e/p15-extension-flow.cjs",
-    "check:extension": "node extension/check.mjs"
+    "check:extension": "node extension/check.mjs",
+    "test:e2e:p16": "node e2e/p16-usage-flow.cjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

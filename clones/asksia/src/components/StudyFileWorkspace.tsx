@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyUsageChanged } from "@/lib/usage/client";
+
 import type { ChangeEvent, DragEvent, FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, BookOpenCheck, Check, FileText, LoaderCircle, MessageSquareText, RefreshCw, Trash2, Upload, X } from "lucide-react";
@@ -149,6 +151,7 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
       setProgress(100);
       setPhase("done");
       persist(payload.session);
+      notifyUsageChanged();
       onToast("资料已提取、总结并保存在本机服务");
     } catch (caught) {
       clearTimer();
@@ -229,6 +232,7 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
       if (!response.ok) throw new Error(responseError(payload, "追问失败，请重试。"));
       if (payload.session) {
         persist(payload.session);
+      notifyUsageChanged();
       } else {
         const assistantMessage = {
           id: crypto.randomUUID(),

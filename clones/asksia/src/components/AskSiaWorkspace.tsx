@@ -52,6 +52,8 @@ import { loadAccountSettings } from "@/lib/account/settings";
 import { HOMEWORK_SESSION_STORAGE_KEY } from "@/lib/homework/types";
 import { STUDY_SESSION_STORAGE_KEY } from "@/lib/study/types";
 import { TRANSCRIBE_SESSION_STORAGE_KEY } from "@/lib/transcribe/types";
+import { STUDYPAL_USAGE_CHANGED_EVENT } from "@/lib/usage/client";
+import type { AccountUsageStatus } from "@/lib/usage/types";
 import { VIDEO_SESSION_STORAGE_KEY } from "@/lib/video/types";
 
 type Mode = "default" | "homework";
@@ -186,7 +188,7 @@ function HomePanel({ tab, setTab, onSelectTool, onExtension }: { tab: AppTab; se
 
 function AccountMenu({
   username,
-  usage,
+  usageStatus,
   onToast,
   onClose,
   onOpen,
@@ -195,7 +197,7 @@ function AccountMenu({
   onExtension,
 }: {
   username: string;
-  usage: number;
+  usageStatus: AccountUsageStatus | null;
   onToast: (message: string) => void;
   onClose: () => void;
   onOpen: (kind: "account" | "personalization" | "help" | "updates") => void;
@@ -212,7 +214,11 @@ function AccountMenu({
     { label: "Personalization", kind: "personalization", icon: <UserRound size={14} /> },
     { label: "Help center", kind: "help", icon: <CircleHelp size={14} /> },
   ];
-  return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">{initial}</div><div><strong>{username}</strong><span>Local plan</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>Usage</span><b>{usage}</b></div><div><span>File Page</span><b>Local</b></div><div><span>Recording</span><b>10 min</b></div><div><span>AI Detection</span><b>10k</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Payments are intentionally disabled in this local build")}><LockKeyhole size={14} />Upgrade unavailable</button><div className="account-links">{actions.map((action) => <button type="button" key={action.label} onClick={() => { if (action.kind) { onOpen(action.kind); onClose(); } else { onToast(action.label === "Credits Used" ? "Local features do not consume paid credits" : "Rewards are not part of this local product"); } }}>{action.icon}{action.label}{action.kind && <ChevronDown size={13} className="account-link-chevron" />}</button>)}<button type="button" onClick={() => { onCloud(); onClose(); }}><Cloud size={14} />Cloud account & sync</button><button type="button" onClick={() => { onLms(); onClose(); }}><BookOpenCheck size={14} />LMS connections</button><button type="button" onClick={() => { onExtension(); onClose(); }}><Puzzle size={14} />Browser extension</button></div></div>;
+  const aiMeter = usageStatus?.meters.aiRequests;
+  const pageMeter = usageStatus?.meters.filePages;
+  const recordingMeter = usageStatus?.meters.recordingSeconds;
+  const detectionMeter = usageStatus?.meters.aiDetectionChars;
+  return <div className="account-menu" role="dialog" aria-label="Account menu"><div className="account-summary"><div className="account-avatar">{initial}</div><div><strong>{username}</strong><span>{usageStatus ? `${usageStatus.planLabel} plan` : "Checking plan"}</span></div><button type="button" aria-label="Close account menu" onClick={onClose}><X size={14} /></button></div><div className="account-quotas"><div><span>AI requests left</span><b>{aiMeter ? aiMeter.remaining : "Local"}</b></div><div><span>File pages</span><b>{pageMeter ? `${pageMeter.used}/${pageMeter.limit}` : "Local"}</b></div><div><span>Recording</span><b>{recordingMeter ? `${Math.ceil(recordingMeter.remaining / 60)} min left` : "Local"}</b></div><div><span>AI Detection</span><b>{detectionMeter ? `${detectionMeter.used.toLocaleString()}/10k` : "Local"}</b></div></div><button type="button" className="account-upgrade" onClick={() => onToast("Payments are intentionally disabled in this local build")}><LockKeyhole size={14} />Upgrade unavailable</button><div className="account-links">{actions.map((action) => <button type="button" key={action.label} onClick={() => { if (action.kind) { onOpen(action.kind); onClose(); } else { onToast(action.label === "Credits Used" ? "Local features do not consume paid credits" : "Rewards are not part of this local product"); } }}>{action.icon}{action.label}{action.kind && <ChevronDown size={13} className="account-link-chevron" />}</button>)}<button type="button" onClick={() => { onCloud(); onClose(); }}><Cloud size={14} />Cloud account & sync</button><button type="button" onClick={() => { onLms(); onClose(); }}><BookOpenCheck size={14} />LMS connections</button><button type="button" onClick={() => { onExtension(); onClose(); }}><Puzzle size={14} />Browser extension</button></div></div>;
 }
 
 function MathAnswer() {
@@ -270,7 +276,7 @@ export default function AskSiaWorkspace() {
   const [activeRail, setActiveRail] = useState("home");
   const [submitted, setSubmitted] = useState<string | null>(null);
   const [status, setStatus] = useState<GenerationStatus>("idle");
-  const [usage, setUsage] = useState(7);
+  const [usageStatus, setUsageStatus] = useState<AccountUsageStatus | null>(null);
   const [bannerVisible, setBannerVisible] = useState(true);
   const [visualMap, setVisualMap] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
@@ -317,14 +323,36 @@ export default function AskSiaWorkspace() {
     return () => window.clearTimeout(timeout);
   }, []);
 
-  function beginGeneration(question: string, consumeUsage = true) {
+
+  useEffect(() => {
+    let active = true;
+    async function refreshUsage() {
+      try {
+        const response = await fetch("/api/usage/status", { cache: "no-store" });
+        const payload = await response.json() as AccountUsageStatus;
+        if (active && response.ok) setUsageStatus(payload);
+      } catch {
+        // The feature APIs remain usable in local mode even if the status panel cannot refresh.
+      }
+    }
+    const refresh = () => void refreshUsage();
+    void refreshUsage();
+    window.addEventListener(STUDYPAL_USAGE_CHANGED_EVENT, refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener(STUDYPAL_USAGE_CHANGED_EVENT, refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
+
+  function beginGeneration(question: string) {
     setSubmitted(question);
     setInput("");
     setStatus("thinking");
     setFeedback(null);
     setVisualMap(false);
     setCopied(false);
-    if (consumeUsage) setUsage((current) => Math.max(0, current - 1));
     window.setTimeout(() => setStatus("working"), 850);
     window.setTimeout(() => setStatus("done"), 1650);
   }
@@ -363,7 +391,7 @@ export default function AskSiaWorkspace() {
   }
 
   function regenerate() {
-    if (submitted) beginGeneration(submitted, false);
+    if (submitted) beginGeneration(submitted);
   }
 
   function copyAnswer() {
@@ -386,7 +414,7 @@ export default function AskSiaWorkspace() {
           <RailButton label="Explore" active={activeRail === "explore"} onClick={() => { setActiveRail("explore"); setActiveTool(null); setTab("library"); setSubmitted(null); setToast("Explore your saved work and learning tools"); }}><Globe2 size={17} /></RailButton>
         </nav>
         <button type="button" className="profile-avatar" aria-label="Profile" aria-expanded={accountOpen} onClick={() => setAccountOpen(!accountOpen)}>{username.trim().charAt(0).toUpperCase() || "S"}</button>
-        {accountOpen && <AccountMenu username={username} usage={usage} onToast={setToast} onClose={() => setAccountOpen(false)} onOpen={setAccountDialog} onCloud={() => setCloudAccountOpen(true)} onLms={() => setLmsOpen(true)} onExtension={() => setExtensionOpen(true)} />}
+        {accountOpen && <AccountMenu username={username} usageStatus={usageStatus} onToast={setToast} onClose={() => setAccountOpen(false)} onOpen={setAccountDialog} onCloud={() => setCloudAccountOpen(true)} onLms={() => setLmsOpen(true)} onExtension={() => setExtensionOpen(true)} />}
       </aside>
 
       <section className={`workspace-content${submitted ? " workspace-content-conversation" : ""}`}>
@@ -413,7 +441,7 @@ export default function AskSiaWorkspace() {
           <div className="home-stage">
             {activeTool !== "homework" && <>
               <div className="welcome-panel"><div className="welcome-orb"><Sparkles size={23} /></div><h1>Hi {username}, what are we studying today?</h1></div>
-              {bannerVisible && <div className="usage-banner"><span>You have <strong>{usage}</strong> usage left. Upgrade to enjoy seamless study journey.</span><button type="button" className="upgrade-button" onClick={() => setToast("Upgrade is disabled in this local clone")}>Upgrade</button><button type="button" className="banner-close" aria-label="Close usage banner" onClick={() => setBannerVisible(false)}><X size={17} /></button></div>}
+              {bannerVisible && <div className="usage-banner"><span>{usageStatus?.authenticated && usageStatus.meters.aiRequests ? <>You have <strong>{usageStatus.meters.aiRequests.remaining}</strong> AI requests left this month.</> : usageStatus ? <>Local mode is not metered. Sign in to sync monthly usage.</> : <>Checking account usage…</>}</span><button type="button" className="upgrade-button" onClick={() => usageStatus?.authenticated ? setToast("Payments remain disabled; this account uses the Free plan") : setCloudAccountOpen(true)}>{usageStatus?.authenticated ? "Free plan" : "Cloud sync"}</button><button type="button" className="banner-close" aria-label="Close usage banner" onClick={() => setBannerVisible(false)}><X size={17} /></button></div>}
               <Composer input={input} setInput={setInput} mode={mode} setMode={setMode} status={status} onSend={sendCurrent} onToast={setToast} onSelectTool={selectTool} />
             </>}
             {activeTool === "essay" || activeTool === "detector" ? <WritingToolsWorkspace tool={activeTool} onToast={setToast} /> : activeTool === "quiz" || activeTool === "study-guide" || activeTool === "flashcard" ? <LearningToolsWorkspace tool={activeTool} onToast={setToast} onOpenFileSummary={() => selectTool("file")} /> : activeTool === "headshot" ? <PortraitWorkspace onToast={setToast} /> : activeTool === "web-search" ? <WebSearchWorkspace onToast={setToast} /> : activeTool === "transcribe" ? <TranscribeWorkspace onToast={setToast} /> : activeTool === "file" ? <StudyFileWorkspace onToast={setToast} /> : activeTool === "homework" ? <HomeworkWorkspace key={homeworkDraft} initialProblem={homeworkDraft} onToast={setToast} /> : activeTool === "video" ? <VideoSummaryWorkspace onToast={setToast} /> : <>
@@ -423,7 +451,7 @@ export default function AskSiaWorkspace() {
           </div>
         )}
       </section>
-      {cloudAccountOpen && <CloudAccountDialog onClose={() => setCloudAccountOpen(false)} onChanged={setToast} />}
+      {cloudAccountOpen && <CloudAccountDialog onClose={() => setCloudAccountOpen(false)} onChanged={(message) => { setToast(message); window.dispatchEvent(new Event(STUDYPAL_USAGE_CHANGED_EVENT)); }} />}
       {lmsOpen && <LmsConnectorDialog onClose={() => setLmsOpen(false)} onChanged={setToast} />}
       {extensionOpen && <ExtensionSyncDialog onClose={() => setExtensionOpen(false)} onChanged={setToast} />}
       {accountDialog && <AccountSettingsDialog kind={accountDialog} onClose={() => setAccountDialog(null)} onSaved={(settings) => { setUsername(settings.username); setToast("Local settings saved"); }} />}

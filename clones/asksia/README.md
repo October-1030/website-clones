@@ -31,7 +31,7 @@ http://127.0.0.1:3000/pro/session
 - Writing-signal review that never claims to prove AI authorship or invents a probability.
 - Searchable local Library across file, homework, video, and transcription sessions.
 - Browser-local display name and personalization settings.
-- Optional Supabase cloud accounts with cookie-based SSR auth, indexed Postgres storage, database RLS, and explicit local-session import.
+- Optional Supabase cloud accounts with cookie-based SSR auth, indexed Postgres storage, database RLS, explicit local-session import, and server-enforced monthly free-plan usage limits.
 - Allowlisted English/Chinese Wikipedia search with direct source links.
 - Local-only portrait crop, style preview, and 800 × 800 PNG export. Photos are not uploaded.
 
@@ -86,12 +86,18 @@ The `extension` folder is a local unpacked Manifest V3 Chrome extension. It uses
 
 Run `npm run check:extension` to validate the manifest, permissions, JavaScript syntax, and static privacy controls. Installation and security details are in [docs/P15-browser-extension-sync.md](docs/P15-browser-extension-sync.md).
 
+## Account usage and quotas
+
+Anonymous local mode is explicitly unmetered. Signed-in Free accounts use server-owned UTC-month counters for AI requests, parsed file pages, recording seconds, and writing-signal characters. The browser can read only the current user's usage; it cannot update counters directly or choose another user ID. Public payments, subscriptions, and paid-plan upgrades remain disabled.
+
+Run `npm run test:e2e:p16` to verify the local-mode banner, usage menu, writing detector boundary, desktop layout, and 390px mobile layout. Architecture and database controls are documented in [docs/P16-account-usage-quotas.md](docs/P16-account-usage-quotas.md).
+
 ## Important boundaries
 
 The local web product intentionally does not pretend to provide:
 
 - write access to Canvas, Blackboard, Brightspace, or Moodle (all LMS synchronization is read-only);
-- subscription, payment, or quota billing;
+- subscriptions, payments, paid-plan upgrades, or quota billing;
 - public production hosting until a dedicated StudyPal deployment target is approved;
 - a native mobile application, operating-system overlay, or background translation over other apps;
 - OCR for scanned PDFs, full DOCX/PPTX ingestion, or private video transcription;
@@ -108,6 +114,7 @@ npm test
 npm run build
 npm run test:e2e:final
 npm run check:extension
+npm run test:e2e:p16
 ```
 
 `test:e2e:final` uses the installed Playwright and Chrome, tests desktop and 390px mobile layouts, and saves screenshots, a trace, browser metadata, and a JSON report under `docs/evidence/final-study-suite/`.

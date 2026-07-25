@@ -3,6 +3,8 @@ import { saveCloudSession } from "../cloud/session-repository";
 import { createStudyPalServerClient, type CloudAuthContext } from "../cloud/server";
 import { getStudyProvider } from "../study/provider";
 import type { StudySession } from "../study/types";
+import { consumeAccountUsage } from "../usage/service";
+import type { AccountUsageStatus } from "../usage/types";
 import type {
   ExtensionCaptureInput,
   ExtensionCaptureSummary,
@@ -167,7 +169,7 @@ function captureFileName(title: string): string {
 export async function summarizeExtensionCapture(
   context: AuthenticatedCloud,
   id: string,
-): Promise<{ session: StudySession; href: string }> {
+): Promise<{ session: StudySession; href: string; usage: AccountUsageStatus }> {
   const { data, error } = await context.client
     .from("extension_captures")
     .select("id,source_url,title,text_content,captured_at,created_at,metadata")
@@ -186,6 +188,7 @@ export async function summarizeExtensionCapture(
   const pages = [{ page: null, label: `Web page · ${host}`, text: capture.text_content }];
   const provider = getStudyProvider();
   const summary = await provider.summarize({ pages, fileName: captureFileName(capture.title) });
+  const usage = await consumeAccountUsage({ aiRequests: 1 }, async () => context);
   const now = new Date().toISOString();
   const session: StudySession = {
     version: 1,
@@ -208,5 +211,5 @@ export async function summarizeExtensionCapture(
   };
   const saved = await saveCloudSession("study", session, async () => context);
   if (!saved) throw databaseFailure("Unable to save the webpage study session.");
-  return { session, href: `/pro/session?session=${encodeURIComponent(session.id)}` };
+  return { session, href: `/pro/session?session=${encodeURIComponent(session.id)}`, usage };
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyUsageChanged } from "@/lib/usage/client";
+
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
 import {
@@ -146,6 +148,7 @@ export default function ExtensionSyncDialog({
       const response = await fetch(`/api/extension/captures/${capture.id}/study`, { method: "POST" });
       const payload = await response.json() as { href?: string; error?: string };
       if (!response.ok || !payload.href) throw new Error(payload.error || "Unable to summarize captured webpage.");
+      notifyUsageChanged();
       onChanged("Captured webpage converted into a grounded StudyPal session.");
       window.location.href = payload.href;
     } catch (caught) {

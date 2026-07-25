@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { consumeAccountUsage, UsageAccountingError } from "@/lib/usage/service";
 import { extractStudyDocument } from "@/lib/study/extract";
 import { StudyFileError, validateStudyFile } from "@/lib/study/file-validation";
 import { getStudyProvider, StudyProviderError } from "@/lib/study/provider";
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
     const document = { pages: extracted.pages, fileName: file.name };
     const provider = getStudyProvider();
     const summary = await provider.summarize(document);
+    const usage = await consumeAccountUsage({ aiRequests: 1, filePages: extracted.pageCount });
     const now = new Date().toISOString();
     const session: StudySession = {
       version: 1,
@@ -45,9 +47,9 @@ export async function POST(request: Request) {
     };
 
     await saveServerStudySession(session);
-    return NextResponse.json({ session });
+    return NextResponse.json({ session, usage });
   } catch (error) {
-    if (error instanceof StudyFileError || error instanceof StudyProviderError || error instanceof StudySessionStoreError) {
+    if (error instanceof StudyFileError || error instanceof StudyProviderError || error instanceof StudySessionStoreError || error instanceof UsageAccountingError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
     return NextResponse.json({ error: "资料处理失败，请稍后重试。", code: "processing_failed" }, { status: 500 });

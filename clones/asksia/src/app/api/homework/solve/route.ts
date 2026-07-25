@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { consumeAccountUsage, UsageAccountingError } from "@/lib/usage/service";
 import { HomeworkSessionStoreError, saveServerHomeworkSession } from "@/lib/homework/session-store";
 import { MAX_HOMEWORK_PROBLEM_CHARS, type HomeworkSession } from "@/lib/homework/types";
 import { getStudyProvider, StudyProviderError } from "@/lib/study/provider";
@@ -21,6 +22,7 @@ export async function POST(request: Request) {
   try {
     const provider = getStudyProvider();
     const solution = await provider.solveHomework(problem);
+    const usage = await consumeAccountUsage({ aiRequests: 1 });
     const now = new Date().toISOString();
     const session: HomeworkSession = {
       version: 1,
@@ -32,9 +34,9 @@ export async function POST(request: Request) {
       updatedAt: now,
     };
     await saveServerHomeworkSession(session);
-    return NextResponse.json({ session });
+    return NextResponse.json({ session, usage });
   } catch (error) {
-    if (error instanceof StudyProviderError || error instanceof HomeworkSessionStoreError) {
+    if (error instanceof StudyProviderError || error instanceof HomeworkSessionStoreError || error instanceof UsageAccountingError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
     return NextResponse.json({ error: "作业解题失败，请稍后重试。", code: "homework_failed" }, { status: 500 });

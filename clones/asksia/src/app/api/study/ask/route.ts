@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { consumeAccountUsage, UsageAccountingError } from "@/lib/usage/service";
 import { getStudyProvider, StudyProviderError } from "@/lib/study/provider";
 import { loadServerStudySession, saveServerStudySession, StudySessionStoreError } from "@/lib/study/session-store";
 import type { StudySession, StudySourcePage } from "@/lib/study/types";
@@ -24,7 +25,7 @@ function validPages(value: unknown): value is StudySourcePage[] {
 }
 
 function knownError(error: unknown) {
-  if (error instanceof StudyProviderError || error instanceof StudySessionStoreError) {
+  if (error instanceof StudyProviderError || error instanceof StudySessionStoreError || error instanceof UsageAccountingError) {
     return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
   }
   return NextResponse.json({ error: "追问处理失败，请稍后重试。", code: "ask_failed" }, { status: 500 });
@@ -58,8 +59,9 @@ export async function POST(request: Request) {
     }
     const fileName = session?.file.name ?? (typeof payload.fileName === "string" ? payload.fileName.slice(0, 240) : "学习资料");
     const result = await provider.answer({ pages, fileName }, question);
+    const usage = await consumeAccountUsage({ aiRequests: 1 });
 
-    if (!session) return NextResponse.json(result);
+    if (!session) return NextResponse.json({ ...result, usage });
 
     const userCreatedAt = new Date().toISOString();
     const assistantCreatedAt = new Date().toISOString();
@@ -74,7 +76,7 @@ export async function POST(request: Request) {
       updatedAt: assistantCreatedAt,
     };
     await saveServerStudySession(updated);
-    return NextResponse.json({ ...result, session: updated });
+    return NextResponse.json({ ...result, session: updated, usage });
   } catch (error) {
     return knownError(error);
   }

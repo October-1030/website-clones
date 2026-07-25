@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { hashExtensionToken } from "../src/lib/extension/service";
+import { requireSameOriginMutation } from "../src/lib/http/same-origin";
 import {
   extensionCorsHeaders,
   isAllowedExtensionOrigin,
@@ -10,7 +11,6 @@ import {
   parseExtensionLabel,
   parseExtensionToken,
   readExtensionBearerToken,
-  requireSameOriginMutation,
 } from "../src/lib/extension/validation";
 
 const validToken = `spx_${"A".repeat(43)}`;

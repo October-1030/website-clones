@@ -1,5 +1,7 @@
 "use client";
 
+import { notifyUsageChanged } from "@/lib/usage/client";
+
 import type { FormEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, BookOpenCheck, Check, Clipboard, Eraser, FlaskConical, LoaderCircle, RefreshCw, Send, Sparkles, Trash2 } from "lucide-react";
@@ -112,6 +114,7 @@ export default function HomeworkWorkspace({ onToast, initialProblem = "" }: { on
       const payload = await response.json() as { session?: HomeworkSession; error?: string };
       if (!response.ok || !payload.session) throw new Error(responseError(payload, "解题失败，请重试。"));
       persist(payload.session);
+      notifyUsageChanged();
       onToast("分步解答和验算已保存");
     } catch (caught) {
       if (caught instanceof DOMException && caught.name === "AbortError") {

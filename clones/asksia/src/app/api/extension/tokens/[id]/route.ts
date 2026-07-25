@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { RequestOriginError, requireSameOriginMutation } from "@/lib/http/same-origin";
 import { CloudAuthError, requireCloudUser } from "@/lib/cloud/server";
 import { revokeExtensionToken } from "@/lib/extension/service";
 import { ExtensionSyncError } from "@/lib/extension/types";
-import { parseExtensionId, requireSameOriginMutation } from "@/lib/extension/validation";
+import { parseExtensionId } from "@/lib/extension/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ export async function DELETE(request: Request, context: RouteContext) {
     await revokeExtensionToken(cloud, parseExtensionId(id));
     return NextResponse.json({ revoked: true });
   } catch (error) {
-    if (error instanceof CloudAuthError || error instanceof ExtensionSyncError) {
+    if (error instanceof CloudAuthError || error instanceof ExtensionSyncError || error instanceof RequestOriginError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });
     }
     return NextResponse.json({ error: "Unable to revoke extension connection.", code: "extension_revoke_failed" }, { status: 503 });
