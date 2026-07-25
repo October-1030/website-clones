@@ -813,3 +813,35 @@ button:focus-visible, textarea:focus-visible { outline: 3px solid rgba(103, 99, 
 .cloud-signed-in strong { color: #14532d; font-size: 11px; }
 .cloud-signed-in > button { padding: 9px 11px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--studio-orange-100); border-radius: 9px; color: #7f6656; font-size: 10px; font-weight: 800; }
 .cloud-signed-in .cloud-sign-out { color: #9a3412; border-color: #fecaca; }
+/* P15 Browser extension sync */
+.extension-sync-dialog { width: min(680px,calc(100vw - 28px)); }
+.extension-install-steps { padding: 14px; display: grid; gap: 6px; border: 1px solid var(--studio-orange-100); border-radius: 12px; color: #7f6656; background: #fffcf8; }
+.extension-install-steps strong { color: var(--studio-ink); font-size: 11px; }
+.extension-install-steps span { font-size: 9px; line-height: 1.5; }
+.extension-install-steps code { padding: 1px 4px; border-radius: 4px; color: #9a3412; background: var(--studio-orange-50); font: 9px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; }
+.extension-token-once { padding: 13px; display: grid; gap: 5px; border: 1px solid #86efac; border-radius: 12px; background: #f0fdf4; }
+.extension-token-once > strong { color: #14532d; font-size: 11px; }
+.extension-token-once > span { color: #47705a; font-size: 9px; }
+.extension-token-once > div { display: flex; align-items: center; gap: 7px; }
+.extension-token-once code { min-width: 0; flex: 1; padding: 9px; overflow-x: auto; border: 1px solid #bbf7d0; border-radius: 8px; color: #14532d; background: #fff; font: 10px/1.4 ui-monospace,SFMono-Regular,Consolas,monospace; white-space: nowrap; }
+.extension-token-once button, .extension-section-heading button, .extension-connection-list button, .extension-capture-list a, .extension-capture-list button { padding: 7px 9px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--studio-orange-100); border-radius: 8px; color: #7f6656; background: #fff; font-size: 9px; font-weight: 800; text-decoration: none; }
+.extension-section-heading { display: flex !important; align-items: center; justify-content: space-between; gap: 10px !important; padding-top: 4px; }
+.extension-section-heading > div { display: flex; align-items: baseline; gap: 7px; }
+.extension-section-heading strong { color: var(--studio-ink); font-size: 11px; }
+.extension-section-heading span { color: #9b8778; font-size: 9px; }
+.extension-empty { padding: 14px; border: 1px dashed var(--studio-orange-200); border-radius: 11px; color: #8f796a; background: #fffcf8; font-size: 9px; line-height: 1.5; text-align: center; }
+.extension-connection-list, .extension-capture-list { display: grid; gap: 7px; }
+.extension-connection-list > div, .extension-capture-list > article { padding: 11px; display: grid; align-items: center; gap: 8px; border: 1px solid var(--studio-orange-100); border-radius: 11px; background: #fff; }
+.extension-connection-list > div { grid-template-columns: minmax(0,1fr) auto; }
+.extension-capture-list > article { grid-template-columns: minmax(0,1fr) auto auto; }
+.extension-connection-list > div > div, .extension-capture-list article > div { min-width: 0; display: grid; gap: 2px; }
+.extension-connection-list strong, .extension-capture-list strong { overflow: hidden; color: var(--studio-ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.extension-connection-list span, .extension-connection-list small, .extension-capture-list span, .extension-capture-list small { overflow: hidden; color: #8f796a; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.extension-connection-list button { color: #9a3412; border-color: #fecaca; }
+.extension-capture-list button { color: #9a3412; border-color: var(--studio-orange-200); background: var(--studio-orange-50); }
+.extension-capture-list a:hover, .extension-capture-list button:hover, .extension-section-heading button:hover, .extension-token-once button:hover { border-color: var(--studio-orange-300); }
+@media (max-width: 620px) {
+  .extension-token-once > div { align-items: stretch; flex-direction: column; }
+  .extension-capture-list > article { grid-template-columns: 1fr 1fr; }
+  .extension-capture-list article > div { grid-column: 1 / -1; }
+}

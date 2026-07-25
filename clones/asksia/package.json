@@ -1,6 +1,6 @@
 {
   "name": "studypal-ai",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "description": "StudyPal AI local study workspace",
   "author": "StudyPal AI",
@@ -20,10 +20,12 @@
     "test:e2e:p1": "node e2e/p1-study-flow.cjs",
     "test:e2e:p2": "node e2e/p2-study-flow.cjs",
     "test:e2e:p3": "node e2e/p3-homework-flow.cjs",
-    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "check": "npm run lint && npm run typecheck && npm test && npm run check:extension && npm run build",
     "test:e2e:p4": "node e2e/p4-video-flow.cjs",
     "test:e2e:p5": "node e2e/p5-transcribe-flow.cjs",
-    "test:e2e:final": "node e2e/final-study-suite.cjs"
+    "test:e2e:final": "node e2e/final-study-suite.cjs",
+    "test:e2e:p15": "node e2e/p15-extension-flow.cjs",
+    "check:extension": "node extension/check.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

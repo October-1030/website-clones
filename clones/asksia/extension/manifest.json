@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "StudyPal Page Sync",
+  "version": "0.1.0",
+  "description": "Capture selected text or the visible study page only when you explicitly click Sync.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:3000/*",
+    "http://localhost:3000/*"
+  ],
+  "action": {
+    "default_title": "Open StudyPal Page Sync"
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}

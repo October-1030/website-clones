@@ -80,15 +80,20 @@ D2L Brightspace is supported through its recommended OAuth 2.0 authorization-cod
 
 Moodle is supported through an administrator-created external service restricted to `core_webservice_get_site_info`, `core_enrol_get_users_courses`, and `core_course_get_contents`. Users paste the issued token into the signed-in StudyPal LMS dialog; the token is sent only in HTTPS POST bodies, encrypted before storage, and never placed in URLs or client logs. Self-hosted Moodle domains must be explicitly allowlisted with `STUDYPAL_LMS_ALLOWED_HOSTS`.
 
+## Browser extension page sync
+
+The `extension` folder is a local unpacked Manifest V3 Chrome extension. It uses temporary `activeTab` access only after a user click, excludes form values and editable/hidden content, and sends a bounded capture to StudyPal with a revocable 30-day pairing token. Tokens are shown once, stored only as SHA-256 hashes in Supabase, and kept in `chrome.storage.local` on the browser. Captures can be converted into the existing grounded summary and Q&A workflow.
+
+Run `npm run check:extension` to validate the manifest, permissions, JavaScript syntax, and static privacy controls. Installation and security details are in [docs/P15-browser-extension-sync.md](docs/P15-browser-extension-sync.md).
+
 ## Important boundaries
 
 The local web product intentionally does not pretend to provide:
 
 - write access to Canvas, Blackboard, Brightspace, or Moodle (all LMS synchronization is read-only);
 - subscription, payment, or quota billing;
-- production cloud hosting until a dedicated StudyPal Supabase project and deployment target are approved;
-- mobile operating-system overlays or background translation over other apps;
-- a packaged browser extension or native mobile application;
+- public production hosting until a dedicated StudyPal deployment target is approved;
+- a native mobile application, operating-system overlay, or background translation over other apps;
 - OCR for scanned PDFs, full DOCX/PPTX ingestion, or private video transcription;
 - AI-generated replacement faces or biometric processing.
 
@@ -102,6 +107,7 @@ npm run lint
 npm test
 npm run build
 npm run test:e2e:final
+npm run check:extension
 ```
 
 `test:e2e:final` uses the installed Playwright and Chrome, tests desktop and 390px mobile layouts, and saves screenshots, a trace, browser metadata, and a JSON report under `docs/evidence/final-study-suite/`.

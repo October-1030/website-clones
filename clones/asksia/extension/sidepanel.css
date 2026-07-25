@@ -1,0 +1,25 @@
+:root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #2f241e; background: #fffaf5; }
+* { box-sizing: border-box; }
+body { min-width: 300px; margin: 0; }
+main { padding: 18px; display: grid; gap: 14px; }
+header { display: flex; align-items: center; gap: 10px; }
+.brand { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 12px; color: #fff; background: linear-gradient(145deg,#fb923c,#ea580c); box-shadow: 0 9px 20px rgba(234,88,12,.24); font-weight: 900; }
+h1 { margin: 0; font-size: 15px; line-height: 1.25; }
+header p { margin: 3px 0 0; color: #8f796a; font-size: 10px; }
+.privacy { padding: 12px; display: grid; gap: 4px; border: 1px solid #bbf7d0; border-radius: 12px; color: #14532d; background: #f0fdf4; }
+.privacy strong { font-size: 10px; }
+.privacy span { color: #47705a; font-size: 9px; line-height: 1.5; }
+form { display: grid; gap: 9px; }
+label { display: grid; gap: 5px; font-size: 9px; font-weight: 800; }
+input, select { width: 100%; padding: 10px; border: 1px solid #fed7aa; border-radius: 9px; outline: none; color: #2f241e; background: #fff; font-family: inherit; font-size: 10px; line-height: 1.4; }
+input:focus, select:focus { border-color: #fb923c; box-shadow: 0 0 0 3px rgba(251,146,60,.15); }
+button { min-height: 36px; padding: 9px 11px; border: 0; border-radius: 9px; cursor: pointer; font-family: inherit; font-size: 10px; font-weight: 800; line-height: 1.2; }
+button:disabled { cursor: not-allowed; opacity: .52; }
+form button, .primary { color: #fff; background: linear-gradient(135deg,#f97316,#ea580c); }
+.primary { min-height: 43px; font-size: 11px; box-shadow: 0 10px 20px rgba(234,88,12,.18); }
+.secondary { color: #9a3412; border: 1px solid #fdba74; background: #fff7ed; }
+.text-button { min-height: 28px; padding: 5px; color: #9b8778; background: transparent; }
+.connection { min-height: 18px; color: #8f796a; font-size: 9px; line-height: 1.45; }
+.connection.connected { color: #047857; }
+.result { padding: 12px; border: 1px solid #fed7aa; border-radius: 11px; color: #7c2d12; background: #fff7ed; font-size: 9px; line-height: 1.5; }
+.result.error { color: #991b1b; border-color: #fecaca; background: #fef2f2; }

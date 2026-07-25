@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>StudyPal Page Sync</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <main>
+    <header><div class="brand">S</div><div><h1>StudyPal Page Sync</h1><p>Capture only when you click Sync.</p></div></header>
+    <section class="privacy"><strong>Private by design</strong><span>No background browsing. No form values. No password fields. The extension uses temporary active-tab access only.</span></section>
+    <form id="pair-form">
+      <label>StudyPal server<select id="base-url"><option value="http://127.0.0.1:3000">127.0.0.1:3000</option><option value="http://localhost:3000">localhost:3000</option></select></label>
+      <label>Pairing token<input id="token" type="password" autocomplete="off" placeholder="spx_…" required></label>
+      <button id="save" type="submit">Save token locally</button>
+    </form>
+    <div id="connection" class="connection" aria-live="polite"></div>
+    <button id="sync" class="primary" type="button" disabled>Sync this page</button>
+    <div id="result" class="result" aria-live="polite" hidden></div>
+    <button id="open" class="secondary" type="button" hidden>Open in StudyPal</button>
+    <button id="clear" class="text-button" type="button" hidden>Forget token on this browser</button>
+  </main>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
