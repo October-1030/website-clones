@@ -3,7 +3,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { handleTranscribeRequest } from "../src/app/api/transcribe/route";
+import { handleTranscribeRequest } from "../src/lib/transcribe/route-handler";
 import {
   deleteServerTranscribeSession,
   loadServerTranscribeSession,
@@ -82,6 +82,22 @@ describe("Live Transcribe core", () => {
     assert.deepEqual(remainingTemporaryFiles, []);
     assert.equal(await deleteServerTranscribeSession(session.id), true);
     assert.equal(await loadServerTranscribeSession(session.id), null);
+  });
+
+  it("rejects decoded overlong audio before model work", async () => {
+    let transcriberCalled = false;
+    const response = await handleTranscribeRequest(
+      requestWith(new File([wavBytes().buffer as ArrayBuffer], "lecture.wav", { type: "audio/wav" })),
+      async () => {
+        transcriberCalled = true;
+        return fakeResult;
+      },
+      async () => 620.0015,
+    );
+    assert.equal(response.status, 413);
+    assert.equal(transcriberCalled, false);
+    const remainingTemporaryFiles = await readdir(path.join(dataDirectory, "transcribe-temp"));
+    assert.deepEqual(remainingTemporaryFiles, []);
   });
 
   it("rejects missing, unsafe, empty, and overlong recordings", async () => {

@@ -24,7 +24,7 @@ function parse(kind: CloudSessionKind, raw: string): CloudSessionPayload | null 
 }
 
 async function sessionsFor(kind: CloudSessionKind): Promise<CloudSessionPayload[]> {
-  const directory = path.join(dataDirectory(), kind === "study" ? "sessions" : kind);
+  const directory = path.join(/* turbopackIgnore: true */ dataDirectory(), kind === "study" ? "sessions" : kind);
   let names: string[];
   try {
     names = (await readdir(directory, { withFileTypes: true }))
@@ -36,7 +36,7 @@ async function sessionsFor(kind: CloudSessionKind): Promise<CloudSessionPayload[
     throw error;
   }
   const values = await Promise.all(names.map(async (name) => {
-    const filePath = path.join(directory, name);
+    const filePath = path.join(/* turbopackIgnore: true */ directory, name);
     try {
       const metadata = await stat(filePath);
       if (!metadata.isFile() || metadata.size > MAX_FILE_BYTES) return null;

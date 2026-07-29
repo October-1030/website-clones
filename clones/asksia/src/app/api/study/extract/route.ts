@@ -23,8 +23,8 @@ export async function POST(request: Request) {
     const extracted = await extractStudyDocument(bytes, validation.kind);
     const document = { pages: extracted.pages, fileName: file.name };
     const provider = getStudyProvider();
-    const summary = await provider.summarize(document);
     const usage = await consumeAccountUsage({ aiRequests: 1, filePages: extracted.pageCount });
+    const summary = await provider.summarize(document);
     const now = new Date().toISOString();
     const session: StudySession = {
       version: 1,

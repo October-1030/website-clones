@@ -58,8 +58,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "缺少可用的资料内容。", code: "invalid_document" }, { status: 400 });
     }
     const fileName = session?.file.name ?? (typeof payload.fileName === "string" ? payload.fileName.slice(0, 240) : "学习资料");
-    const result = await provider.answer({ pages, fileName }, question);
     const usage = await consumeAccountUsage({ aiRequests: 1 });
+    const result = await provider.answer({ pages, fileName }, question);
 
     if (!session) return NextResponse.json({ ...result, usage });
 

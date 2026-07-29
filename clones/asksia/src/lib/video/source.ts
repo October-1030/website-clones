@@ -1,3 +1,4 @@
+import { readResponseText, ResponseLimitError } from "../http/response-limit";
 import type { StudySourcePage } from "../study/types";
 import {
   MAX_MEDIA_URL_CHARS,
@@ -166,13 +167,16 @@ async function fetchBoundedText(
       if (!response.ok) throw new MediaSourceError(`媒体页面读取失败（HTTP ${response.status}）。`, "media_fetch_failed", 502);
       const contentLength = Number(response.headers.get("content-length") || 0);
       if (contentLength > MAX_REMOTE_HTML_CHARS * 4) throw new MediaSourceError("远程页面体积过大，已停止读取。", "media_response_too_large", 413);
-      const text = await response.text();
+      const text = await readResponseText(response, MAX_REMOTE_HTML_CHARS * 4);
       if (text.length > MAX_REMOTE_HTML_CHARS) throw new MediaSourceError("远程页面体积过大，已停止读取。", "media_response_too_large", 413);
       return { response, text, finalUrl: current };
     }
     throw new MediaSourceError("媒体页面重定向失败。", "media_redirect_failed");
   } catch (error) {
     if (error instanceof MediaSourceError) throw error;
+    if (error instanceof ResponseLimitError) {
+      throw new MediaSourceError("The remote media response is too large.", "media_response_too_large", 413);
+    }
     if (error instanceof Error && error.name === "AbortError") throw new MediaSourceError("媒体页面读取超时。", "media_fetch_timeout", 504);
     throw new MediaSourceError("无法连接媒体页面，请检查网络或稍后重试。", "media_unreachable", 502);
   } finally {
@@ -334,7 +338,7 @@ async function fetchAndroidPlayer(
       }),
     });
     if (!response.ok) return null;
-    const text = await response.text();
+    const text = await readResponseText(response, MAX_REMOTE_HTML_CHARS * 4);
     if (!text || text.length > MAX_REMOTE_HTML_CHARS) return null;
     return JSON.parse(text) as InnertubePlayerResponse;
   } catch {

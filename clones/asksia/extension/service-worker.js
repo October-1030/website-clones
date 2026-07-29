@@ -65,7 +65,10 @@ function extractStudyPalPage() {
   if (textContent.length < 50) throw new Error("Select more text or open a page with at least 50 readable characters.");
   const description = document.querySelector("meta[name='description']")?.getAttribute("content") || "";
   return {
-    sourceUrl: window.location.href,
+    sourceUrl: (() => {
+      const source = new URL(window.location.href);
+      return `${source.origin}${source.pathname}`;
+    })(),
     title: normalizeText(document.title || window.location.hostname).slice(0, 500),
     textContent,
     capturedAt: new Date().toISOString(),

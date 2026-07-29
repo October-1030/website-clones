@@ -106,6 +106,8 @@ export default function TranscribeWorkspace({ onToast }: { onToast: (message: st
     let active = true;
     const stored = loadTranscribeSession(window.localStorage);
     if (stored) {
+      // Browser storage is an external system restored after hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSession(stored);
       setSourceKind(stored.source.kind);
       setRestoreSource("local");
@@ -174,9 +176,9 @@ export default function TranscribeWorkspace({ onToast }: { onToast: (message: st
       saveTranscribeSession(window.localStorage, payload.session);
       setSessionInUrl(payload.session.id);
       notifyUsageChanged();
-      onToast("Final transcript saved. The temporary audio was deleted.");
+      onToast("Final transcript saved. Temporary-file cleanup was requested.");
     } catch (caught) {
-      if (caught instanceof DOMException && caught.name === "AbortError") setError("Transcription was cancelled. Temporary audio was deleted.");
+      if (caught instanceof DOMException && caught.name === "AbortError") setError("Transcription was cancelled. Temporary-file cleanup was requested.");
       else setError(caught instanceof Error ? caught.message : "Transcription failed. Please retry.");
     } finally {
       abortRef.current = null;
@@ -316,12 +318,12 @@ export default function TranscribeWorkspace({ onToast }: { onToast: (message: st
       <div>
         <span className="everywhere-kicker">P5 Live Transcribe</span>
         <h2>Capture audio, then keep an accurate final transcript</h2>
-        <p>Microphone mode can show temporary browser captions. The saved final transcript always comes from local Faster-Whisper after recording stops.</p>
+        <p>Temporary browser captions may be processed by your browser or operating-system speech service. The saved final transcript comes from the StudyPal Faster-Whisper server after recording stops.</p>
       </div>
-      <span className="demo-mode-badge">Local speech engine</span>
+      <span className="demo-mode-badge">Faster-Whisper speech engine</span>
     </header>
 
-    <div className="transcribe-privacy"><Check size={15} /><span><strong>Private by design:</strong> audio is sent only to this computer and deleted immediately after transcription. Only the text session is saved.</span></div>
+    <div className="transcribe-privacy"><Check size={15} /><span><strong>Processing disclosure:</strong> audio is uploaded to the StudyPal server and written to temporary storage for Faster-Whisper transcription. The server attempts to remove the temporary file immediately after processing; saved sessions contain transcript text, not the audio recording.</span></div>
 
     <div className="audio-source-grid transcribe-source-grid">
       <button type="button" className={sourceKind === "microphone" ? "audio-source-active" : ""} onClick={() => void startRecording("microphone")} disabled={phase !== "idle"}>
@@ -345,7 +347,7 @@ export default function TranscribeWorkspace({ onToast }: { onToast: (message: st
       <button type="button" className="stop-recording-button" onClick={stopRecording}><Square size={14} fill="currentColor" />Stop and transcribe</button>
     </div>}
 
-    {phase === "processing" && <div className="transcribe-status"><LoaderCircle size={18} className="spin" /><div><strong>Creating the final transcript</strong><span>Local Faster-Whisper is processing the recording. You can safely cancel; temporary audio will still be deleted.</span></div><button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button></div>}
+    {phase === "processing" && <div className="transcribe-status"><LoaderCircle size={18} className="spin" /><div><strong>Creating the final transcript</strong><span>Faster-Whisper is processing the recording. You can cancel; the server will stop processing and attempt to remove the temporary file.</span></div><button type="button" onClick={() => abortRef.current?.abort()}>Cancel</button></div>}
 
     {error && <div className="study-error" role="alert"><AlertCircle size={18} /><div><strong>Transcription could not continue</strong><span>{error}</span></div></div>}
 

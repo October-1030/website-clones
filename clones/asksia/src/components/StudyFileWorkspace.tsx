@@ -59,6 +59,8 @@ export default function StudyFileWorkspace({ onToast }: { onToast: (message: str
     let active = true;
     const stored = loadStudySession(window.localStorage);
     if (stored) {
+      // Browser storage is an external system restored after hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSession(stored);
       setPhase("done");
       setProgress(100);

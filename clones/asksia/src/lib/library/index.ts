@@ -22,11 +22,11 @@ function clip(value: string, length = 100): string {
 
 async function readSessionFiles(directory: string): Promise<string[]> {
   try {
-    const entries = await readdir(path.join(dataDirectory(), directory), { withFileTypes: true });
+    const entries = await readdir(path.join(/* turbopackIgnore: true */ dataDirectory(), directory), { withFileTypes: true });
     return entries
       .filter((entry) => entry.isFile() && /^[a-zA-Z0-9_-]{1,100}\.json$/.test(entry.name))
       .slice(0, MAX_LIBRARY_FILES_PER_KIND)
-      .map((entry) => path.join(dataDirectory(), directory, entry.name));
+      .map((entry) => path.join(/* turbopackIgnore: true */ dataDirectory(), directory, entry.name));
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
     throw error;

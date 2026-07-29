@@ -150,7 +150,7 @@ export default function ExtensionSyncDialog({
       if (!response.ok || !payload.href) throw new Error(payload.error || "Unable to summarize captured webpage.");
       notifyUsageChanged();
       onChanged("Captured webpage converted into a grounded StudyPal session.");
-      window.location.href = payload.href;
+      window.location.assign(payload.href);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to summarize captured webpage.");
       setBusy(null);

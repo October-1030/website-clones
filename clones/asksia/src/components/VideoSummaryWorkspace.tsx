@@ -68,6 +68,8 @@ export default function VideoSummaryWorkspace({ onToast }: { onToast: (message: 
     let active = true;
     const stored = loadVideoSession(window.localStorage);
     if (stored) {
+      // Browser storage is an external system restored after hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSession(stored);
       setUrl(stored.source.canonicalUrl);
       setRestoreSource("local");

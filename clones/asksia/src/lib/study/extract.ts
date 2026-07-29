@@ -1,5 +1,5 @@
 import { assertPdfSignature, assertPlainText, StudyFileError } from "./file-validation";
-import { MAX_EXTRACTED_CHARS, type StudyFileKind, type StudySourcePage } from "./types";
+import { MAX_EXTRACTED_CHARS, MAX_PDF_PAGES, type StudyFileKind, type StudySourcePage } from "./types";
 
 export interface ExtractedStudyDocument {
   pages: StudySourcePage[];
@@ -44,6 +44,9 @@ export async function extractStudyDocument(bytes: Uint8Array, kind: StudyFileKin
     try {
       const { extractText, getDocumentProxy } = await import("unpdf");
       const pdf = await getDocumentProxy(bytes);
+      if (pdf.numPages > MAX_PDF_PAGES) {
+        throw new StudyFileError(`PDF files are limited to ${MAX_PDF_PAGES} pages.`, "pdf_too_many_pages", 413);
+      }
       const extracted = await extractText(pdf);
       pageCount = extracted.totalPages;
       pages = extracted.text.map((text, index) => ({ page: index + 1, label: `第 ${index + 1} 页`, text: cleanText(text) }));

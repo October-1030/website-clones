@@ -21,8 +21,8 @@ export async function POST(request: Request) {
 
   try {
     const provider = getStudyProvider();
-    const solution = await provider.solveHomework(problem);
     const usage = await consumeAccountUsage({ aiRequests: 1 });
+    const solution = await provider.solveHomework(problem);
     const now = new Date().toISOString();
     const session: HomeworkSession = {
       version: 1,

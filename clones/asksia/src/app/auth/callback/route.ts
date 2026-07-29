@@ -1,17 +1,14 @@
 import { NextResponse } from "next/server";
 import { createStudyPalServerClient } from "@/lib/cloud/server";
+import { safeLocalRedirect } from "@/lib/http/safe-redirect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function safeNext(value: string | null): string {
-  return value && value.startsWith("/") && !value.startsWith("//") ? value : "/pro/session";
-}
-
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
-  const next = safeNext(url.searchParams.get("next"));
+  const next = safeLocalRedirect(url.searchParams.get("next"));
   const redirect = new URL(next, url.origin);
   if (!code) {
     redirect.searchParams.set("cloudAuthError", "missing_code");

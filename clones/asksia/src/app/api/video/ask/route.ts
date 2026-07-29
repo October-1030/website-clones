@@ -22,8 +22,8 @@ export async function POST(request: Request) {
     }
     const session = await loadServerVideoSession(body.sessionId);
     if (!session) return NextResponse.json({ error: "视频学习记录不存在。", code: "video_session_not_found" }, { status: 404 });
-    const result = await askVideoSession(session, body.question);
     const usage = await consumeAccountUsage({ aiRequests: 1 });
+    const result = await askVideoSession(session, body.question);
     await saveServerVideoSession(result.session);
     return NextResponse.json({ ...result, usage });
   } catch (error) {

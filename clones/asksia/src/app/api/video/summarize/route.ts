@@ -18,8 +18,13 @@ export async function POST(request: Request) {
     if (typeof body.url !== "string") {
       return NextResponse.json({ error: "请输入视频或播客链接。", code: "invalid_media_url" }, { status: 400 });
     }
-    const session = await createVideoSession(body.url);
-    const usage = await consumeAccountUsage({ aiRequests: 1 });
+    let usage: Awaited<ReturnType<typeof consumeAccountUsage>> | undefined;
+    const session = await createVideoSession(body.url, {
+      beforeSummarize: async () => {
+        usage = await consumeAccountUsage({ aiRequests: 1 });
+      },
+    });
+    if (!usage) throw new Error("Usage accounting did not run.");
     await saveServerVideoSession(session);
     return NextResponse.json({ session, usage });
   } catch (error) {

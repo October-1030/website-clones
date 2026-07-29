@@ -41,6 +41,8 @@ export default function HomeworkWorkspace({ onToast, initialProblem = "" }: { on
     let active = true;
     const stored = initialProblem.trim() ? null : loadHomeworkSession(window.localStorage);
     if (stored) {
+      // Browser storage is an external system restored after hydration.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSession(stored);
       setProblem(stored.problem);
       setRestoreSource("local");

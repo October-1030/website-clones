@@ -1,3 +1,5 @@
+import { readResponseJson } from "../http/response-limit";
+
 export interface PublicSearchResult {
   id: number;
   key: string;
@@ -62,7 +64,7 @@ export async function searchPublicKnowledge(
   });
   if (!response.ok) throw new Error(`Public search failed with status ${response.status}.`);
 
-  const payload = await response.json() as WikimediaSearchResponse;
+  const payload = await readResponseJson<WikimediaSearchResponse>(response, 1024 * 1024);
   const results = (Array.isArray(payload.pages) ? payload.pages : []).flatMap((page, index) => {
     const key = typeof page.key === "string" ? page.key.trim() : "";
     const title = typeof page.title === "string" ? page.title.trim() : "";

@@ -1,4 +1,5 @@
 import type { HomeworkSolution } from "../homework/types";
+import { readResponseJson, ResponseLimitError } from "../http/response-limit";
 import type { StudyCitation, StudyProviderMode, StudyQuestionResult, StudySourcePage, StudySummary } from "./types";
 
 export interface StudyDocumentInput {
@@ -361,7 +362,10 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
           body: JSON.stringify(requestBody),
           signal: controller.signal,
         });
-        const payload = await response.json().catch(() => ({})) as OpenAIResponsePayload;
+        const payload = await readResponseJson<OpenAIResponsePayload>(response, 1024 * 1024).catch((error) => {
+          if (error instanceof ResponseLimitError) throw error;
+          return {} as OpenAIResponsePayload;
+        });
         if (!response.ok) {
           const detail = payload.error?.message ? `：${clip(payload.error.message, 180)}` : "";
           throw new StudyProviderError(`真实 AI 请求失败（HTTP ${response.status}）${detail}`, "live_request_failed", 502);
@@ -376,6 +380,9 @@ export class OpenAIResponsesStudyProvider implements StudyProvider {
       throw new StudyProviderError("真实 AI 返回的结构无法解析。", "live_invalid_response");
     } catch (error) {
       if (error instanceof StudyProviderError) throw error;
+      if (error instanceof ResponseLimitError) {
+        throw new StudyProviderError("The AI provider response was too large.", "live_response_too_large", 502);
+      }
       if (error instanceof Error && error.name === "AbortError") throw new StudyProviderError("真实 AI 请求超时，请重试。", "live_timeout", 504);
       throw new StudyProviderError("无法连接真实 AI 服务，请检查网络与服务配置。", "live_unreachable", 502);
     } finally {

@@ -10,12 +10,14 @@ export interface CreateVideoSessionOptions extends MediaSourceOptions {
   provider?: StudyProvider;
   id?: string;
   now?: string;
+  beforeSummarize?: () => Promise<void>;
 }
 
 export async function createVideoSession(url: string, options: CreateVideoSessionOptions = {}): Promise<VideoSession> {
   const source = await extractMediaSource(url, options);
   const pages = mediaSourceToStudyPages(source);
   const provider = options.provider ?? getStudyProvider(options.environment);
+  await options.beforeSummarize?.();
   const summary = await provider.summarize({ fileName: source.title, pages });
   const now = options.now ?? new Date().toISOString();
   return {

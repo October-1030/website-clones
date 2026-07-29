@@ -23,6 +23,8 @@ assert.match(worker, /chrome\.storage\.local/);
 assert.match(worker, /active: true, currentWindow: true/);
 assert.match(worker, /form,input,textarea,select,button/);
 assert.match(worker, /Authorization: `Bearer \$\{settings\.token\}`/);
+assert.match(worker, /source\.origin.*source\.pathname/s);
+assert.doesNotMatch(worker, /sourceUrl:\s*window\.location\.href/);
 assert.doesNotMatch(worker, /console\.(?:log|info|debug)\s*\(/);
 assert.doesNotMatch(worker, /chrome\.history|chrome\.cookies|chrome\.webRequest/);
 

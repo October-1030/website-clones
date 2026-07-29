@@ -1,6 +1,7 @@
 export const STUDY_SESSION_STORAGE_KEY = "studypal.study-session.v1";
 export const MAX_STUDY_FILE_BYTES = 10 * 1024 * 1024;
 export const MAX_EXTRACTED_CHARS = 350_000;
+export const MAX_PDF_PAGES = 300;
 
 export type StudyFileKind = "pdf" | "txt";
 export type StudyProviderMode = "demo" | "live";
