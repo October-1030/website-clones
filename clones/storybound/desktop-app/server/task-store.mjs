@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import {
   appendFile,
   copyFile,
@@ -21,6 +22,34 @@ const artifactFileNames = {
   audioMeta: "05-audio-meta.json",
   timeline: "05-timeline.json",
 };
+
+function isPathInside(base, candidate) {
+  const normalizedBase = resolve(base);
+  const normalizedCandidate = resolve(candidate);
+  return normalizedCandidate === normalizedBase || normalizedCandidate.startsWith(`${normalizedBase}${sep}`);
+}
+
+function findRepositoryRoot(start) {
+  let current = resolve(start);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return resolve(start);
+    current = parent;
+  }
+}
+
+export function resolveStoryboundDataRoot(root) {
+  const defaultRoot = resolve(root, ".storybound-data");
+  const configured = String(process.env.STORYBOUND_DATA_DIR || "").trim();
+  if (!configured) return defaultRoot;
+  const resolvedRoot = resolve(configured);
+  const repositoryRoot = findRepositoryRoot(root);
+  if (isPathInside(repositoryRoot, resolvedRoot) && !isPathInside(defaultRoot, resolvedRoot)) {
+    throw new Error("STORYBOUND_DATA_DIR 不能指向代码仓库内未忽略的目录；请使用 .storybound-data 或仓库外路径");
+  }
+  return resolvedRoot;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -78,7 +107,7 @@ function taskSummary(task) {
 }
 
 export function createTaskStore(root) {
-  const dataRoot = resolve(process.env.STORYBOUND_DATA_DIR || join(root, ".storybound-data"));
+  const dataRoot = resolveStoryboundDataRoot(root);
   const tasksRoot = join(dataRoot, "tasks");
 
   async function ensureRoot() {

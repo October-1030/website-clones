@@ -1,5 +1,6 @@
+import { timingSafeEqual } from "node:crypto";
 import { createReadStream, existsSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { basename, dirname, extname, join, normalize, resolve } from "node:path";
 import { execFile } from "node:child_process";
@@ -8,10 +9,12 @@ import { fileURLToPath } from "node:url";
 
 import { buildJianyingDraft } from "./server/draft-builder.mjs";
 import { renderTitledCover } from "./server/cover-compositor.mjs";
-import { createTaskStore } from "./server/task-store.mjs";
+import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
+import { createTaskStore, resolveStoryboundDataRoot } from "./server/task-store.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const taskStore = createTaskStore(root);
+const storyboundDataRoot = resolveStoryboundDataRoot(root);
 await taskStore.ensureRoot();
 const originalPromptLibrary = JSON.parse(
   await readFile(join(root, "original-prompt-library.json"), "utf8"),
@@ -42,19 +45,26 @@ const llmProviderDefaults = {
 const execFileAsync = promisify(execFile);
 const ffprobeCandidates = [
   process.env.FFPROBE_PATH,
-  "C:\\Users\\pdb12\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-7.1.1-full_build\\bin\\ffprobe.exe",
   "ffprobe",
 ].filter(Boolean);
 const minimaxSecretCandidates = [
   process.env.MINIMAX_SECRETS_FILE,
   "C:\\tmp\\minimax-secrets.txt",
-  "D:\\projects\\MIMI\\coding\\Tbot\\MINIMAX.txt",
 ].filter(Boolean);
 const llmSecretCandidates = [
   process.env.STORYBOUND_LLM_SECRETS_FILE,
   "C:\\tmp\\storybound-secrets.txt",
   "C:\\tmp\\llm-secrets.txt",
 ].filter(Boolean);
+const asrCommand = String(process.env.STORYBOUND_ASR_COMMAND || "").trim();
+const asrArgs = (() => {
+  try {
+    const parsed = JSON.parse(process.env.STORYBOUND_ASR_ARGS || "[]");
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+})();
 
 function parseMinimaxApiKey(contents) {
   const lines = String(contents || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -628,6 +638,101 @@ async function generateMinimaxImages(body) {
   return { images };
 }
 
+function compatibleImageSize(aspectRatio) {
+  if (aspectRatio === "16:9" || aspectRatio === "4:3") return "1536x1024";
+  if (aspectRatio === "9:16" || aspectRatio === "3:4") return "1024x1536";
+  return "1024x1024";
+}
+
+function compatibleImageEndpoint(value) {
+  const url = new URL(String(value || "").trim());
+  const isLoopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
+  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback)) {
+    throw new Error("图片 Provider Base URL 必须使用 HTTPS；本机回环服务可使用 HTTP");
+  }
+  const path = url.pathname.replace(/\/+$/u, "");
+  url.pathname = path.endsWith("/images/generations") ? path : `${path}/images/generations`;
+  return url.toString();
+}
+
+async function generateCompatibleImages(body) {
+  const prompts = Array.isArray(body.prompts) ? body.prompts : [];
+  if (!prompts.length) throw new Error("缺少绘图 prompt");
+  const config = body.config || {};
+  if (!config.apiKey?.trim() || !config.baseUrl?.trim() || !config.model?.trim()) {
+    throw new Error("OpenAI-compatible 图片引擎配置不完整");
+  }
+  const endpoint = compatibleImageEndpoint(config.baseUrl);
+  const maxImages = Math.max(1, Math.min(18, Number(body.maxImages || prompts.length)));
+  const selectedPrompts = prompts.slice(0, maxImages);
+  const generationTask = body.taskId ? await taskStore.readTask(body.taskId) : null;
+  const images = await mapLimit(selectedPrompts, 2, async (item, index) => {
+    const shotId = Number(item.shotId || index + 1);
+    const prompt = String(item.prompt || "").trim().slice(0, 4000);
+    try {
+      const response = await fetchWithTimeout(endpoint, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.apiKey.trim()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: config.model.trim(),
+          prompt,
+          n: 1,
+          size: compatibleImageSize(body.aspectRatio),
+          response_format: "b64_json",
+        }),
+      }, 180000);
+      const text = await response.text();
+      if (!response.ok) throw new Error(`图片 Provider HTTP ${response.status}: ${text.slice(0, 280)}`);
+      const payload = JSON.parse(text);
+      const image = payload.data?.[0];
+      let saved = null;
+      let url = "";
+      if (image?.b64_json) {
+        const buffer = Buffer.from(image.b64_json, "base64");
+        saved = body.taskId ? await taskStore.saveBuffer(body.taskId, "images", `${shotId}.png`, buffer) : null;
+        url = saved?.url || `data:image/png;base64,${image.b64_json}`;
+      } else if (image?.url) {
+        saved = body.taskId ? await taskStore.saveRemoteAsset(body.taskId, "images", `${shotId}.png`, image.url) : null;
+        url = saved?.url || image.url;
+      } else {
+        throw new Error("图片 Provider 未返回 b64_json 或 url");
+      }
+      if (saved && shotId >= 9000 && generationTask?.options?.coverMode === "titled") {
+        const rendered = await renderTitledCover({
+          sourcePath: saved.path,
+          title: generationTask.artifacts?.rewrite?.title || generationTask.title,
+          subtitles: generationTask.artifacts?.rewrite?.subtitle || [],
+        }).catch(() => null);
+        if (rendered) saved = { ...saved, bytes: rendered.bytes };
+      }
+      return {
+        id: payload.id || `compatible-image-${Date.now()}-${index}`,
+        shotId,
+        prompt,
+        url,
+        path: saved?.path,
+        bytes: saved?.bytes,
+        retryLevel: 0,
+        status: "ready",
+      };
+    } catch (error) {
+      return {
+        id: `failed-compatible-image-${Date.now()}-${index}`,
+        shotId,
+        prompt,
+        url: "",
+        retryLevel: 0,
+        status: "failed",
+        error: providerMessage(error, "图片 Provider 生图失败"),
+      };
+    }
+  });
+  return { images };
+}
+
 function parseJsonObject(text) {
   const raw = String(text || "").trim();
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
@@ -1096,6 +1201,10 @@ async function handleLlmApi(request, response, pathname) {
     }
     return;
   }
+  if (pathname === "/api/llm/prompt-library" && request.method === "GET") {
+    sendJson(response, 200, originalPromptLibrary);
+    return;
+  }
   if (request.method !== "POST") {
     sendJson(response, 405, { error: "只支持 POST" });
     return;
@@ -1127,9 +1236,74 @@ async function handleImageApi(request, response, pathname) {
       sendJson(response, 200, await generateMinimaxImages(body));
       return;
     }
+    if (pathname === "/api/images/openai/generate") {
+      sendJson(response, 200, await generateCompatibleImages(body));
+      return;
+    }
     sendJson(response, 404, { error: "未知图片接口" });
   } catch (error) {
     sendJson(response, 400, { error: providerMessage(error, "图片生成失败") });
+  }
+}
+
+function safeUploadName(value, fallback = "media.bin") {
+  const normalized = basename(String(value || fallback)).replace(/[^\p{L}\p{N}._-]+/gu, "-");
+  return normalized.slice(0, 120) || fallback;
+}
+
+async function handleAsrApi(request, response, pathname) {
+  if (pathname === "/api/asr/status" && request.method === "GET") {
+    sendJson(response, 200, {
+      available: Boolean(asrCommand),
+      provider: asrCommand ? "local-command" : null,
+      accepts: ["audio", "video"],
+    });
+    return;
+  }
+  if (pathname !== "/api/asr/transcribe") {
+    sendJson(response, 404, { error: "未知 ASR 接口" });
+    return;
+  }
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "只支持 POST" });
+    return;
+  }
+  if (!asrCommand) {
+    sendJson(response, 503, {
+      error: "本地 ASR 未配置。请设置 STORYBOUND_ASR_COMMAND 和 JSON 数组格式的 STORYBOUND_ASR_ARGS。",
+    });
+    return;
+  }
+  let inputFile = "";
+  try {
+    const body = await readJson(request);
+    const buffer = Buffer.from(String(body.base64 || ""), "base64");
+    if (!buffer.length) throw new Error("上传媒体为空");
+    if (buffer.length > 18 * 1024 * 1024) throw new Error("媒体超过 18 MB，请先截取或压缩");
+    const asrRoot = join(storyboundDataRoot, "asr");
+    await mkdir(asrRoot, { recursive: true });
+    inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(body.fileName)}`);
+    await writeFile(inputFile, buffer, { flag: "wx" });
+    const args = (asrArgs.length ? asrArgs : ["{input}"]).map((arg) => arg.replaceAll("{input}", inputFile));
+    const { stdout } = await execFileAsync(asrCommand, args, {
+      cwd: asrRoot,
+      timeout: 20 * 60 * 1000,
+      windowsHide: true,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    let text = String(stdout || "").trim();
+    try {
+      const parsed = JSON.parse(text);
+      text = String(parsed?.text || parsed?.transcript || parsed?.content || "").trim();
+    } catch {
+      // Plain text stdout is an accepted adapter response.
+    }
+    if (!text) throw new Error("ASR 命令未返回转写文本");
+    sendJson(response, 200, { text });
+  } catch (error) {
+    sendJson(response, 400, { error: providerMessage(error, "本地媒体转写失败") });
+  } finally {
+    if (inputFile) await rm(inputFile, { force: true }).catch(() => undefined);
   }
 }
 
@@ -1149,7 +1323,7 @@ async function handleTaskApi(request, response, pathname) {
   try {
     if (parts.length === 2) {
       if (request.method === "GET") {
-        sendJson(response, 200, { tasks: await taskStore.listTasks(), dataRoot: taskStore.dataRoot });
+        sendJson(response, 200, { tasks: await taskStore.listTasks() });
         return;
       }
       if (request.method === "POST") {
@@ -1269,13 +1443,42 @@ async function serveProduction(response, pathname) {
   createReadStream(file).pipe(response);
 }
 
-function authorizePublicTunnel(request, response, url) {
-  const host = String(request.headers.host || "").split(":")[0].toLowerCase();
-  if (!host.endsWith(".trycloudflare.com") || !publicAccessToken) return false;
+function secureTokenMatches(candidate) {
+  const expected = Buffer.from(publicAccessToken, "utf8");
+  const actual = Buffer.from(String(candidate || ""), "utf8");
+  return expected.length > 0 && expected.length === actual.length && timingSafeEqual(expected, actual);
+}
+
+function isLocalRequest(request) {
+  const hostHeader = String(request.headers.host || "").trim().toLowerCase();
+  const closingBracket = hostHeader.indexOf("]");
+  const host = hostHeader.startsWith("[") && closingBracket > 0
+    ? hostHeader.slice(1, closingBracket)
+    : hostHeader.split(":")[0];
+  const remoteAddress = String(request.socket.remoteAddress || "").toLowerCase();
+  const loopback = remoteAddress === "::1"
+    || remoteAddress === "127.0.0.1"
+    || remoteAddress === "::ffff:127.0.0.1";
+  return loopback && (host === "localhost" || host === "127.0.0.1" || host === "::1");
+}
+
+function authorizeAccess(request, response, url) {
+  if (isLocalRequest(request)) return false;
+  if (!publicAccessToken) {
+    const apiRequest = url.pathname.startsWith("/api/");
+    response.writeHead(503, {
+      "Content-Type": apiRequest ? "application/json; charset=utf-8" : "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    response.end(apiRequest
+      ? JSON.stringify({ error: "公网访问未启用：请先配置 STORYBOUND_PUBLIC_ACCESS_TOKEN" })
+      : "<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>公网访问未启用</title><body style=\"font-family:system-ui;background:#090d10;color:#e8f0ee;display:grid;place-items:center;min-height:100vh;margin:0\"><main><h1>公网访问未启用</h1><p>请在本机配置访问令牌后重新启动 Storybound。</p></main></body></html>");
+    return true;
+  }
   const cookies = Object.fromEntries(String(request.headers.cookie || "").split(";").map((item) => item.trim().split("=")).filter(([key, value]) => key && value));
   const queryToken = url.searchParams.get("access") || "";
   const bearerToken = String(request.headers.authorization || "").replace(/^Bearer\s+/i, "");
-  if (queryToken === publicAccessToken) {
+  if (secureTokenMatches(queryToken)) {
     url.searchParams.delete("access");
     const search = url.searchParams.toString();
     response.writeHead(302, {
@@ -1286,9 +1489,15 @@ function authorizePublicTunnel(request, response, url) {
     response.end();
     return true;
   }
-  if (decodeURIComponent(cookies.storybound_access || "") === publicAccessToken || bearerToken === publicAccessToken) return false;
+  let cookieToken = "";
+  try {
+    cookieToken = decodeURIComponent(cookies.storybound_access || "");
+  } catch {
+    cookieToken = "";
+  }
+  if (secureTokenMatches(cookieToken) || secureTokenMatches(bearerToken)) return false;
   response.writeHead(401, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-  response.end("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>需要访问链接</title><body style=\"font-family:system-ui;background:#090d10;color:#e8f0ee;display:grid;place-items:center;min-height:100vh;margin:0\"><main><h1>此检查地址需要访问令牌</h1><p>请使用 Codex 提供的完整链接重新打开。</p></main></body></html>");
+  response.end("<!doctype html><html lang=\"zh-CN\"><meta charset=\"utf-8\"><title>需要访问令牌</title><body style=\"font-family:system-ui;background:#090d10;color:#e8f0ee;display:grid;place-items:center;min-height:100vh;margin:0\"><main><h1>此检查地址需要访问令牌</h1><p>请使用包含 access 参数的完整链接重新打开。</p></main></body></html>");
   return true;
 }
 
@@ -1298,8 +1507,12 @@ const vite = production
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url || "/", `http://${request.headers.host || "127.0.0.1"}`);
-  if (authorizePublicTunnel(request, response, url)) return;
+  if (authorizeAccess(request, response, url)) return;
   const pathname = url.pathname;
+  if (pathname.startsWith("/api/media-workbench/")) {
+    await handleMediaWorkbenchRequest(request, response, pathname);
+    return;
+  }
   if (pathname.startsWith("/api/tts/")) {
     await handleTtsApi(request, response, pathname);
     return;
@@ -1310,6 +1523,10 @@ const server = createServer(async (request, response) => {
   }
   if (pathname.startsWith("/api/images/")) {
     await handleImageApi(request, response, pathname);
+    return;
+  }
+  if (pathname.startsWith("/api/asr/")) {
+    await handleAsrApi(request, response, pathname);
     return;
   }
   if (pathname === "/api/tasks" || pathname.startsWith("/api/tasks/")) {

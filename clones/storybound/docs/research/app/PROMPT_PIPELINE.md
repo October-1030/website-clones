@@ -1,8 +1,8 @@
-# Storybound 1.13.1 原版提示词流水线
+# Storybound 1.16.1 原版提示词流水线
 
 ## 数据来源
 
-提示词由本机已安装的 Storybound 1.13.1 客户端前端资源提取。生成脚本位于 `scripts/extract-original-prompt-templates.mjs`，结构化产物为 `desktop-app/original-prompt-library.json`。产物只包含客户端随包分发的模板与运行配置，不包含 API Key、Cookie、账户或激活数据。
+提示词由 Storybound 1.16.1 官方 Windows 安装包内随客户端分发的前端资源静态提取。生成脚本位于 `scripts/extract-original-prompt-templates.mjs`，结构化产物为 `desktop-app/original-prompt-library.json`。安装包未执行，产物只包含客户端随包分发的模板与运行配置，不包含 API Key、Cookie、账户或激活数据。
 
 ## 步骤映射
 

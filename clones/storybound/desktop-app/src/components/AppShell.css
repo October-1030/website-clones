@@ -11,6 +11,19 @@
   line-height: 21px;
 }
 
+.app-shell.is-collapsed {
+  height: 33px;
+}
+
+.app-shell.is-collapsed .app-shell-license,
+.app-shell.is-collapsed .app-shell-body {
+  display: none;
+}
+
+.app-shell.is-high-contrast {
+  filter: contrast(1.12) brightness(1.06);
+}
+
 .app-shell button {
   font: inherit;
 }
@@ -391,6 +404,10 @@
 }
 
 .app-shell-footer-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
   display: flex;
   height: 30px;
   align-items: center;
@@ -431,6 +448,12 @@
 }
 
 @media (max-width: 899px) {
+  .app-shell {
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+  }
+
   .app-shell-body {
     grid-template-columns: 64px minmax(0, 1fr);
   }
@@ -458,7 +481,8 @@
 
   .app-shell-new-task {
     justify-content: center;
-    height: 38px;
+    min-height: 44px;
+    height: 44px;
     padding: 0;
   }
 
@@ -472,7 +496,7 @@
 
   .app-shell-nav-item {
     justify-content: center;
-    min-height: 36px;
+    min-height: 44px;
     padding: 6px 0;
   }
 
@@ -487,7 +511,8 @@
 
   .app-shell-points-card {
     justify-content: center;
-    height: 40px;
+    min-height: 44px;
+    height: 44px;
     padding: 5px;
   }
 
@@ -498,7 +523,9 @@
   }
 
   .app-shell-footer-button {
-    height: 28px;
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
     padding: 0;
   }
 }
@@ -514,7 +541,8 @@
   }
 
   .app-shell-window-button {
-    width: 39px;
+    min-width: 44px;
+    width: 44px;
   }
 
   .app-shell-license {

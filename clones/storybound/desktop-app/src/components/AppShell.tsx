@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { navGroups } from "../data/app-data";
 import type { AppPage } from "../types/app";
@@ -36,6 +36,10 @@ function ThemeIcon() {
 }
 
 export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [highContrast, setHighContrast] = useState(() => window.localStorage.getItem("storybound-high-contrast") === "1");
+  const [windowMessage, setWindowMessage] = useState("");
+
   useEffect(() => {
     const handleNewTaskShortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "n") {
@@ -48,8 +52,26 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
     return () => window.removeEventListener("keydown", handleNewTaskShortcut);
   }, [onNavigate]);
 
+  useEffect(() => {
+    window.localStorage.setItem("storybound-high-contrast", highContrast ? "1" : "0");
+  }, [highContrast]);
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else await document.documentElement.requestFullscreen();
+    } catch {
+      setWindowMessage("当前浏览器未授予全屏权限");
+    }
+  }
+
+  function closeWindow() {
+    window.close();
+    window.setTimeout(() => setWindowMessage("浏览器模式请直接关闭当前标签页"), 120);
+  }
+
   return (
-    <div className="app-shell">
+    <div className={`app-shell${collapsed ? " is-collapsed" : ""}${highContrast ? " is-high-contrast" : ""}`}>
       <header className="app-shell-titlebar">
         <div className="app-shell-titlebar-brand">
           <StoryboundMark compact />
@@ -57,24 +79,24 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
         </div>
 
         <div className="app-shell-window-controls" aria-label="窗口控制">
-          <button className="app-shell-window-button" type="button" aria-label="最小化">
+          <button className="app-shell-window-button" type="button" aria-label={collapsed ? "展开工作台" : "收起工作台"} onClick={() => setCollapsed((value) => !value)}>
             <span className="app-shell-minimize" aria-hidden="true" />
           </button>
-          <button className="app-shell-window-button app-shell-maximize-button" type="button" aria-label="最大化">
+          <button className="app-shell-window-button app-shell-maximize-button" type="button" aria-label="切换全屏" onClick={() => void toggleFullscreen()}>
             <span className="app-shell-maximize" aria-hidden="true" />
           </button>
-          <button className="app-shell-window-button app-shell-window-button--close" type="button" aria-label="关闭">
+          <button className="app-shell-window-button app-shell-window-button--close" type="button" aria-label="关闭" onClick={closeWindow}>
             <span className="app-shell-close" aria-hidden="true" />
           </button>
         </div>
       </header>
 
       <div className="app-shell-license" role="status">
-        <span className="app-shell-license-badge">试用版</span>
-        <span>剩 <strong>7</strong> 天</span>
-        <span className="app-shell-license-detail">绑邮箱解锁 5 次试用</span>
-        <button type="button" className="app-shell-license-link">
-          去绑定 <span aria-hidden="true">›</span>
+        <span className="app-shell-license-badge">独立版</span>
+        <span><strong>本地工作台</strong></span>
+        <span className="app-shell-license-detail">{windowMessage || "自有 API · 不连接原版试用、积分和授权后台"}</span>
+        <button type="button" className="app-shell-license-link" onClick={() => onNavigate("activation")}>
+          查看边界 <span aria-hidden="true">›</span>
         </button>
       </div>
 
@@ -84,7 +106,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             <StoryboundMark />
             <div className="app-shell-sidebar-brand-copy">
               <span>Storybound</span>
-              <small>v1.13.1 · beta</small>
+              <small>v1.16.1 · beta</small>
             </div>
           </div>
 
@@ -130,11 +152,11 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             </div>
 
             <div className="app-shell-footer-actions">
-              <button type="button" className="app-shell-footer-button" title="意见反馈">
+              <a className="app-shell-footer-button" title="意见反馈" href="https://github.com/October-1030/website-clones/issues" target="_blank" rel="noreferrer">
                 <FeedbackIcon />
                 <span>意见反馈</span>
-              </button>
-              <button type="button" className="app-shell-footer-button" title="主题">
+              </a>
+              <button type="button" className="app-shell-footer-button" title="切换高对比主题" aria-pressed={highContrast} onClick={() => setHighContrast((value) => !value)}>
                 <ThemeIcon />
                 <span>主题</span>
               </button>

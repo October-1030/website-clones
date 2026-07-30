@@ -16,7 +16,6 @@ const draftTemplates = JSON.parse(await readFile(new URL("../original-draft-temp
 const execFileAsync = promisify(execFile);
 const ffmpegCandidates = [
   process.env.FFMPEG_PATH,
-  "C:\\Users\\pdb12\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-7.1.1-full_build\\bin\\ffmpeg.exe",
   "ffmpeg",
 ].filter(Boolean);
 
@@ -697,7 +696,7 @@ function splitSubtitleTimeline(item, maxChars) {
 function alignedSubtitleTimeline(audio, totalDurationUs, maxChars = 9) {
   const words = Array.isArray(audio?.alignment?.words) ? audio.alignment.words : [];
   if (!words.length) return [];
-  const punctuation = /^[，。、；：？！…,.!?;:'"“”‘’（）()《》【】\[\]—-]+$/u;
+  const punctuation = /^[，。、；：？！…,.!?;:'"“”‘’（）()《》【】[\]—-]+$/u;
   const chinese = /[\u3400-\u9fff]/gu;
   const groups = [];
   let current = null;
@@ -1228,7 +1227,7 @@ export async function buildJianyingDraft(taskStore, task) {
       dynamicVideoShots: [...readyVideos.keys()],
       animationPool,
       motionPool,
-      sourceVersion: "Storybound 1.13.1 compatible",
+      sourceVersion: "Storybound 1.16.1 compatible",
     }, null, 2)}\n`, "utf8"),
   ]);
   const zipPath = join(base, "draft.zip");

@@ -1,7 +1,6 @@
 import { createRequire } from "node:module";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const args = process.argv.slice(2);
@@ -13,6 +12,7 @@ const stylesOnly = args.includes("--styles");
 const tracksOnly = args.includes("--tracks");
 const functionNeedleArg = args.find((arg) => arg.startsWith("--function-needle="));
 const functionIndexArg = args.find((arg) => arg.startsWith("--function-index="));
+const sourceVersionArg = args.find((arg) => arg.startsWith("--source-version="));
 const functionList = args.includes("--function-list");
 
 if (!sourceArg) {
@@ -165,6 +165,7 @@ if (listOnly || !outputArg) {
 }
 
 const selected = Object.fromEntries(candidates.map(({ variable, value }) => [variable, value]));
+const selectedByHeading = Object.fromEntries(candidates.map(({ heading, value }) => [heading, value]));
 const styleObjects = collectStaticObjects((item) =>
   typeof item.id === "string" && "prefix" in item && "suffix" in item && "negativePrompt" in item,
 );
@@ -180,6 +181,48 @@ const trackPromptVariables = {
   inspirational: { rewrite: "Kx", metadata: "Vx", image: "Gx" },
   "folk-tale": { rewrite: "Fx", metadata: "Px", image: "Bx" },
   general: { rewrite: "Rx", metadata: "Cx", image: "Nx" },
+};
+const trackPromptHeadings = {
+  "character-story": {
+    rewrite: "# 对标文案改写规则",
+    metadata: "# 封面标题与视频简介生成规则",
+    image: "# AI 分镜绘画提示词生成系统（工业级版本）",
+  },
+  "health-book": {
+    rewrite: "# 健康图书赛道改写规则",
+    metadata: "# 封面标题与视频简介生成规则（健康图书赛道）",
+    image: "# 健康图书赛道 · AI 分镜绘画提示词生成系统",
+  },
+  "culture-knowledge": {
+    rewrite: "# 传统文化赛道改写规则",
+    metadata: "# 封面标题与视频简介生成规则（传统文化赛道）",
+    image: "# 传统文化赛道 · AI 分镜绘画提示词生成系统",
+  },
+  "picture-book": {
+    rewrite: "# 绘本故事赛道改写规则",
+    metadata: "# 封面标题与视频简介生成规则（绘本故事赛道）",
+    image: "# 绘本故事赛道 · AI 分镜绘画提示词生成系统",
+  },
+  ecommerce: {
+    rewrite: "# 电商带货赛道改写规则",
+    metadata: "# 封面标题与视频简介生成规则（电商带货赛道）",
+    image: "# 电商带货赛道 · AI 分镜绘画提示词生成系统",
+  },
+  inspirational: {
+    rewrite: "# 心灵鸡汤赛道改写规则",
+    metadata: "# 封面标题与视频简介生成规则（心灵鸡汤赛道）",
+    image: "# 心灵鸡汤赛道 · AI 分镜绘画提示词生成系统",
+  },
+  "folk-tale": {
+    rewrite: "# 民间故事赛道 · 对标文案改写规则",
+    metadata: "# 封面标题与视频简介生成规则（民间故事赛道）",
+    image: "# 民间故事赛道 · AI 分镜绘画提示词生成系统",
+  },
+  general: {
+    rewrite: "# 通用文案改写规则（general 兜底）",
+    metadata: "# 通用封面标题与视频简介生成规则（general 兜底）",
+    image: "# 通用 AI 分镜绘画提示词生成系统（general 兜底）",
+  },
 };
 
 const originalDefaultStyles = {
@@ -216,18 +259,18 @@ const tracks = Object.entries(trackPromptVariables).map(([id, variables]) => ({
     l2: "简洁室内或街景，柔和自然光，主体清晰",
     l3: "无人物的环境空镜，柔和光影，画面沉静",
   },
-  rewritePrompt: selected[variables.rewrite],
-  metadataPrompt: selected[variables.metadata],
-  imagePrompt: selected[variables.image],
+  rewritePrompt: selectedByHeading[trackPromptHeadings[id].rewrite] ?? selected[variables.rewrite],
+  metadataPrompt: selectedByHeading[trackPromptHeadings[id].metadata] ?? selected[variables.metadata],
+  imagePrompt: selectedByHeading[trackPromptHeadings[id].image] ?? selected[variables.image],
 }));
 const library = {
   schemaVersion: 1,
-  sourceVersion: "Storybound 1.13.1",
-  precheckPrompt: selected.PR,
-  sentenceSplitPrompt: selected.zR,
-  writerAgentPrompt: selected.FR,
-  storyboardAgentPrompt: selected.BR,
-  producerAgentPrompt: selected.UR,
+  sourceVersion: sourceVersionArg?.slice("--source-version=".length) || "Storybound 1.13.1",
+  precheckPrompt: selectedByHeading["# 文案预审"] ?? selected.PR,
+  sentenceSplitPrompt: selectedByHeading["# 分句规则 - 影视分镜级字幕拆分标准"] ?? selected.zR,
+  writerAgentPrompt: selectedByHeading["# WriterAgent — 文案改写 + 封面标题生成"] ?? selected.FR,
+  storyboardAgentPrompt: selectedByHeading["# StoryboardAgent — 分镜分句 + 绘图提示词"] ?? selected.BR,
+  producerAgentPrompt: selectedByHeading["# ProducerAgent — 生产制作"] ?? selected.UR,
   tracks,
   styles: styleObjects,
 };

@@ -3,6 +3,12 @@ import { useMemo, useState } from "react";
 import { llmProviderOptions } from "../data/llm-data";
 import { minimaxVoices, volcengineVoices } from "../data/tts-data";
 import { cloneMinimaxVoice, fetchMinimaxVoices, testTts } from "../lib/tts-api";
+import {
+  readImageProviderConfig,
+  writeImageProviderConfig,
+  type ImageProviderConfig,
+  type ImageProviderId,
+} from "../lib/image-provider-store";
 import type { LlmConfig, LlmCredentialStatus, LlmProvider } from "../types/llm";
 import type { MinimaxModel, TtsConfig, TtsCredentialStatus, TtsProvider, TtsVoice, VolcengineVersion } from "../types/tts";
 import "./TtsPages.css";
@@ -24,6 +30,7 @@ export function TtsSettingsPage({ config, credentialStatus, llmConfig, llmCreden
   const [cloneFile, setCloneFile] = useState<File | null>(null);
   const [cloneName, setCloneName] = useState("");
   const [cloneText, setCloneText] = useState("这是一段示例文本，用来测试克隆音色");
+  const [imageConfig, setImageConfig] = useState(readImageProviderConfig);
 
   const voices = useMemo(
     () => [...minimaxVoices, ...config.minimax.clonedVoices],
@@ -39,6 +46,16 @@ export function TtsSettingsPage({ config, credentialStatus, llmConfig, llmCreden
   const updateMinimax = (patch: Partial<TtsConfig["minimax"]>) =>
     onChange({ ...config, minimax: { ...config.minimax, ...patch } });
   const updateLlm = (patch: Partial<LlmConfig>) => onLlmChange({ ...llmConfig, ...patch });
+  const updateImageConfig = (patch: Partial<ImageProviderConfig>) => {
+    const next = {
+      ...imageConfig,
+      ...patch,
+      custom: { ...imageConfig.custom, ...(patch.custom || {}) },
+    };
+    setImageConfig(next);
+    writeImageProviderConfig(next);
+  };
+  const setImageProvider = (provider: ImageProviderId) => updateImageConfig({ provider });
 
   const setLlmProvider = (provider: LlmProvider) => {
     const preset = llmProviderOptions.find((option) => option.value === provider);
@@ -134,6 +151,16 @@ export function TtsSettingsPage({ config, credentialStatus, llmConfig, llmCreden
           <label className="tts-field"><span>模型 <small>model</small></span><input value={llmConfig.model} onChange={(event) => updateLlm({ model: event.target.value })} placeholder="deepseek-chat" /></label>
         </div>
         <p className="tts-help">也可以新建 `C:\tmp\storybound-secrets.txt`：`STORYBOUND_LLM_API_KEY=...`，可选 `STORYBOUND_LLM_PROVIDER`、`STORYBOUND_LLM_BASE_URL`、`STORYBOUND_LLM_MODEL`。</p>
+      </section>
+
+      <section className="tts-card">
+        <label className="tts-label">图片引擎</label>
+        <div className="tts-provider-grid">
+          <button className={imageConfig.provider === "minimax" ? "selected" : ""} onClick={() => setImageProvider("minimax")} type="button"><strong>MiniMax image-01</strong><span>默认 · 使用现有 MiniMax 凭据</span></button>
+          <button className={imageConfig.provider === "openai-compatible" ? "selected" : ""} onClick={() => setImageProvider("openai-compatible")} type="button"><strong>兼容图片引擎</strong><span>OpenAI-compatible /images/generations</span></button>
+        </div>
+        {imageConfig.provider === "openai-compatible" ? <><label className="tts-field"><span>API Key <small>仅当前会话</small></span><input type="password" autoComplete="off" value={imageConfig.custom.apiKey} onChange={(event) => updateImageConfig({ custom: { ...imageConfig.custom, apiKey: event.target.value } })} placeholder="粘贴图片 Provider API Key" /></label><div className="tts-two-column"><label className="tts-field"><span>Base URL <small>HTTPS</small></span><input value={imageConfig.custom.baseUrl} onChange={(event) => updateImageConfig({ custom: { ...imageConfig.custom, baseUrl: event.target.value } })} placeholder="https://api.example.com/v1" /></label><label className="tts-field"><span>模型</span><input value={imageConfig.custom.model} onChange={(event) => updateImageConfig({ custom: { ...imageConfig.custom, model: event.target.value } })} placeholder="gpt-image-1" /></label></div></> : <div className="tts-local-credential"><span>✓</span><div><strong>与 TTS 共用 MiniMax Key</strong><small>服务端安全读取；任务和画图实验室统一使用 image-01。</small></div></div>}
+        <p className="tts-help">原客户端的私有“全能绘图”不对外提供接口；本地复刻保留同等的 Provider 切换能力，默认使用你已配置的 MiniMax。</p>
       </section>
 
       <section className="tts-card">

@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { draftTemplates } from "../data/draft-templates";
-import { deleteTask, listTasks } from "../lib/task-api";
-import type { AppPage } from "../types/app";
-import type { TaskSummary } from "../types/task";
+import { deleteTask, listTasks, updateTask } from "../lib/task-api";
+import type { TaskStatus, TaskSummary } from "../types/task";
 import "./SupportPage.css";
 
 interface SupportPageProps {
-  page: Exclude<AppPage, "create" | "image-task" | "html-video" | "music-mv">;
+  page: "queue" | "history";
   onOpenTask: (taskId: string | null) => void;
   onRunQueue?: (taskIds: string[]) => void;
   activeQueue?: string[];
@@ -15,32 +13,31 @@ interface SupportPageProps {
 const pageInfo: Record<SupportPageProps["page"], { title: string; description: string; features: string[] }> = {
   queue: { title: "任务队列", description: "批量顺序执行、暂停当前条、跳过失败条目。", features: ["串行执行", "断点恢复", "批次摘要"] },
   history: { title: "历史任务", description: "查看任务产物、继续断点、重新打包或删除记录。", features: ["状态筛选", "继续创作", "打开产物"] },
-  playground: { title: "画图实验室", description: "独立测试提示词、画面风格和图片 Provider。", features: ["多 Provider", "比例与分辨率", "历史对比"] },
-  "voice-lab": { title: "配音实验室", description: "输入文本、选择音色与语速，一键生成 MP3。", features: ["豆包 TTS", "MiniMax", "声音克隆"] },
-  "person-assets": { title: "人物素材库", description: "按人物整理真实照片，创作时直接铺入分镜。", features: ["拖拽排序", "粘贴导入", "真图分镜"] },
-  "prompt-templates": { title: "提示词模板", description: "管理改写、分镜、封面和绘图规则。", features: ["赛道模板", "版本管理", "本地模板"] },
-  "draft-templates": { title: "草稿模板", description: "查看原版剪映画布、正文字幕、主副标题、免责声明、动画和音量参数。", features: ["4 套原版模板", "创建页完整编辑", "直接写入剪映"] },
-  "book-selection": { title: "选品助手", description: "当当畅销榜选书、AI 筛选和带货任务创建。", features: ["畅销榜", "豆瓣评分", "Excel 导出"] },
-  benchmark: { title: "对标监控", description: "监控视频号作品、提取文案并拆解爆款结构。", features: ["账号监控", "ASR 转写", "AI 纠错"] },
-  market: { title: "创作市场", description: "本地开源版使用本地提示词和画风模板。", features: ["本地安装", "模板导入", "版本管理"] },
-  settings: { title: "系统设置", description: "配置 LLM、图片、TTS、语音识别和剪映目录。", features: ["Provider 配置", "本地凭据", "诊断报告"] },
-  account: { title: "账号管理", description: "本地开源版不连接原产品账号和积分后台。", features: ["本地模式", "自有 API", "任务归档"] },
-  activation: { title: "激活管理", description: "独立复刻版不会连接原产品授权系统。", features: ["本地开发版", "无原版绕过", "可接自有授权"] },
 };
 
 export function SupportPage({ page, onOpenTask, onRunQueue, activeQueue = [] }: SupportPageProps) {
   const info = pageInfo[page];
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
-  const [dataRoot, setDataRoot] = useState("");
   const [loading, setLoading] = useState(page === "history" || page === "queue");
-  const visibleTasks = useMemo(() => page === "queue" ? tasks.filter((task) => ["pending", "running", "paused", "failed", "cancelled"].includes(task.status)) : tasks, [page, tasks]);
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("all");
+  const [query, setQuery] = useState("");
+  const queueTasks = useMemo(
+    () => page === "queue" ? tasks.filter((task) => ["pending", "running", "paused", "failed", "cancelled"].includes(task.status)) : tasks,
+    [page, tasks],
+  );
+  const visibleTasks = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    return queueTasks
+      .filter((task) => statusFilter === "all" || task.status === statusFilter)
+      .filter((task) => !normalized || `${task.title} ${task.track} ${task.inputText}`.toLowerCase().includes(normalized));
+  }, [query, queueTasks, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
     if (page !== "history" && page !== "queue") return;
     setLoading(true);
     void listTasks().then((result) => {
-      if (!cancelled) { setTasks(result.tasks); setDataRoot(result.dataRoot); }
+      if (!cancelled) setTasks(result.tasks);
     }).catch(() => undefined).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [page]);
@@ -51,12 +48,51 @@ export function SupportPage({ page, onOpenTask, onRunQueue, activeQueue = [] }: 
     setTasks((current) => current.filter((task) => task.id !== taskId));
   }
 
+  async function handleRename(task: TaskSummary) {
+    const title = window.prompt("重命名任务", task.title || "未命名任务")?.trim();
+    if (!title || title === task.title) return;
+    const updated = await updateTask(task.id, { title });
+    setTasks((current) => current.map((item) => item.id === task.id ? { ...item, title: updated.title, updatedAt: updated.updatedAt } : item));
+  }
+
+  function exportBatchSummary() {
+    const summary = {
+      exportedAt: new Date().toISOString(),
+      view: page,
+      filter: statusFilter,
+      counts: visibleTasks.reduce<Record<string, number>>((counts, task) => {
+        counts[task.status] = (counts[task.status] || 0) + 1;
+        return counts;
+      }, {}),
+      totals: {
+        tasks: visibleTasks.length,
+        images: visibleTasks.reduce((sum, task) => sum + task.imageCount, 0),
+        audio: visibleTasks.reduce((sum, task) => sum + task.audioCount, 0),
+        drafts: visibleTasks.filter((task) => task.draftReady).length,
+      },
+      tasks: visibleTasks,
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(summary, null, 2)], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `storybound-${page}-summary-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="support-page">
-      <header><span>Storybound 工作台</span><h1>{info.title}</h1><p>{info.description}</p>{dataRoot ? <small>本地任务目录：{dataRoot}</small> : null}</header>
+      <header><span>Storybound 工作台</span><h1>{info.title}</h1><p>{info.description}</p><small>任务保存在服务端本地工作目录，不向页面暴露绝对路径。</small></header>
       <div className="support-features">{info.features.map((feature) => <span key={feature}>{feature}</span>)}</div>
+      <div className="task-filter-toolbar">
+        <div role="group" aria-label="任务状态筛选">
+          {(["all", "draft", "pending", "running", "paused", "completed", "failed", "cancelled"] as const).map((status) => <button className={statusFilter === status ? "is-selected" : ""} key={status} onClick={() => setStatusFilter(status)} type="button">{status === "all" ? `全部 ${queueTasks.length}` : `${status} ${queueTasks.filter((task) => task.status === status).length}`}</button>)}
+        </div>
+        <label><span className="sr-only">搜索任务</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索标题、赛道或文案" /></label>
+        <button className="task-summary-button" disabled={!visibleTasks.length} onClick={exportBatchSummary} type="button">导出批次摘要</button>
+      </div>
       {page === "queue" && visibleTasks.length ? <div className="queue-toolbar"><div><strong>{activeQueue.length ? `正在串行处理 ${activeQueue.length} 项` : `队列中有 ${visibleTasks.length} 项`}</strong><span>失败项会保留错误记录，并自动继续下一项。</span></div><button type="button" disabled={Boolean(activeQueue.length)} onClick={() => onRunQueue?.(visibleTasks.map((task) => task.id).reverse())}>{activeQueue.length ? "队列执行中" : "串行执行全部"}</button></div> : null}
-      {(page === "history" || page === "queue") ? <section className="task-list">{loading ? <div className="support-empty"><strong>正在读取本地任务…</strong></div> : visibleTasks.length === 0 ? <div className="support-empty"><strong>{page === "queue" ? "队列为空" : "还没有任务"}</strong><p>任务会保存到本地目录，刷新和重启后仍可继续。</p><button onClick={() => onOpenTask(null)} type="button">新建图文任务</button></div> : visibleTasks.map((task) => <article key={task.id}><div><span className={`task-dot ${task.status}`} /><strong>{task.title || "未命名任务"}</strong></div><p>{task.mode === "auto" ? "全自动" : task.mode === "semi_auto" ? "半自动" : "直接出片"} · {task.status === "completed" ? `已完成 · ${task.imageCount} 图 / ${task.audioCount} 音频` : `Step ${Math.max(0, task.currentStep) + 1}/7 · ${task.status}`}</p><div><button onClick={() => onOpenTask(task.id)} type="button">{task.status === "completed" ? "打开产物" : "继续任务"}</button><button className="task-delete" onClick={() => void handleDelete(task.id)} type="button">删除</button></div></article>)}</section> : page === "draft-templates" ? <section className="template-catalog"><div className="template-catalog__notice"><strong>已接入原版 Storybound 1.13.1 参数</strong><span>创建任务时可展开“编辑这次任务的剪映模板参数”，调整全部文字轨、动画/运镜、画面区域、背景、边框和音量。</span></div><div className="template-catalog__grid">{draftTemplates.map((template) => <article key={template.id}><div className={`template-preview template-preview--${template.id}`}><span className="template-preview__title">主标题轨</span><span className="template-preview__image">{template.config.image.ratio} 画面</span><span className="template-preview__caption">正文字幕每行 {template.config.caption.maxCharsPerLine} 字</span></div><div className="template-card__head"><strong>{template.name}</strong><span>{template.config.canvas.width} × {template.config.canvas.height}</span></div><dl><div><dt>画面</dt><dd>{template.config.image.ratio} · 高度 {Math.round(template.config.image.height * 100)}%</dd></div><div><dt>正文字幕</dt><dd>{template.config.caption.fontSize} 号 · {template.config.caption.color} · Y {template.config.caption.y.toFixed(3)}</dd></div><div><dt>主标题</dt><dd>{template.config.title.fontSize} 号 · {template.config.title.color} · 无 AI 封面时显示</dd></div><div><dt>免责声明</dt><dd>{template.config.disclaimer.visible ? template.config.disclaimer.text.replace("\n", " / ") : "关闭"}</dd></div><div><dt>音频</dt><dd>旁白 {template.config.audio.narrationVolume} · BGM {template.config.audio.bgmVolume} · 淡出 {template.config.audio.bgmFadeOutMs / 1000}s</dd></div></dl></article>)}</div></section> : <div className="support-empty"><strong>模块界面已保留</strong><p>当前完整版范围优先完成图文任务闭环；该外围工作台使用本地数据替换原版私有后台。</p></div>}
+      <section className="task-list">{loading ? <div className="support-empty"><strong>正在读取本地任务…</strong></div> : visibleTasks.length === 0 ? <div className="support-empty"><strong>{page === "queue" ? "队列为空" : "没有匹配的任务"}</strong><p>任务会保存到本地目录，刷新和重启后仍可继续。</p><button onClick={() => onOpenTask(null)} type="button">新建图文任务</button></div> : visibleTasks.map((task) => <article key={task.id}><div><span className={`task-dot ${task.status}`} /><strong>{task.title || "未命名任务"}</strong></div><p>{task.mode === "auto" ? "全自动" : task.mode === "semi_auto" ? "半自动" : "直接出片"} · {task.status === "completed" ? `已完成 · ${task.imageCount} 图 / ${task.audioCount} 音频` : `Step ${Math.max(0, task.currentStep) + 1}/7 · ${task.status}`}</p><div><button onClick={() => onOpenTask(task.id)} type="button">{task.status === "completed" ? "打开产物" : "继续任务"}</button><button onClick={() => void handleRename(task)} type="button">重命名</button><button className="task-delete" onClick={() => void handleDelete(task.id)} type="button">删除</button></div></article>)}</section>
     </div>
   );
 }

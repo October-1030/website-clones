@@ -15,7 +15,7 @@ async function jsonRequest<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export async function listTasks(): Promise<{ tasks: TaskSummary[]; dataRoot: string }> {
+export async function listTasks(): Promise<{ tasks: TaskSummary[] }> {
   return jsonRequest("/api/tasks", { cache: "no-store" });
 }
 

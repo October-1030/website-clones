@@ -43,7 +43,7 @@ export const storyboundMarkup = String.raw`
     <div class="wrap hero-inner">
       <div class="hero-tag">
         <span class="hero-tag-badge">NEW</span>
-        v1.13.1 · 出图超时能捞回 + 历史任务收藏
+        v1.16.1 · 字幕行号超字标红 + 对标账号搜索
       </div>
       <h1>一句话，一段故事，<br><span class="accent">一键成片</span></h1>
       <p class="hero-sub">
@@ -851,4 +851,3 @@ export const storyboundMarkup = String.raw`
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
 </button>
 `;
-

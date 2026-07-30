@@ -84,6 +84,12 @@
 .shot-editor-list header { display:flex;align-items:center;justify-content:space-between; }
 .shot-editor-list header button { color:#ff8178;background:transparent;font-size:11px; }
 .shot-editor-list textarea,.prompt-editor-list textarea { min-height:80px;margin-top:8px; }
+.caption-line-limit { display:flex;flex-wrap:wrap;gap:6px;margin-top:7px; }
+.caption-line-limit__item { display:inline-flex;align-items:center;gap:5px;padding:3px 7px;color:#7f8b96;background:#11171d;border:1px solid #25303a;border-radius:999px;font-size:11px;line-height:1.35; }
+.caption-line-limit__item b { color:#aeb8c2;font-weight:600; }
+.caption-line-limit__item em { font-style:normal; }
+.caption-line-limit__item.is-over-limit { color:#ff9c96;background:rgba(255,73,66,.09);border-color:rgba(255,73,66,.52); }
+.caption-line-limit__item.is-over-limit b { color:#ff7068; }
 .prompt-editor-list>article>strong { color:var(--builder-brand);font-size:12px; }
 .image-failure { display:grid;min-height:150px;place-items:center;padding:18px;color:#ff918a;text-align:center;background:rgba(255,91,81,.05); }
 .pipeline-image-grid article.is-failed { border-color:rgba(255,91,81,.32); }
@@ -1020,6 +1026,8 @@
   color: var(--builder-brand);
   font-size: 12px;
 }
+.timeline-editor__caption { min-width:0; }
+.timeline-editor__caption > .text-input { width:100%; }
 
 .timeline-editor__list label {
   display: grid;
@@ -1349,7 +1357,7 @@
 @media (max-width: 760px) {
   .task-builder__content,
   .task-builder__footer-inner {
-    width: min(100% - 28px, 1180px);
+    width: min(calc(100% - 28px), 1180px);
   }
 
   .task-builder__content {
@@ -1461,7 +1469,7 @@
 @media (max-width: 480px) {
   .task-builder__content,
   .task-builder__footer-inner {
-    width: min(100% - 20px, 1180px);
+    width: min(calc(100% - 20px), 1180px);
   }
 
   .task-builder__header-icon {
@@ -1487,5 +1495,17 @@
 
   .footer-actions button {
     flex: 1;
+  }
+}
+
+@media (max-width: 760px) {
+  .task-builder__footer {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .task-builder__footer button,
+  .pipeline-actions button,
+  .artifact-editor button {
+    min-height: 44px;
   }
 }

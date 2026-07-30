@@ -49,10 +49,34 @@ function countChineseCharacters(value: string): number {
   return (value.match(/[\u3400-\u9fff]/g) || []).length;
 }
 
+function countCaptionCharacters(value: string): number {
+  return Array.from(value).filter((character) => !/\s/u.test(character)).length;
+}
+
+function CaptionLineLimit({ value, maxCharsPerLine }: { value: string; maxCharsPerLine: number }) {
+  const lines = value.split(/\r?\n/);
+
+  return (
+    <div className="caption-line-limit" aria-label={`字幕每行最多 ${maxCharsPerLine} 字`}>
+      {lines.map((line, index) => {
+        const count = countCaptionCharacters(line);
+        const overLimit = count > maxCharsPerLine;
+        return (
+          <span className={overLimit ? "caption-line-limit__item is-over-limit" : "caption-line-limit__item"} key={`${index}-${line}`}>
+            <b>第 {index + 1} 行</b>
+            <em>{count}/{maxCharsPerLine} 字{overLimit ? ` · 超出 ${count - maxCharsPerLine} 字` : ""}</em>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function sopQualityChecks(task: StoryboundTask): SopCheck[] {
   const shots = task.artifacts.storyboard?.shots || [];
   const timeline = task.media.timeline || [];
-  const template = draftTemplateById(task.options.draftTemplateId || "default-portrait-9-16").config;
+  const template = task.options.draftTemplateConfig
+    ?? draftTemplateById(task.options.draftTemplateId || "default-portrait-9-16").config;
   const tutorialMode = task.options.ttsMode === "continuous";
   const readyImages = task.media.images.filter((image) => image.status === "ready" || image.status === "borrowed").length;
   const narrationVolume = task.options.narrationVolume ?? template.audio.narrationVolume;
@@ -124,6 +148,8 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
   const finishedCount = task.stepStatuses.filter((status) => status === "done" || status === "skipped").length;
   const failedImages = task.media.images.filter((image) => image.status === "failed");
   const qualityChecks = sopQualityChecks(task);
+  const activeTemplate = task.options.draftTemplateConfig
+    ?? draftTemplateById(task.options.draftTemplateId || "default-portrait-9-16").config;
   const updatePrecheck = (cleanText: string) => {
     const next = cloneTask(task);
     if (next.artifacts.precheck) next.artifacts.precheck.cleanText = cleanText;
@@ -185,7 +211,7 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
 
       {task.artifacts.rewrite ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 2 · 改写、封面与发布素材</strong><span>原版 WriterAgent 的正文、封面五字段和自评均已保存</span></div><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(1)}>保存并从分镜继续</button></div><div className="form-grid form-grid--two"><label><span>封面主标题</span><input className="text-input" value={task.artifacts.rewrite.title} onChange={(event) => updateRewrite("title", event.target.value)} /></label><label><span>置顶评论</span><input className="text-input" value={task.artifacts.rewrite.pinnedComment} onChange={(event) => updateRewrite("pinnedComment", event.target.value)} /></label></div><div className="form-grid form-grid--two"><label><span>封面副标题（每行一条）</span><textarea className="artifact-textarea artifact-textarea--short" value={(task.artifacts.rewrite.subtitle || []).join("\n")} onChange={(event) => updateRewriteList("subtitle", event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label><label><span>标签（逗号分隔）</span><textarea className="artifact-textarea artifact-textarea--short" value={task.artifacts.rewrite.tags.join("，")} onChange={(event) => updateRewriteList("tags", event.target.value.split(/[,，]/).map((item) => item.trim().replace(/^#/, "")).filter(Boolean))} /></label></div><label><span>改写正文</span><textarea className="artifact-textarea" value={task.artifacts.rewrite.narration} onChange={(event) => updateRewrite("narration", event.target.value)} /></label><div className="form-grid form-grid--two"><label><span>发布简介</span><textarea className="artifact-textarea artifact-textarea--short" value={task.artifacts.rewrite.summary || task.artifacts.rewrite.publishCopy} onChange={(event) => { updateRewrite("summary", event.target.value); }} /></label><label><span>5 条种子评论（每行一条）</span><textarea className="artifact-textarea artifact-textarea--short" value={(task.artifacts.rewrite.comments || []).join("\n")} onChange={(event) => updateRewriteList("comments", event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label></div>{typeof task.artifacts.rewrite.totalScore === "number" ? <div className="artifact-tags"><span>WriterAgent 自评 {task.artifacts.rewrite.totalScore}/100</span></div> : null}</div> : null}
 
-      {task.artifacts.storyboard ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 3 · 分镜工作台</strong><span>{task.artifacts.storyboard.shots.length} 镜 · 可增删、排序、改字幕和画面描述</span></div><div><button type="button" className="secondary-button" onClick={addShot}>新增分镜</button><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(2)}>保存并生成提示词</button></div></div><div className="shot-editor-list">{task.artifacts.storyboard.shots.map((shot, index) => <article key={shot.id}><header><strong>第 {shot.id} 镜</strong><div><button type="button" disabled={index === 0} onClick={() => moveShot(index, -1)}>上移</button><button type="button" disabled={index === task.artifacts.storyboard!.shots.length - 1} onClick={() => moveShot(index, 1)}>下移</button><button type="button" onClick={() => removeShot(index)}>删除</button></div></header><textarea value={shot.text} onChange={(event) => updateShot(index, { text: event.target.value })} /><textarea value={shot.visual} onChange={(event) => updateShot(index, { visual: event.target.value })} /><div className="form-grid form-grid--two"><input className="text-input" value={shot.emotion} onChange={(event) => updateShot(index, { emotion: event.target.value })} /><input className="text-input" type="number" min="0.3" step="0.1" value={shot.durationSec} onChange={(event) => updateShot(index, { durationSec: Number(event.target.value) || 5 })} /></div></article>)}</div></div> : null}
+      {task.artifacts.storyboard ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 3 · 分镜工作台</strong><span>{task.artifacts.storyboard.shots.length} 镜 · 可增删、排序、改字幕和画面描述</span></div><div><button type="button" className="secondary-button" onClick={addShot}>新增分镜</button><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(2)}>保存并生成提示词</button></div></div><div className="shot-editor-list">{task.artifacts.storyboard.shots.map((shot, index) => <article key={shot.id}><header><strong>第 {shot.id} 镜</strong><div><button type="button" disabled={index === 0} onClick={() => moveShot(index, -1)}>上移</button><button type="button" disabled={index === task.artifacts.storyboard!.shots.length - 1} onClick={() => moveShot(index, 1)}>下移</button><button type="button" onClick={() => removeShot(index)}>删除</button></div></header><textarea aria-label={`第 ${shot.id} 镜字幕`} value={shot.text} onChange={(event) => updateShot(index, { text: event.target.value })} /><CaptionLineLimit value={shot.text} maxCharsPerLine={activeTemplate.caption.maxCharsPerLine} /><textarea aria-label={`第 ${shot.id} 镜画面描述`} value={shot.visual} onChange={(event) => updateShot(index, { visual: event.target.value })} /><div className="form-grid form-grid--two"><input aria-label={`第 ${shot.id} 镜情绪`} className="text-input" value={shot.emotion} onChange={(event) => updateShot(index, { emotion: event.target.value })} /><input aria-label={`第 ${shot.id} 镜时长`} className="text-input" type="number" min="0.3" step="0.1" value={shot.durationSec} onChange={(event) => updateShot(index, { durationSec: Number(event.target.value) || 5 })} /></div></article>)}</div></div> : null}
 
       {task.artifacts.prompts ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 4 · 原版绘图提示词</strong><span>{task.artifacts.prompts.templateVersion} · {task.artifacts.prompts.prompts.length} 条</span></div><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(3)}>保存并开始出图</button></div><div className="prompt-editor-list">{task.artifacts.prompts.prompts.map((prompt, index) => <article key={prompt.shotId}><strong>第 {prompt.shotId} 镜</strong><textarea value={prompt.prompt} onChange={(event) => updatePrompt(index, { prompt: event.target.value })} /><input className="text-input" value={prompt.negativePrompt} onChange={(event) => updatePrompt(index, { negativePrompt: event.target.value })} /></article>)}</div></div> : null}
 
@@ -203,7 +229,7 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
 
       {task.media.externalAudio ? <div className="pipeline-audio"><div><strong>外部配音已接入</strong><span>{task.media.externalAudio.fileName} · 字幕按分镜时间线写入</span></div><audio controls src={task.media.externalAudio.url} /><a href={task.media.externalAudio.url} download={task.media.externalAudio.fileName}>下载</a></div> : null}
 
-      {task.media.timeline?.length ? <div className="artifact-editor timeline-editor"><div className="artifact-editor__head"><div><strong>可编辑字幕时间线</strong><span>{task.media.timeline.length} 段 · 修改后只需重新打包草稿</span></div><button type="button" className="secondary-button" disabled={busy} onClick={onRepackDraft}>保存并重新打包</button></div><div className="timeline-editor__list">{task.media.timeline.map((item, index) => <article key={`${item.shotId}-${index}`}><strong>#{item.shotId}</strong><input className="text-input" value={item.text} onChange={(event) => onUpdateTimeline(index, { text: event.target.value })} /><label>开始<input className="text-input" type="number" min="0" step="0.1" value={item.startSec} onChange={(event) => onUpdateTimeline(index, { startSec: Number(event.target.value) || 0 })} /></label><label>结束<input className="text-input" type="number" min="0.1" step="0.1" value={item.endSec} onChange={(event) => onUpdateTimeline(index, { endSec: Number(event.target.value) || item.endSec })} /></label></article>)}</div></div> : null}
+      {task.media.timeline?.length ? <div className="artifact-editor timeline-editor"><div className="artifact-editor__head"><div><strong>可编辑字幕时间线</strong><span>{task.media.timeline.length} 段 · 修改后只需重新打包草稿</span></div><button type="button" className="secondary-button" disabled={busy} onClick={onRepackDraft}>保存并重新打包</button></div><div className="timeline-editor__list">{task.media.timeline.map((item, index) => <article key={`${item.shotId}-${index}`}><strong>#{item.shotId}</strong><div className="timeline-editor__caption"><input aria-label={`第 ${item.shotId} 镜时间线字幕`} className="text-input" value={item.text} onChange={(event) => onUpdateTimeline(index, { text: event.target.value })} /><CaptionLineLimit value={item.text} maxCharsPerLine={activeTemplate.caption.maxCharsPerLine} /></div><label>开始<input className="text-input" type="number" min="0" step="0.1" value={item.startSec} onChange={(event) => onUpdateTimeline(index, { startSec: Number(event.target.value) || 0 })} /></label><label>结束<input className="text-input" type="number" min="0.1" step="0.1" value={item.endSec} onChange={(event) => onUpdateTimeline(index, { endSec: Number(event.target.value) || item.endSec })} /></label></article>)}</div></div> : null}
 
       {task.artifacts.storyboard || task.media.timeline?.length ? <section className="sop-quality-gate"><header><div><strong>教程成片检查</strong><span>依据《剪辑基础篇》与《剪辑进阶篇》；建议项不会阻止打包，客观错误会明确标红。</span></div><a href="https://aipoju.com/docx/63b1a44a-8060-4928-bf33-a9a4d9caf849/LKF4d2PoforF3ex2lZLcca2in7c?from=from_copylink" target="_blank" rel="noreferrer">查看参考 SOP ↗</a></header><div className="sop-quality-gate__checks">{qualityChecks.map((check) => <article key={`${check.label}-${check.detail}`} className={`sop-quality-gate__check sop-quality-gate__check--${check.level}`}><span>{check.level === "pass" ? "✓" : check.level === "attention" ? "!" : check.level === "advice" ? "△" : "i"}</span><div><strong>{check.label}</strong><p>{check.detail}</p></div></article>)}</div></section> : null}
 

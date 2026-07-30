@@ -13,11 +13,13 @@
     "smoke:task": "node scripts/smoke-task-lifecycle.mjs",
     "smoke:continuous": "node scripts/smoke-continuous-audio.mjs",
     "smoke:alignment": "node scripts/smoke-minimax-alignment.mjs",
+    "smoke:media": "node scripts/smoke-media-workbench.mjs",
     "rebuild:tutorial": "node scripts/rebuild-pocket-watch-tutorial.mjs",
     "smoke:pipeline": "node scripts/smoke-original-pipeline.mjs"
   },
   "dependencies": {
     "@node-rs/jieba": "^2.0.1",
+    "puppeteer-core": "^25.4.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
   },

@@ -3,9 +3,7 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 
 const require = createRequire(import.meta.url);
-const { parse } = require(
-  "C:/Users/pdb12/AppData/Local/Temp/storybound-analysis/node_modules/@babel/parser/lib/index.js",
-);
+const { parse } = require("@babel/parser");
 
 const args = process.argv.slice(2);
 const maxLengthArg = args.find((arg) => arg.startsWith("--max-length="));

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const ffprobe = process.env.FFPROBE_PATH
-  || "C:\\Users\\pdb12\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-7.1.1-full_build\\bin\\ffprobe.exe";
+  || "ffprobe";
 const appRoot = resolve(import.meta.dirname, "..");
 const baseUrl = process.env.STORYBOUND_URL || "http://127.0.0.1:5173";
 const taskId = process.argv[2] || "6e8bcd4d-86d7-4244-9ac6-ff9124b1fd1d";

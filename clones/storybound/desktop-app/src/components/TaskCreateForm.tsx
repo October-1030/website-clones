@@ -1,5 +1,28 @@
+import { useEffect, useMemo, useState } from "react";
+
 import { contentTracks, originalDefaultStyleByTrack, pipelineSteps, visualStyles } from "../data/app-data";
-import { draftTemplateById, draftTemplates } from "../data/draft-templates";
+import { draftTemplates } from "../data/draft-templates";
+import {
+  customStyleStoreEvent,
+  readCustomVisualStyles,
+  writeCustomVisualStyles,
+} from "../lib/custom-style-store";
+import { draftTemplateStoreEvent, readCustomDraftTemplates } from "../lib/draft-template-store";
+import {
+  imageProviderStoreEvent,
+  readImageProviderConfig,
+  writeImageProviderConfig,
+} from "../lib/image-provider-store";
+import {
+  marketStoreEvent,
+  readInstalledMarketItems,
+  type MarketItem,
+} from "../lib/market-store";
+import {
+  personAssetToFile,
+  personAssetsStoreEvent,
+  readPersonGroups,
+} from "../lib/person-assets-store";
 import type { TtsVoice } from "../types/tts";
 import { DraftTemplateEditor } from "./DraftTemplateEditor";
 import type { BuilderFormState } from "./task-builder-model";
@@ -17,7 +40,7 @@ interface TaskCreateFormProps {
   bgmName?: string;
   onChange: (patch: Partial<BuilderFormState>) => void;
   onGenerateCopy: () => void;
-  onUploadImages: (files: FileList) => void;
+  onUploadImages: (files: FileList | File[]) => void;
   onUploadReference: (file: File) => void;
   onUploadTemplateBackground: (file: File) => Promise<string>;
   onUploadExternalAudio: (file: File) => void;
@@ -42,9 +65,70 @@ function NumberField({ value, placeholder, onChange }: { value: number | null; p
 }
 
 export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredentials, aiGenerating, taskReady, referenceName, externalAudioName, bgmName, onChange, onGenerateCopy, onUploadImages, onUploadReference, onUploadTemplateBackground, onUploadExternalAudio, onUploadBgm }: TaskCreateFormProps) {
+  const [customTemplates, setCustomTemplates] = useState(readCustomDraftTemplates);
+  const [personGroups, setPersonGroups] = useState(readPersonGroups);
+  const [selectedPersonGroupId, setSelectedPersonGroupId] = useState(() => readPersonGroups()[0]?.id || "");
+  const [personImporting, setPersonImporting] = useState(false);
+  const [installedMarketItems, setInstalledMarketItems] = useState(readInstalledMarketItems);
+  const [customStyles, setCustomStyles] = useState(readCustomVisualStyles);
+  const [imageProviderConfig, setImageProviderConfig] = useState(readImageProviderConfig);
+  const [newStyleName, setNewStyleName] = useState("");
+  const [newStylePrompt, setNewStylePrompt] = useState("");
+  useEffect(() => {
+    const refresh = () => setCustomTemplates(readCustomDraftTemplates());
+    window.addEventListener(draftTemplateStoreEvent, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(draftTemplateStoreEvent, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
+  useEffect(() => {
+    const refreshStyles = () => setCustomStyles(readCustomVisualStyles());
+    const refreshProvider = () => setImageProviderConfig(readImageProviderConfig());
+    window.addEventListener(customStyleStoreEvent, refreshStyles);
+    window.addEventListener(imageProviderStoreEvent, refreshProvider);
+    window.addEventListener("storage", refreshStyles);
+    return () => {
+      window.removeEventListener(customStyleStoreEvent, refreshStyles);
+      window.removeEventListener(imageProviderStoreEvent, refreshProvider);
+      window.removeEventListener("storage", refreshStyles);
+    };
+  }, []);
+  useEffect(() => {
+    const refresh = () => setInstalledMarketItems(readInstalledMarketItems());
+    window.addEventListener(marketStoreEvent, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(marketStoreEvent, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
+  useEffect(() => {
+    const refresh = () => setPersonGroups(readPersonGroups());
+    window.addEventListener(personAssetsStoreEvent, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(personAssetsStoreEvent, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
+  const availableTemplates = useMemo(() => [...draftTemplates, ...customTemplates], [customTemplates]);
   const updateTrack = (track: string) => onChange({ track, visualStyle: originalDefaultStyleByTrack[track] ?? form.visualStyle });
-  const selectedTemplate = draftTemplateById(form.draftTemplateId);
+  const selectedTemplate = availableTemplates.find((template) => template.id === form.draftTemplateId) ?? availableTemplates[0];
   const activeTemplate = form.draftTemplateConfig ?? selectedTemplate.config;
+  const availableVisualStyles = useMemo(
+    () => [...visualStyles, ...customStyles.map((style) => style.name)],
+    [customStyles],
+  );
+  const applyMarketItem = (item: MarketItem) => onChange({
+    ...(item.apply.track ? {
+      track: item.apply.track,
+      visualStyle: originalDefaultStyleByTrack[item.apply.track] ?? form.visualStyle,
+    } : {}),
+    ...(item.apply.visualStyle ? { visualStyle: item.apply.visualStyle } : {}),
+    ...(item.apply.coverTemplateId ? { coverMode: "titled", coverTemplateId: item.apply.coverTemplateId } : {}),
+  });
   return (
     <>
       <section className="builder-card">
@@ -86,11 +170,44 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
       <section className="builder-card">
         <div className="builder-card__heading"><span className="builder-card__icon">◇</span><div><h2>出图</h2><p>素材来源、画风、参考图、封面与剪映模板</p></div></div>
         <span className="field-label field-label--standalone">素材来源</span><div className="choice-grid choice-grid--four">{[["ai", "AI 绘图", "MiniMax image-01"], ["local", "本地素材", "批量上传替换"], ["person", "人物素材库", "使用真实人物图"], ["stock", "免版税素材", "保留适配入口"]].map(([value, title, description]) => <button key={value} type="button" className={`choice-card choice-card--compact ${form.materialSource === value ? "is-selected" : ""}`} onClick={() => onChange({ materialSource: value as BuilderFormState["materialSource"] })}><span className="choice-card__radio" /><span><strong>{title}</strong><small>{description}</small></span></button>)}</div>
-        {form.materialSource !== "ai" ? <label className="upload-tile field-group"><input type="file" accept="image/*" multiple onChange={(event) => event.target.files && onUploadImages(event.target.files)} /><strong>批量导入分镜图片</strong><span>{taskReady ? "按文件顺序匹配分镜，也可在产物区逐张替换" : "上传时会自动创建本地任务目录"}</span></label> : null}
+        {form.materialSource === "person" ? <div className="field-group form-grid form-grid--two"><label><span className="field-label field-label--standalone">人物素材组</span><select className="text-input" value={selectedPersonGroupId} onChange={(event) => setSelectedPersonGroupId(event.target.value)}><option value="">请选择素材组</option>{personGroups.map((group) => <option key={group.id} value={group.id}>{group.name} · {group.assets.length} 张</option>)}</select></label><button className="upload-tile upload-tile--compact" type="button" disabled={personImporting || !selectedPersonGroupId} onClick={() => {
+          const group = personGroups.find((item) => item.id === selectedPersonGroupId);
+          if (!group?.assets.length) return;
+          setPersonImporting(true);
+          void Promise.all(group.assets.map(personAssetToFile))
+            .then((files) => onUploadImages(files))
+            .finally(() => setPersonImporting(false));
+        }}><strong>{personImporting ? "正在读取人物素材…" : "使用这组人物素材"}</strong><span>按素材库顺序写入当前任务</span></button></div> : null}
+        {form.materialSource === "local" || form.materialSource === "stock" ? <label className="upload-tile field-group"><input type="file" accept="image/*" multiple onChange={(event) => event.target.files && onUploadImages(event.target.files)} /><strong>{form.materialSource === "stock" ? "导入已获授权的免版税素材" : "批量导入分镜图片"}</strong><span>{taskReady ? "按文件顺序匹配分镜，也可在产物区逐张替换" : "上传时会自动创建本地任务目录"}</span></label> : null}
         <div className="field-group option-checks"><label><input type="checkbox" checked={form.autoBorrowImage} onChange={(event) => onChange({ autoBorrowImage: event.target.checked })} />失败图自动使用相邻画面补位</label></div>
         <div className="field-group form-grid form-grid--two"><div><span className="field-label field-label--standalone">画面生成比例</span><div className="segmented-control">{ratios.map((ratio) => <button key={ratio} type="button" className={form.aspectRatio === ratio ? "is-selected" : ""} onClick={() => onChange({ aspectRatio: ratio })}>{ratio}</button>)}</div></div><div className="settings-note"><strong>成片时长由真实配音决定</strong><span>目标字数、分镜数和 TTS 语速共同决定总时长；不会强行拉伸音频。</span></div></div>
-        <div className="field-group"><span className="field-label field-label--standalone">视觉风格</span><div className="chip-list">{visualStyles.map((item) => <button key={item} type="button" className={`chip ${form.visualStyle === item ? "is-selected" : ""}`} onClick={() => onChange({ visualStyle: item })}>{item}</button>)}</div></div>
-        <div className="field-group form-grid form-grid--two"><label><span className="field-label field-label--standalone">剪映草稿模板</span><select className="text-input" value={form.draftTemplateId} onChange={(event) => onChange({ draftTemplateId: event.target.value, draftTemplateConfig: null })}>{draftTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label><label className="upload-tile upload-tile--compact"><input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUploadReference(event.target.files[0])} /><strong>{referenceName ? "✓ 人物参考图已保存" : "人物参考图"}</strong><span>{referenceName || "上传后写入任务人物一致性配置"}</span></label></div>
+        <div className="field-group"><span className="field-label field-label--standalone">图片引擎</span><div className="segmented-control"><button type="button" className={imageProviderConfig.provider === "minimax" ? "is-selected" : ""} onClick={() => {
+          const next = { ...imageProviderConfig, provider: "minimax" as const };
+          setImageProviderConfig(next);
+          writeImageProviderConfig(next);
+        }}>MiniMax image-01</button><button type="button" className={imageProviderConfig.provider === "openai-compatible" ? "is-selected" : ""} onClick={() => {
+          const next = { ...imageProviderConfig, provider: "openai-compatible" as const };
+          setImageProviderConfig(next);
+          writeImageProviderConfig(next);
+        }}>兼容图片引擎</button></div><p className="template-hint">{imageProviderConfig.provider === "minimax" ? "使用系统设置中的 MiniMax 凭据。" : imageProviderConfig.custom.baseUrl && imageProviderConfig.custom.apiKey ? `已配置 ${imageProviderConfig.custom.model}` : "请先在系统设置填写兼容图片引擎。"}</p></div>
+        <div className="field-group"><span className="field-label field-label--standalone">视觉风格</span><div className="chip-list">{availableVisualStyles.map((item) => <button key={item} type="button" className={`chip ${form.visualStyle === item ? "is-selected" : ""}`} onClick={() => onChange({ visualStyle: item })}>{item}</button>)}</div></div>
+        <details className="custom-pause-panel field-group"><summary>新建自定义画风</summary><div className="form-grid form-grid--two"><label><span className="field-label field-label--standalone">画风名称</span><input className="text-input" value={newStyleName} onChange={(event) => setNewStyleName(event.target.value)} placeholder="例如：赛博朋克雨夜" /></label><label><span className="field-label field-label--standalone">提示词前缀</span><input className="text-input" value={newStylePrompt} onChange={(event) => setNewStylePrompt(event.target.value)} placeholder="描述色调、材质、光线与构图" /></label></div><button className="primary-button" type="button" disabled={!newStyleName.trim() || !newStylePrompt.trim()} onClick={() => {
+          const created = { id: `style-${crypto.randomUUID()}`, name: newStyleName.trim(), prompt: newStylePrompt.trim(), negativePrompt: "文字，水印，标志，低清晰度" };
+          const next = [...customStyles.filter((style) => style.name !== created.name), created];
+          writeCustomVisualStyles(next);
+          setCustomStyles(next);
+          onChange({ visualStyle: created.name });
+          setNewStyleName("");
+          setNewStylePrompt("");
+        }}>保存并用于当前任务</button>{customStyles.length ? <div className="chip-list">{customStyles.map((style) => <button className="chip" key={style.id} type="button" title="删除自定义画风" onClick={() => {
+          if (!window.confirm(`删除自定义画风“${style.name}”？`)) return;
+          const next = customStyles.filter((item) => item.id !== style.id);
+          writeCustomVisualStyles(next);
+          setCustomStyles(next);
+          if (form.visualStyle === style.name) onChange({ visualStyle: visualStyles[0] });
+        }}>删除 · {style.name}</button>)}</div> : null}</details>
+        {installedMarketItems.length ? <div className="field-group"><span className="field-label field-label--standalone">我的市场 · 已安装资源</span><div className="chip-list">{installedMarketItems.map((item) => <button key={item.id} type="button" className="chip" title={item.description} onClick={() => applyMarketItem(item)}>{item.kind === "prompt" ? "提示词" : item.kind === "style" ? "画风" : "封面"} · {item.name}</button>)}</div><p className="template-hint">点击资源会把对应赛道、画风或封面模板应用到当前任务。</p></div> : null}
+        <div className="field-group form-grid form-grid--two"><label><span className="field-label field-label--standalone">剪映草稿模板</span><select className="text-input" value={selectedTemplate.id} onChange={(event) => { const template = availableTemplates.find((item) => item.id === event.target.value) ?? availableTemplates[0]; onChange({ draftTemplateId: template.id, draftTemplateConfig: template.id.startsWith("custom-") ? structuredClone(template.config) : null }); }}>{availableTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}{template.id.startsWith("custom-") ? " · 我的模板" : ""}</option>)}</select></label><label className="upload-tile upload-tile--compact"><input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUploadReference(event.target.files[0])} /><strong>{referenceName ? "✓ 人物参考图已保存" : "人物参考图"}</strong><span>{referenceName || "上传后写入任务人物一致性配置"}</span></label></div>
         <div className="template-summary"><div><strong>{selectedTemplate.name}{form.draftTemplateConfig ? " · 已自定义" : ""}</strong><span>{activeTemplate.canvas.width}×{activeTemplate.canvas.height} · 画面 {activeTemplate.image.ratio}</span></div><div><span>正文字幕 {activeTemplate.caption.fontSize} 号 / 每行 {activeTemplate.caption.maxCharsPerLine} 字</span><span>{activeTemplate.caption.color} · 背景透明度 {activeTemplate.caption.background.alpha}</span></div><div><span>免责声明 {activeTemplate.disclaimer.visible ? "开启" : "关闭"}</span><span>旁白 {activeTemplate.audio.narrationVolume} / BGM {activeTemplate.audio.bgmVolume}</span></div></div>
         <DraftTemplateEditor config={activeTemplate} onChange={(draftTemplateConfig) => onChange({ draftTemplateConfig })} onReset={() => onChange({ draftTemplateConfig: null })} onUploadBackground={onUploadTemplateBackground} />
         <div className="field-group form-grid form-grid--three"><label className="toggle-row"><input type="checkbox" checked={form.dynamicStoryboard} onChange={(event) => onChange({ dynamicStoryboard: event.target.checked })} />启用动态分镜（前 N 张图转视频）</label><label><span className="field-label field-label--standalone">转视频镜头数</span><input className="text-input" type="number" min="1" max="20" disabled={!form.dynamicStoryboard} value={form.videoIntroCount} onChange={(event) => onChange({ videoIntroCount: Math.max(1, Math.min(20, Number(event.target.value) || 3)) })} /></label><div><span className="field-label field-label--standalone">每镜时长</span><div className="segmented-control"><button type="button" disabled={!form.dynamicStoryboard} className={form.videoIntroDurationMode === "narration" ? "is-selected" : ""} onClick={() => onChange({ videoIntroDurationMode: "narration" })}>跟随配音</button><button type="button" disabled={!form.dynamicStoryboard} className={form.videoIntroDurationMode === "fixed" ? "is-selected" : ""} onClick={() => onChange({ videoIntroDurationMode: "fixed" })}>固定秒数</button></div></div></div>

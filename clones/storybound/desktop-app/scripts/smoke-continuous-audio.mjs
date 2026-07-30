@@ -107,7 +107,7 @@ try {
   const textById = new Map((draftInfo.materials?.texts || []).map((item) => [item.id, JSON.parse(item.content).text]));
   const subtitleTrack = draftInfo.tracks?.find((track) => track.name === "subtitle");
   const subtitleTexts = (subtitleTrack?.segments || []).map((segment) => textById.get(segment.material_id) || "");
-  const punctuationOnly = /^[，。、；：？！…,.!?;:'"“”‘’（）()《》【】\[\]—-]+$/u;
+  const punctuationOnly = /^[，。、；：？！…,.!?;:'"“”‘’（）()《》【】[\]—-]+$/u;
   if (!subtitleTexts.length || subtitleTexts.some((text) => (text.match(/[\u3400-\u9fff]/gu) || []).length > 9 || text.startsWith("的") || punctuationOnly.test(text))) {
     throw new Error(`教程短字幕规则失败：${subtitleTexts.join(" | ")}`);
   }

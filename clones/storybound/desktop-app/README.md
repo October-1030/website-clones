@@ -1,6 +1,6 @@
 # Storybound 桌面工作台复刻
 
-基于 Storybound 1.13.1 客户端动态研究实现的独立本地工作台。它不会连接原产品的创作、授权或计费后台；LLM、图片和 TTS 使用用户自己的 API。
+基于 Storybound 1.16.1 客户端证据实现的独立本地工作台。它不会连接原产品的创作、授权或计费后台；LLM、图片和 TTS 使用用户自己的 API。
 
 ## 已实现
 
@@ -10,7 +10,10 @@
 - 原版提示词状态机：预审 → WriterAgent 改写/自评 → 封面五字段 → 尾部锚点分镜 → 人物一致性卡 → 绘图提示词
 - 旁白逐镜配音、严格 `[A]`/`[B]` 双人 Podcast、外部音频真实时长时间线
 - 可暂停、继续、取消、排队串行和从指定步骤重跑的 7 步流水线
-- HTML 动画和音乐 MV 的配置表单与阶段演示
+- HTML 动画和音乐 MV 的真实本地任务、素材上传、断点状态、FFmpeg MP4 和剪映草稿
+- 画图实验室真实 MiniMax 批量生图、参考图、尺寸后处理与本地历史
+- 人物素材库、提示词模板、选品助手、对标监控和创作市场的本地可持久化工作台
+- Storybound 1.16.1 字幕行号、单行字数限制和超字标红
 - 火山引擎 / 豆包 TTS 1.0、2.0 的真实 MP3 合成
 - MiniMax `speech-2.8-hd` / `speech-2.8-turbo`、平台音色同步与声音克隆
 - 10,000 字长文本自动分段、三路并发和 MP3 顺序合并
@@ -33,6 +36,19 @@ npm run dev
 
 任务数据位于 `desktop-app/.storybound-data/tasks/<taskId>/`。每个目录包含 `task.json`、`events.ndjson`、图片、音频、上传素材和剪映草稿；该目录已加入 `.gitignore`。
 
+FFmpeg 与 ffprobe 默认从系统 `PATH` 查找；也可分别通过 `FFMPEG_PATH`、`FFPROBE_PATH` 指定可执行文件。代码库不包含开发者电脑的绝对工具路径。
+
+### 公网检查
+
+服务只监听本机回环地址。若通过 Cloudflare Tunnel、Tailscale Serve 或其他反向代理临时公开，必须先设置访问令牌：
+
+```powershell
+$env:STORYBOUND_PUBLIC_ACCESS_TOKEN = "<一段足够长的随机字符串>"
+npm run dev
+```
+
+检查链接使用 `https://你的域名/?access=<同一令牌>`。首次访问成功后服务会写入仅 HTTPS、HttpOnly 的短期 Cookie，并从地址栏移除令牌。所有非 `localhost` / `127.0.0.1` 请求统一要求鉴权；未配置令牌时公网请求直接拒绝，避免他人借用本机 MiniMax/LLM 凭据和读取任务。
+
 MiniMax 也可以从本机文本文件安全读取。默认查找 `C:\tmp\minimax-secrets.txt`，格式如下：
 
 ```text
@@ -52,13 +68,29 @@ STORYBOUND_LLM_MODEL=deepseek-chat
 
 `STORYBOUND_LLM_PROVIDER` 可选：`minimax`、`deepseek`、`openai`、`siliconflow`、`custom`。未单独配置 LLM 时，会使用 `minimax-secrets.txt` 中同一份 MiniMax Key 调用兼容文本接口。服务端只向页面返回“凭据是否可用”和 provider/model，不返回密钥内容。
 
+### 可选本地 ASR
+
+对标监控可以把本地音频或视频交给你自己的 ASR 命令。命令需要把转写纯文本，或 `{"text":"..."}` JSON 写到 stdout：
+
+```powershell
+$env:STORYBOUND_ASR_COMMAND = "faster-whisper"
+$env:STORYBOUND_ASR_ARGS = '["{input}","--language","zh","--output_format","json"]'
+npm run dev
+```
+
+`STORYBOUND_ASR_ARGS` 必须是 JSON 字符串数组，`{input}` 会替换为临时媒体路径；执行使用 `execFile`，不会经过 shell。未配置时页面保留导入 transcript 和手工粘贴模式。
+
 生产检查：
 
 ```powershell
 npm run lint
 npm run build
 npm run smoke:task
+npm run smoke:media
 npm run smoke:pipeline
 ```
 
-`smoke:task` 验证任务持久化、真实音频时长、裁切参数、剪映媒体轨道和 ZIP；`smoke:pipeline` 会使用本机 LLM 凭据真实跑一遍 1.13.1 文本提示词链，因此会产生少量 API 用量。
+`smoke:task` 验证任务持久化、真实音频时长、裁切参数、剪映媒体轨道和 ZIP；`smoke:media` 复用已有本地素材，验证双分镜 H.264/AAC MP4 与剪映包，不消耗生图或 TTS 额度；`smoke:pipeline` 会使用本机 LLM 凭据真实跑一遍 1.16.1 文本提示词链，因此会产生少量 API 用量。
+
+完整功能、真实媒体、响应式和安全验收结果见
+[`docs/research/v1.16.1/QA_REPORT.md`](../docs/research/v1.16.1/QA_REPORT.md)。

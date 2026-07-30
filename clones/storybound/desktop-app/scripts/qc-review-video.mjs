@@ -5,9 +5,9 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const ffmpeg = process.env.FFMPEG_PATH
-  || "C:\\Users\\pdb12\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-7.1.1-full_build\\bin\\ffmpeg.exe";
+  || "ffmpeg";
 const ffprobe = process.env.FFPROBE_PATH
-  || "C:\\Users\\pdb12\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-7.1.1-full_build\\bin\\ffprobe.exe";
+  || "ffprobe";
 const appRoot = resolve(import.meta.dirname, "..");
 const taskId = process.argv[2];
 const round = process.argv[3] || "round-1";
