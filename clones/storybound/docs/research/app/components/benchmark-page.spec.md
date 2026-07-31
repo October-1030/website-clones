@@ -14,7 +14,12 @@
   `免费接口`, returns title, description, author, cover and a no-watermark media
   URL, then offers download and local ASR.
 - `添加对标账号` calls `POST /v1/dajiala/feed-info` with a shared-video URL.
-- `刷新本账号` and pagination call `POST /v1/dajiala/feed-list`.
+- `刷新本账号` calls `POST /v1/dajiala/feed-list` with an empty
+  `last_buffer` and merges the latest page (15 works).
+- `加载更多` sends the stored `last_buffer` and merges one more page (15
+  works). `连续加载…` repeats that paginated request, exposes stop control and
+  can consume credits once per page. One refresh is not evidence that all
+  historical works were synchronized.
 - The account endpoints send `X-Sb-Email` and `X-Sb-Fp`, reject unbound accounts
   with `NO_EMAIL`, and deduct original Storybound credits. They are not public
   client-only behavior and must not be impersonated or bypassed.
@@ -34,10 +39,19 @@
 - Group/track assignment, rename, favorite and delete.
 - Search filters existing accounts before adding.
 - When a compatible account data adapter is explicitly configured, resolve the
-  account ID, refresh its latest works and continue pagination. Before a refresh
-  that can spend credits, show an explicit confirmation.
-- When the adapter is absent, show that automatic account refresh is unavailable;
-  do not present the local manual form as equivalent to original monitoring.
+  account ID, refresh its latest 15 works, load one more 15-work page, or
+  continuously load all remaining history. Persist `last_buffer`,
+  `continue_flag` and page depth; merge by remote work ID/source URL so
+  interaction counts refresh without duplicating works or overwriting local
+  transcript/analysis fields.
+- Continuous loading must be stoppable between requests, stop on a repeated or
+  empty cursor, and use a safety page limit to prevent a faulty provider loop.
+  Before any refresh or multi-page action that can spend credits, show an
+  explicit confirmation and explain per-page charging.
+- When the adapter is absent, disable account-sync actions and explain that the
+  original client needs a bound email and the current device fingerprint.
+  MiniMax credentials and the manual import form are not equivalent to original
+  account monitoring.
 - Works list supports filters: all, favorite, created, uncreated.
 - Sort options: publish time, likes, favorites, comments, forwards and growth.
 - Single-video import stores URL, no-watermark media URL, title, author, cover,
