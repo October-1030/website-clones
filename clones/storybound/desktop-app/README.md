@@ -67,7 +67,7 @@ STORYBOUND_LLM_BASE_URL=https://api.deepseek.com/v1
 STORYBOUND_LLM_MODEL=deepseek-chat
 ```
 
-`STORYBOUND_LLM_PROVIDER` 可选：`minimax`、`deepseek`、`openai`、`siliconflow`、`custom`。未单独配置 LLM 时，会使用 `minimax-secrets.txt` 中同一份 MiniMax Key 调用兼容文本接口。服务端只向页面返回“凭据是否可用”和 provider/model，不返回密钥内容。
+`STORYBOUND_LLM_PROVIDER` 可选：`minimax`、`deepseek`、`openai`、`siliconflow`、`custom`。MiniMax 文本接口默认使用 `MiniMax-M3`；未单独配置 LLM 时，会使用 `minimax-secrets.txt` 中同一份 MiniMax Key 调用兼容文本接口。服务端只向页面返回“凭据是否可用”和 provider/model，不返回密钥内容。
 
 ### 对标监控
 

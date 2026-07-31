@@ -12,7 +12,7 @@ export const llmProviderOptions: Array<{
     name: "MiniMax",
     description: "同一 API 可用于文案、出图和配音",
     baseUrl: "https://api.minimaxi.com/v1",
-    model: "MiniMax-M2.7",
+    model: "MiniMax-M3",
   },
   {
     value: "deepseek",
@@ -48,5 +48,5 @@ export const defaultLlmConfig: LlmConfig = {
   provider: "minimax",
   apiKey: "",
   baseUrl: "https://api.minimaxi.com/v1",
-  model: "MiniMax-M2.7",
+  model: "MiniMax-M3",
 };

@@ -38,7 +38,7 @@ const maxJsonBytes = 24 * 1024 * 1024;
 const volcengineEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
 const minimaxBase = "https://api.minimaxi.com";
 const llmProviderDefaults = {
-  minimax: { baseUrl: "https://api.minimaxi.com/v1", model: "MiniMax-M2.7" },
+  minimax: { baseUrl: "https://api.minimaxi.com/v1", model: "MiniMax-M3" },
   openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
   deepseek: { baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   siliconflow: { baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen3-32B" },
