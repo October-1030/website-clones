@@ -1110,6 +1110,9 @@ async function runLlmPipeline(body) {
   if (!String(context.inputText || "").trim()) throw new Error("缺少文案内容");
   const artifacts = body.artifacts || {};
   const track = originalTrack(context.track);
+  const promptOverride = context.promptTemplateOverride && typeof context.promptTemplateOverride === "object"
+    ? context.promptTemplateOverride
+    : {};
   const base = pipelineContextPayload(context, artifacts);
 
   if (step === "precheck") {
@@ -1145,14 +1148,14 @@ async function runLlmPipeline(body) {
       }
     }
     const rewritePayload = await callLlmJson(config, pipelineMessages(
-      [originalPromptLibrary.writerAgentPrompt, track?.rewritePrompt, copyOptionPrompt(rewriteContext)],
+      [originalPromptLibrary.writerAgentPrompt, promptOverride.rewritePrompt || track?.rewritePrompt, copyOptionPrompt(rewriteContext)],
       `只执行 WriterAgent 的改写与自评阶段，严格返回 JSON：${JSON.stringify({ narration: "完整改写正文", scores: { hook: 0, fluency: 0, empathy: 0, visual: 0, originality: 0, spoken: 0 }, totalScore: 0 })}`,
       rewriteBase,
     ), 0.52, "WriterAgent 改写");
     const rawNarration = clampString(rewritePayload.narration || rewritePayload.rewritten_text || rewritePayload.content, rewriteBase.sourceText).slice(0, 10000);
     const narrationForMetadata = composeConfiguredNarration(rawNarration, rewriteContext, context.title);
     const metadataPayload = await callLlmJson(config, pipelineMessages(
-      [track?.metadataPrompt],
+      [promptOverride.metadataPrompt || track?.metadataPrompt],
       `只执行原版封面标题与发布元数据阶段，严格返回 JSON：${JSON.stringify({ title: "", subtitle: ["", ""], summary: "", tags: [], comments: ["", "", "", "", ""] })}`,
       { ...base, rewrittenText: narrationForMetadata },
     ), 0.48, "封面与发布元数据");
@@ -1163,7 +1166,7 @@ async function runLlmPipeline(body) {
   if (step === "storyboard") {
     const source = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
     const splitPayload = await callLlmJson(config, pipelineMessages(
-      [originalPromptLibrary.storyboardAgentPrompt, originalPromptLibrary.sentenceSplitPrompt, context.ttsMode === "continuous" ? tutorialStoryboardPrompt : ""],
+      [originalPromptLibrary.storyboardAgentPrompt, promptOverride.segmentationPrompt || originalPromptLibrary.sentenceSplitPrompt, context.ttsMode === "continuous" ? tutorialStoryboardPrompt : ""],
       `当前只执行 StoryboardAgent 第一阶段。按原版尾部锚点法，严格返回 JSON：${JSON.stringify({ anchors: ["每个分镜在原文中的最后10-20个字符，最后一项覆盖全文末尾"] })}`,
       { ...base, sourceText: source },
     ), 0.2, "影视分镜锚点拆分");
@@ -1180,7 +1183,7 @@ async function runLlmPipeline(body) {
     let characterCard;
     if (track?.needsCharacterCard) {
       const cardPayload = await callLlmJson(config, pipelineMessages(
-        [originalPromptLibrary.storyboardAgentPrompt, track?.imagePrompt],
+        [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt],
         `当前只提取跨分镜人物一致性卡，严格返回 JSON：${JSON.stringify({ characterCard: { name: "", identity: "", age: "", gender: "", appearance: "", clothing: "" } })}`,
         { ...base, shots },
       ), 0.3, "人物一致性卡");
@@ -1190,7 +1193,7 @@ async function runLlmPipeline(body) {
   }
 
   const promptPayload = await callLlmJson(config, pipelineMessages(
-    [originalPromptLibrary.storyboardAgentPrompt, track?.imagePrompt, context.ttsMode === "continuous" ? tutorialImagePrompt : "", originalPromptLibrary.producerAgentPrompt],
+    [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt, context.ttsMode === "continuous" ? tutorialImagePrompt : "", originalPromptLibrary.producerAgentPrompt],
     `执行 StoryboardAgent 第二阶段并交接 ProducerAgent。严格返回 JSON：${JSON.stringify({ prompts: [{ shotId: 1, prompt: "只写画面主体、环境、动作、光影和构图", negativePrompt: "" }] })}。不得修改 shotId 与字幕；prompt 不要重复画风前后缀，系统会按原版逻辑统一拼接。`,
     base,
   ), 0.72, "原版绘图提示词");

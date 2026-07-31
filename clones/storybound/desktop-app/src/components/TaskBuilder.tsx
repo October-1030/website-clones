@@ -9,10 +9,11 @@ import { appendTaskEvent, buildTaskDraft, clearTaskFromStep, createTask, getTask
 import { takeTaskHandoff } from "../lib/task-handoff";
 import { synthesizeTts } from "../lib/tts-api";
 import type { PipelineStatus } from "../types/app";
+import type { ImageGenerationRequest } from "../types/image";
 import type { StoredImage } from "../types/task";
 import type { LlmConfig, LlmCredentialStatus, PipelineContext, StoryboardShot } from "../types/llm";
 import type { AudioSegment, StoredVideo, StoryboundTask, TaskTimelineEntry } from "../types/task";
-import type { TtsConfig, TtsCredentialStatus } from "../types/tts";
+import type { TtsConfig, TtsCredentialStatus, TtsProvider } from "../types/tts";
 import { TaskCreateForm } from "./TaskCreateForm";
 import { TaskWorkbench } from "./TaskWorkbench";
 import { defaultBuilderForm, formFromTask, pipelineStartStep, taskPatchFromForm, type BuilderFormState } from "./task-builder-model";
@@ -145,6 +146,12 @@ function compactShotText(text: string): string {
   return text.trim().replace(/\s*\r?\n+\s*/g, "");
 }
 
+function coverAspectRatio(value?: string): ImageGenerationRequest["aspectRatio"] {
+  return ["16:9", "9:16", "1:1", "4:3", "3:4"].includes(value || "")
+    ? value as ImageGenerationRequest["aspectRatio"]
+    : "3:4";
+}
+
 function timelineFromWordAlignment(shots: StoryboardShot[], audio: AudioSegment): TaskTimelineEntry[] {
   const words = audio.alignment?.words || [];
   if (!words.length) throw new Error("MiniMax 没有返回词级时间戳，无法按真实发音位置生成分镜标记");
@@ -166,7 +173,7 @@ function timelineFromWordAlignment(shots: StoryboardShot[], audio: AudioSegment)
 }
 
 export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredentialStatus, taskId, autoRun = false, onTaskIdChange, onOpenPipeline, onQueueAdvance, onNavigateSettings }: TaskBuilderProps) {
-  const [form, setForm] = useState<BuilderFormState>(defaultBuilderForm);
+  const [form, setForm] = useState<BuilderFormState>(() => ({ ...defaultBuilderForm, ttsProvider: config.provider }));
   const [task, setTask] = useState<StoryboundTask | null>(null);
   const [loading, setLoading] = useState(Boolean(taskId));
   const [busy, setBusy] = useState(false);
@@ -178,14 +185,18 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const autoStartedRef = useRef<string | null>(null);
   const queuedRunRef = useRef<() => void>(() => undefined);
 
-  const availableVoices = useMemo(() => config.provider === "minimax"
+  const activeTtsProvider: TtsProvider = form.videoForm === "podcast" ? "volcengine" : form.ttsProvider;
+  const availableVoices = useMemo(() => activeTtsProvider === "minimax"
     ? [...minimaxVoices, ...config.minimax.clonedVoices]
-    : volcengineVoices.filter((voice) => voice.version === config.volcengine.version), [config.minimax.clonedVoices, config.provider, config.volcengine.version]);
-  const hasTtsCredentials = config.provider === "minimax"
+    : volcengineVoices.filter((voice) => voice.version === config.volcengine.version), [activeTtsProvider, config.minimax.clonedVoices, config.volcengine.version]);
+  const hasTtsCredentials = activeTtsProvider === "minimax"
     ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
     : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
   const hasLlmCredentials = Boolean(llmConfig.apiKey.trim() || llmCredentialStatus.available);
-  const canStart = form.inputText.trim().length >= 10 || (form.sourceMode === "ai" && form.aiBrief.trim().length >= 2);
+  const canStart = form.inputText.trim().length >= 50 || (form.sourceMode === "ai" && form.aiBrief.trim().length >= 2);
+  const providerReady = (provider: TtsProvider) => provider === "minimax"
+    ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
+    : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
 
   useEffect(() => {
     if (taskId) return;
@@ -201,10 +212,17 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }, [taskId]);
 
   useEffect(() => {
-    const voiceA = form.ttsVoiceId || (config.provider === "minimax" ? config.minimax.voiceId : config.volcengine.voiceId) || availableVoices[0]?.id || "";
-    const voiceB = form.ttsVoiceIdB || availableVoices.find((voice) => voice.id !== voiceA)?.id || voiceA;
+    const selectedPair = form.videoForm === "podcast"
+      ? {
+        mizai_dayi: ["zh_female_mizaitongxue_v2_saturn_bigtts", "zh_male_dayixiansheng_v2_saturn_bigtts"],
+        liufei_xiaolei: ["zh_male_liufei_v2_saturn_bigtts", "zh_male_xiaolei_v2_saturn_bigtts"],
+      }[form.podcastPair]
+      : undefined;
+    const configuredVoice = activeTtsProvider === "minimax" ? config.minimax.voiceId : config.volcengine.voiceId;
+    const voiceA = selectedPair?.[0] || (availableVoices.some((voice) => voice.id === form.ttsVoiceId) ? form.ttsVoiceId : "") || configuredVoice || availableVoices[0]?.id || "";
+    const voiceB = selectedPair?.[1] || (availableVoices.some((voice) => voice.id === form.ttsVoiceIdB) ? form.ttsVoiceIdB : "") || availableVoices.find((voice) => voice.id !== voiceA)?.id || voiceA;
     if (voiceA !== form.ttsVoiceId || voiceB !== form.ttsVoiceIdB) setForm((current) => ({ ...current, ttsVoiceId: voiceA, ttsVoiceIdB: voiceB }));
-  }, [availableVoices, config.minimax.voiceId, config.provider, config.volcengine.voiceId, form.ttsVoiceId, form.ttsVoiceIdB]);
+  }, [activeTtsProvider, availableVoices, config.minimax.voiceId, config.volcengine.voiceId, form.podcastPair, form.ttsVoiceId, form.ttsVoiceIdB, form.videoForm]);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,13 +234,13 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     void getTask(taskId).then((loaded) => {
       if (cancelled) return;
       setTask(loaded);
-      setForm(formFromTask(loaded));
+      setForm(formFromTask(loaded, config.provider));
       onOpenPipeline(loaded);
     }).catch((error: unknown) => {
       if (!cancelled) window.alert(error instanceof Error ? error.message : "无法打开任务");
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [onOpenPipeline, taskId]);
+  }, [config.provider, onOpenPipeline, taskId]);
 
   useEffect(() => {
     if (!task || busy) return;
@@ -269,6 +287,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       outroCtaEnabled: activeForm.outroCtaEnabled,
       outroCta: activeForm.outroCtaEnabled ? activeForm.outroCta.trim() : "",
       ttsMode: activeForm.ttsMode,
+      promptTemplateOverride: activeForm.promptTemplateOverride,
     };
   }
 
@@ -366,29 +385,51 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     const unusable = images.filter((image) => !image.path);
     if (unusable.length) throw new Error(`还有 ${unusable.length} 个分镜缺图，请上传替换、重画或使用相邻画面补位`);
     let coverImages = activeTask.media.coverImages || [];
-    if (activeTask.options.coverMode && activeTask.options.coverMode !== "off" && activeTask.options.materialSource === "ai") {
-      const coverCount = activeTask.options.secondCover ? 2 : 1;
+    if (activeTask.options.coverMode === "local") {
+      const asset = activeTask.options.coverLocalAsset;
+      if (!asset?.path) throw new Error("封面模式选择了本地上传，但还没有选择封面图片");
+      coverImages = [{
+        id: `local-cover-${Date.now()}`,
+        shotId: 9001,
+        prompt: "本地上传封面",
+        ...asset,
+        status: "ready",
+      }];
+    } else if (activeTask.options.coverMode && activeTask.options.coverMode !== "off" && activeTask.options.materialSource !== "stock") {
       const coverTitle = activeTask.artifacts.rewrite?.title || activeTask.title;
       const coverSubtitles = activeTask.artifacts.rewrite?.subtitle || [];
-      const coverPrompts = Array.from({ length: coverCount }, (_, index) => {
+      const coverConfigs = [{
+        mode: activeTask.options.coverMode,
+        templateId: activeTask.options.coverTemplateId,
+        ratio: activeTask.options.coverRatio,
+      }, ...(activeTask.options.secondCover ? [{
+        mode: activeTask.options.secondCoverMode || "titled",
+        templateId: activeTask.options.secondCoverTemplateId || "cinematic-poster",
+        ratio: activeTask.options.secondCoverRatio || "3:4",
+      }] : [])];
+      coverImages = [];
+      for (const [index, coverConfig] of coverConfigs.entries()) {
         const coverPrompt = buildCoverImagePrompt({
           corePrompt: `${activeTask.visualStyle}，主题：${coverTitle}，${prompts[index % prompts.length]?.prompt || "高完成度短视频封面"}`,
           title: coverTitle,
           subtitles: coverSubtitles,
-          mode: activeTask.options.coverMode === "titled" ? "titled" : "plain",
-          templateId: activeTask.options.coverTemplateId,
+          mode: coverConfig.mode === "titled" ? "titled" : "plain",
+          templateId: coverConfig.templateId,
         });
-        return { shotId: 9001 + index, ...coverPrompt };
-      });
-      const coverResult = await generateImages({ taskId: activeTask.id, prompts: coverPrompts, apiKey: config.minimax.apiKey, aspectRatio: activeTask.options.coverRatio === "1:1" ? "1:1" : "3:4", maxImages: coverCount, track: activeTask.track, visualStyle: activeTask.visualStyle, coverBackgroundOnly: true }, signal);
-      coverImages = coverResult.images.map((image) => ({ ...image, status: image.status || (image.path ? "ready" : "failed") })) as StoredImage[];
+        const coverResult = await generateImages({ taskId: activeTask.id, prompts: [{ shotId: 9001 + index, ...coverPrompt }], apiKey: config.minimax.apiKey, aspectRatio: coverAspectRatio(coverConfig.ratio), maxImages: 1, track: activeTask.track, visualStyle: activeTask.visualStyle, coverBackgroundOnly: true }, signal);
+        coverImages.push(...coverResult.images.map((image) => ({ ...image, status: image.status || (image.path ? "ready" : "failed") })) as StoredImage[]);
+      }
     }
     return persistState(activeTask, { media: { ...activeTask.media, images, coverImages }, draft: null });
   }
 
   async function synthesizeSegment(activeTask: StoryboundTask, shotId: number, text: string, voiceId: string, signal: AbortSignal, speaker?: "A" | "B"): Promise<AudioSegment> {
     const speed = activeTask.options.ttsSpeed || 1;
-    const audio = await synthesizeTts({ provider: config.provider, text, voiceId, speed, config, taskId: activeTask.id, shotId, fileName: `${speaker ? `${speaker}-` : ""}${shotId}.mp3`, signal });
+    const provider = activeTask.videoForm === "podcast"
+      ? "volcengine"
+      : activeTask.options.ttsProvider || config.provider;
+    const taskConfig: TtsConfig = { ...config, provider };
+    const audio = await synthesizeTts({ provider, text, voiceId, speed, config: taskConfig, taskId: activeTask.id, shotId, fileName: `${speaker ? `${speaker}-` : ""}${shotId}.mp3`, signal });
     if (!audio.assetUrl || !audio.assetPath || !audio.fileName) throw new Error(`第 ${shotId} 段音频未写入任务目录`);
     return { id: `audio-${speaker || "N"}-${shotId}-${Date.now()}`, shotId, speaker, text, voiceId, fileName: audio.fileName, path: audio.assetPath, url: audio.assetUrl, bytes: audio.blob.size, durationSec: audio.durationSec, speed, alignment: audio.alignment, status: "ready" };
   }
@@ -402,7 +443,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       const timeline = timelineForTotalDuration(shots, totalDuration);
       return persistState(activeTask, { media: { ...activeTask.media, audioSegments: [], continuousAudio: null, podcast: null, timeline }, draft: null });
     }
-    if (!hasTtsCredentials) throw new Error("当前 TTS 引擎缺少凭据");
+    const provider = activeTask.videoForm === "podcast"
+      ? "volcengine"
+      : activeTask.options.ttsProvider || config.provider;
+    if (!providerReady(provider)) throw new Error(`当前 ${provider === "minimax" ? "MiniMax" : "豆包"} TTS 引擎缺少凭据`);
     const voiceA = activeTask.options.ttsVoiceId || form.ttsVoiceId;
     const voiceB = activeTask.options.ttsVoiceIdB || form.ttsVoiceIdB;
     if (!voiceA) throw new Error("请选择配音音色");
@@ -430,10 +474,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         && existing.text === narrationText
         && existing.voiceId === voiceA
         && existing.speed === (activeTask.options.ttsSpeed || 1)
-        && (config.provider !== "minimax" || Boolean(existing.alignment?.words.length))
+        && (provider !== "minimax" || Boolean(existing.alignment?.words.length))
         ? existing
         : await synthesizeSegment(activeTask, 0, narrationText, voiceA, signal);
-      const timeline = config.provider === "minimax"
+      const timeline = provider === "minimax"
         ? timelineFromWordAlignment(shots, continuousAudio)
         : timelineForTotalDuration(shots, continuousAudio.durationSec);
       return persistState(activeTask, { media: { ...activeTask.media, audioSegments: [], continuousAudio, podcast: null, externalAudio: null, timeline }, draft: null });
@@ -457,6 +501,23 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }
 
   async function executeStep(activeTask: StoryboundTask, step: number, signal: AbortSignal): Promise<StoryboundTask> {
+    if (step === 3 && activeTask.options.materialSource !== "ai") {
+      const shots = activeTask.artifacts.storyboard?.shots || [];
+      if (!shots.length) throw new Error("没有分镜，无法匹配本地或网络素材");
+      return persistState(activeTask, {
+        artifacts: {
+          ...activeTask.artifacts,
+          prompts: {
+            prompts: shots.map((shot) => ({
+              shotId: shot.id,
+              prompt: `${activeTask.options.materialSource === "stock" ? "网络素材" : "我的素材库"}：${shot.visual || shot.text}`,
+              negativePrompt: "",
+            })),
+            templateVersion: activeTask.options.materialSource === "stock" ? "stock-material" : "local-library",
+          },
+        },
+      });
+    }
     if (step <= 3) return runLlmStep(activeTask, step as 0 | 1 | 2 | 3, signal);
     if (step === 4) return runImageStep(activeTask, signal);
     if (step === 5) return runAudioStep(activeTask, signal);
@@ -467,7 +528,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (autoRun) return false;
     if (pauseRequestedRef.current) return true;
     if (activeTask.pausePreset === "every") return step < 6;
-    if (activeTask.pausePreset === "key") return [0, 2, 3].includes(step);
+    if (activeTask.pausePreset === "key") {
+      const firstLlmOutput = activeTask.mode === "auto" ? 0 : activeTask.mode === "semi_auto" ? 2 : 3;
+      return step === firstLlmOutput;
+    }
     return activeTask.pausePreset === "custom" && activeTask.customPauseSteps.includes(step);
   }
 
@@ -526,9 +590,13 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   async function handleStart(): Promise<void> {
     if (!canStart || busy) return;
     let activeForm = form;
-    if (form.sourceMode === "ai" && form.inputText.trim().length < 10) {
+    if (form.sourceMode === "ai" && form.inputText.trim().length < 50) {
       const generated = await handleGenerateCopy();
       if (!generated) return;
+      if (generated.trim().length < 50) {
+        window.alert("AI 生成文案少于 50 字，请补充创作要求或手动扩写后再开始。");
+        return;
+      }
       activeForm = { ...form, inputText: generated };
     }
     const start = pipelineStartStep(activeForm.mode);
@@ -675,7 +743,8 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       const controller = new AbortController();
       try {
         const continuousAudio = await synthesizeSegment(task, 0, narrationText, task.media.continuousAudio?.voiceId || task.options.ttsVoiceId || form.ttsVoiceId, controller.signal);
-        const timeline = config.provider === "minimax"
+        const provider = task.options.ttsProvider || config.provider;
+        const timeline = provider === "minimax"
           ? timelineFromWordAlignment(shots, continuousAudio)
           : timelineForTotalDuration(shots, continuousAudio.durationSec);
         setTask(await updateTask(task.id, { media: { ...task.media, audioSegments: [], continuousAudio, externalAudio: null, timeline }, draft: null }));
@@ -751,6 +820,9 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   async function uploadReference(file: File): Promise<void> {
     setBusy(true); try { const active = await ensureTask(); const asset = await uploadTaskAsset(active.id, file, "uploads"); setTask(await updateTask(active.id, { options: { ...active.options, referenceImage: asset } })); } finally { setBusy(false); }
   }
+  async function uploadCover(file: File): Promise<void> {
+    setBusy(true); try { const active = await ensureTask(); const asset = await uploadTaskAsset(active.id, file, "images"); setTask(await updateTask(active.id, { options: { ...active.options, coverLocalAsset: asset } })); } finally { setBusy(false); }
+  }
   async function uploadTemplateBackground(file: File): Promise<string> {
     setBusy(true);
     try {
@@ -786,12 +858,12 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     <main className="task-builder">
       <div className="task-builder__inner">
         <header className="task-builder__header"><span className="task-builder__header-icon">✧</span><div><h1>{task ? "任务详情与产物工作台" : "创建视频任务"}</h1><p>{task ? "所有中间产物已落盘，可编辑、局部重跑和重新打包" : "粘贴或创作文案，按原版七步流程生成剪映草稿"}</p></div></header>
-        <div className={`credential-warning ${hasTtsCredentials && hasLlmCredentials ? "credential-warning--ready" : "credential-warning--partial"}`}><span className="credential-warning__icon">▽</span><div className="credential-warning__copy"><strong>{hasTtsCredentials && hasLlmCredentials ? "LLM、MiniMax 图片与 TTS 已就绪" : "还有必要的本地凭据未配置"}</strong><span>{hasLlmCredentials ? `原版 ${llmCredentialStatus.promptLibrary?.sourceVersion || "1.16.1"} 提示词库已接入` : "缺少 LLM API Key"} · {hasTtsCredentials ? "TTS 可用" : "缺少 TTS 凭据"}</span></div><button type="button" onClick={onNavigateSettings}>前往设置 →</button></div>
+        <div className={`credential-warning ${hasTtsCredentials && hasLlmCredentials ? "credential-warning--ready" : "credential-warning--partial"}`}><span className="credential-warning__icon">▽</span><div className="credential-warning__copy"><strong>{hasTtsCredentials && hasLlmCredentials ? "TTS 与 LLM 已就绪" : hasTtsCredentials ? "TTS 已就绪，还有 1 项凭证未配置" : "还有必要的本地凭据未配置"}</strong><span>{hasTtsCredentials ? `${activeTtsProvider === "minimax" ? "MiniMax" : "豆包"} 可直接配音` : "缺少 TTS 凭据"} · {hasLlmCredentials ? `原版 ${llmCredentialStatus.promptLibrary?.sourceVersion || "1.16.1"} 提示词库已接入` : "仍需 LLM API Key"}</span></div><button type="button" onClick={onNavigateSettings}>前往设置 →</button></div>
 
-        {!task || task.runState === "idle" || task.status === "draft" ? <TaskCreateForm form={form} voices={availableVoices} hasLlmCredentials={hasLlmCredentials} hasTtsCredentials={hasTtsCredentials} aiGenerating={aiGenerating} taskReady={Boolean(task)} referenceName={task?.options.referenceImage?.fileName} externalAudioName={task?.media.externalAudio?.fileName} bgmName={task?.media.bgm?.fileName} onChange={changeForm} onGenerateCopy={() => void handleGenerateCopy()} onUploadImages={(files) => void uploadImages(files)} onUploadReference={(file) => void uploadReference(file)} onUploadTemplateBackground={uploadTemplateBackground} onUploadExternalAudio={(file) => void uploadExternalAudio(file)} onUploadBgm={(file) => void uploadBgm(file)} /> : null}
+        {!task || task.runState === "idle" || task.status === "draft" ? <TaskCreateForm form={form} voices={availableVoices} hasLlmCredentials={hasLlmCredentials} hasTtsCredentials={hasTtsCredentials} aiGenerating={aiGenerating} taskReady={Boolean(task)} referenceName={task?.options.referenceImage?.fileName} coverLocalName={task?.options.coverLocalAsset?.fileName} externalAudioName={task?.media.externalAudio?.fileName} bgmName={task?.media.bgm?.fileName} onChange={changeForm} onGenerateCopy={() => void handleGenerateCopy()} onUploadImages={(files) => void uploadImages(files)} onUploadReference={(file) => void uploadReference(file)} onUploadCover={(file) => void uploadCover(file)} onUploadTemplateBackground={uploadTemplateBackground} onUploadExternalAudio={(file) => void uploadExternalAudio(file)} onUploadBgm={(file) => void uploadBgm(file)} /> : null}
         {task ? <TaskWorkbench task={task} busy={busy} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
       </div>
-      <footer className="task-builder__footer"><div className="task-builder__footer-inner"><div className="footer-status"><span className={canStart ? "is-ready" : ""}>{busy ? "正在处理并写入任务目录…" : saved ? "所有更改已保存" : task ? `任务 ${task.id.slice(0, 8)} · ${task.status}` : canStart ? "文案长度已满足" : "请输入至少 10 字文案"}</span></div><div className="footer-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void handleSave()}>保存草稿</button>{!task || task.status === "draft" ? <button type="button" className="secondary-button" disabled={!canStart || busy} onClick={() => void handleEnqueue()}>加入队列</button> : null}{!task || task.status === "draft" || task.status === "pending" ? <button type="button" className="start-button" disabled={!canStart || busy} onClick={() => void handleStart()}><span>▶</span>{task?.status === "pending" ? "立即执行" : "开始制作"}</button> : task.runState === "completed" ? <button type="button" className="start-button" disabled={busy} onClick={() => void repackDraft()}>重新打包草稿</button> : null}</div></div></footer>
+      <footer className="task-builder__footer"><div className="task-builder__footer-inner"><div className="footer-status"><span className={canStart ? "is-ready" : ""}>{busy ? "正在处理并写入任务目录…" : saved ? "所有更改已保存" : task ? `任务 ${task.id.slice(0, 8)} · ${task.status}` : canStart ? "文案长度已满足" : "请输入至少 50 字文案"}</span></div><div className="footer-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void handleSave()}>保存草稿</button>{!task || task.status === "draft" ? <button type="button" className="secondary-button" disabled={!canStart || busy} onClick={() => void handleEnqueue()}>加入队列</button> : null}{!task || task.status === "draft" || task.status === "pending" ? <button type="button" className="start-button" disabled={!canStart || busy} onClick={() => void handleStart()}><span>▶</span>{task?.status === "pending" ? "立即执行" : "开始制作"}</button> : task.runState === "completed" ? <button type="button" className="start-button" disabled={busy} onClick={() => void repackDraft()}>重新打包草稿</button> : null}</div></div></footer>
     </main>
   );
 }

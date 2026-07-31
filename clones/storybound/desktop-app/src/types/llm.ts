@@ -40,6 +40,15 @@ export interface PipelineContext {
   outroCtaEnabled?: boolean;
   outroCta?: string;
   ttsMode?: "original-segmented" | "continuous";
+  promptTemplateOverride?: PromptTemplateOverride | null;
+}
+
+export interface PromptTemplateOverride {
+  name: string;
+  rewritePrompt: string;
+  metadataPrompt: string;
+  segmentationPrompt: string;
+  imagePrompt: string;
 }
 
 export type LlmPipelineStep = "precheck" | "rewrite" | "storyboard" | "prompts";

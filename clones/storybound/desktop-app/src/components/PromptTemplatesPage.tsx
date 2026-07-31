@@ -1,75 +1,14 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from "react";
 
+import {
+  emptyPromptTemplate,
+  readCustomPromptTemplates,
+  templatesFromLibrary,
+  writeCustomPromptTemplates,
+  type PromptLibraryPayload,
+  type PromptTemplate,
+} from "../lib/prompt-template-store";
 import "./PromptTemplatesPage.css";
-
-interface PromptTemplate {
-  id: string;
-  name: string;
-  baseTrack: string;
-  version: string;
-  rewritePrompt: string;
-  metadataPrompt: string;
-  segmentationPrompt: string;
-  imagePrompt: string;
-  source: "system" | "custom";
-}
-
-interface PromptLibraryTrack {
-  id: string;
-  name: string;
-  rewritePrompt?: string;
-  metadataPrompt?: string;
-  imagePrompt?: string;
-}
-
-interface PromptLibraryPayload {
-  sourceVersion: string;
-  writerAgentPrompt: string;
-  sentenceSplitPrompt: string;
-  producerAgentPrompt: string;
-  tracks: PromptLibraryTrack[];
-}
-
-const storageKey = "storybound-custom-prompt-templates-v1";
-
-function templatesFromLibrary(promptLibrary: PromptLibraryPayload): PromptTemplate[] {
-  return promptLibrary.tracks.map((track) => ({
-    id: `system-${track.id}`,
-    name: track.name,
-    baseTrack: track.name,
-    version: promptLibrary.sourceVersion.replace("Storybound ", ""),
-    rewritePrompt: track.rewritePrompt || promptLibrary.writerAgentPrompt,
-    metadataPrompt: track.metadataPrompt || promptLibrary.writerAgentPrompt,
-    segmentationPrompt: promptLibrary.sentenceSplitPrompt,
-    imagePrompt: track.imagePrompt || promptLibrary.producerAgentPrompt,
-    source: "system",
-  }));
-}
-
-function emptyTemplate(): PromptTemplate {
-  return {
-    id: crypto.randomUUID(),
-    name: "",
-    baseTrack: "通用故事",
-    version: "1.0.0",
-    rewritePrompt: "",
-    metadataPrompt: "",
-    segmentationPrompt: "",
-    imagePrompt: "",
-    source: "custom",
-  };
-}
-
-function readCustomTemplates(): PromptTemplate[] {
-  try {
-    const value = JSON.parse(window.localStorage.getItem(storageKey) || "[]") as PromptTemplate[];
-    return Array.isArray(value)
-      ? value.filter((item) => item?.id && item?.name && item.source === "custom")
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 function downloadTemplate(template: PromptTemplate) {
   const payload = {
@@ -88,14 +27,14 @@ function downloadTemplate(template: PromptTemplate) {
 
 export function PromptTemplatesPage() {
   const [systemTemplates, setSystemTemplates] = useState<PromptTemplate[]>([]);
-  const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>(readCustomTemplates);
+  const [customTemplates, setCustomTemplates] = useState<PromptTemplate[]>(readCustomPromptTemplates);
   const [editor, setEditor] = useState<PromptTemplate | null>(null);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<"all" | "system" | "custom">("all");
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    window.localStorage.setItem(storageKey, JSON.stringify(customTemplates));
+    writeCustomPromptTemplates(customTemplates);
   }, [customTemplates]);
 
   useEffect(() => {
@@ -151,7 +90,7 @@ export function PromptTemplatesPage() {
         throw new Error("不是有效的 Storybound 模板文件。");
       }
       const imported: PromptTemplate = {
-        ...emptyTemplate(),
+        ...emptyPromptTemplate(),
         ...payload.template,
         id: crypto.randomUUID(),
         source: "custom",
@@ -165,7 +104,7 @@ export function PromptTemplatesPage() {
 
   return (
     <main className="prompt-templates-page">
-      <header><div><span>原版提示词库 · 本地</span><h1>提示词模板</h1><p>系统模板来自已提取的原版提示词库；自定义模板仅保存在本机，不连接原站市场。</p></div><div><label>导入 JSON<input type="file" accept=".json,application/json" onChange={(event) => void importTemplate(event)} /></label><button onClick={() => setEditor(emptyTemplate())} type="button">＋ 新建模板</button></div></header>
+      <header><div><span>原版提示词库 · 本地</span><h1>提示词模板</h1><p>系统模板来自已提取的原版提示词库；自定义模板仅保存在本机，不连接原站市场。</p></div><div><label>导入 JSON<input type="file" accept=".json,application/json" onChange={(event) => void importTemplate(event)} /></label><button onClick={() => setEditor(emptyPromptTemplate())} type="button">＋ 新建模板</button></div></header>
       {notice ? <div className="prompt-template-notice"><span>{notice}</span><button aria-label="关闭提示" onClick={() => setNotice("")} type="button">×</button></div> : null}
       <section className="prompt-template-toolbar"><div>{(["all", "system", "custom"] as const).map((value) => <button className={scope === value ? "is-selected" : ""} key={value} onClick={() => setScope(value)} type="button">{value === "all" ? "全部" : value === "system" ? `系统模板 ${systemTemplates.length}` : `我的模板 ${customTemplates.length}`}</button>)}</div><input aria-label="搜索提示词模板" placeholder="搜模板或赛道" value={query} onChange={(event) => setQuery(event.target.value)} /></section>
       <section className="prompt-template-grid">{visibleTemplates.map((template) => <article key={template.id}><div className="prompt-template-card__head"><span className={template.source === "system" ? "is-system" : ""}>{template.source === "system" ? "系统模板" : "本地模板"}</span><small>v{template.version}</small></div><h2>{template.name}</h2><p>{template.baseTrack}</p><dl><div><dt>改写规则</dt><dd>{template.rewritePrompt.length.toLocaleString("zh-CN")} 字</dd></div><div><dt>元数据</dt><dd>{template.metadataPrompt.length.toLocaleString("zh-CN")} 字</dd></div><div><dt>分镜规则</dt><dd>{template.segmentationPrompt.length.toLocaleString("zh-CN")} 字</dd></div><div><dt>绘图规则</dt><dd>{template.imagePrompt.length.toLocaleString("zh-CN")} 字</dd></div></dl><footer>{template.source === "system" ? <button onClick={() => cloneTemplate(template)} type="button">克隆后编辑</button> : <><button onClick={() => setEditor(structuredClone(template))} type="button">编辑</button><button onClick={() => cloneTemplate(template)} type="button">复制</button><button onClick={() => downloadTemplate(template)} type="button">导出</button><button className="is-danger" onClick={() => deleteTemplate(template)} type="button">删除</button></>}</footer></article>)}</section>

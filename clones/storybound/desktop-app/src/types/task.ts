@@ -1,12 +1,13 @@
 import type { GeneratedImage } from "./image";
-import type { PipelineLlmArtifacts } from "./llm";
+import type { PipelineLlmArtifacts, PromptTemplateOverride } from "./llm";
 import type { ExecutionMode, PausePreset, PipelineStatus, VideoForm } from "./app";
 import type { DraftTemplateConfig } from "./draft-template";
+import type { TtsProvider } from "./tts";
 
 export type TaskRunState = "idle" | "queued" | "running" | "paused" | "cancelled" | "completed";
 export type TaskStatus = "draft" | "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
 export type MaterialSource = "ai" | "local" | "person" | "stock";
-export type CoverMode = "off" | "titled" | "plain";
+export type CoverMode = "off" | "titled" | "plain" | "local";
 export type VoiceSource = "tts" | "external";
 
 export interface TaskOptions {
@@ -14,6 +15,8 @@ export interface TaskOptions {
   narrativePov?: "original" | "first" | "third";
   targetLength?: number | null;
   targetScenes?: number | null;
+  promptTemplateId?: string;
+  promptTemplateOverride?: PromptTemplateOverride | null;
   keepPromotion?: boolean;
   fixedIntroEnabled?: boolean;
   fixedIntroMode?: "account" | "lock";
@@ -37,9 +40,13 @@ export interface TaskOptions {
   coverMode?: CoverMode;
   coverTemplateId?: string;
   coverRatio?: string;
+  coverLocalAsset?: StoredAsset | null;
   secondCover?: boolean;
+  secondCoverMode?: Exclude<CoverMode, "off" | "local">;
+  secondCoverTemplateId?: string;
+  secondCoverRatio?: string;
   voiceSource?: VoiceSource;
-  ttsProvider?: string;
+  ttsProvider?: TtsProvider;
   ttsVoiceId?: string;
   ttsVoiceIdB?: string;
   ttsSpeed?: number;

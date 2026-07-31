@@ -3,6 +3,8 @@ import type { ExecutionMode, PausePreset, VideoForm } from "../types/app";
 import type { ImageGenerationRequest } from "../types/image";
 import type { DraftTemplateConfig } from "../types/draft-template";
 import type { StoryboundTask, TaskOptions } from "../types/task";
+import type { TtsProvider } from "../types/tts";
+import type { PromptTemplateOverride } from "../types/llm";
 
 export interface BuilderFormState {
   title: string;
@@ -14,6 +16,8 @@ export interface BuilderFormState {
   customPauseSteps: number[];
   videoForm: VideoForm;
   track: string;
+  promptTemplateId: string;
+  promptTemplateOverride: PromptTemplateOverride | null;
   visualStyle: string;
   aspectRatio: ImageGenerationRequest["aspectRatio"];
   rewriteIntensity: NonNullable<TaskOptions["rewriteIntensity"]>;
@@ -42,7 +46,11 @@ export interface BuilderFormState {
   coverTemplateId: string;
   coverRatio: string;
   secondCover: boolean;
+  secondCoverMode: "titled" | "plain";
+  secondCoverTemplateId: string;
+  secondCoverRatio: string;
   voiceSource: NonNullable<TaskOptions["voiceSource"]>;
+  ttsProvider: TtsProvider;
   ttsVoiceId: string;
   ttsVoiceIdB: string;
   ttsSpeed: number;
@@ -63,6 +71,8 @@ export const defaultBuilderForm: BuilderFormState = {
   customPauseSteps: [2, 3],
   videoForm: "narration",
   track: defaultTrack,
+  promptTemplateId: `system-${defaultTrack}`,
+  promptTemplateOverride: null,
   visualStyle: originalDefaultStyleByTrack[defaultTrack] ?? visualStyles[0] ?? "黑白摄影",
   aspectRatio: "9:16",
   rewriteIntensity: "standard",
@@ -79,28 +89,32 @@ export const defaultBuilderForm: BuilderFormState = {
   outroCtaEnabled: false,
   outroCta: "",
   materialSource: "ai",
-  autoBorrowImage: true,
+  autoBorrowImage: false,
   dynamicStoryboard: false,
-  draftTemplateId: "default-portrait-9-16",
+  draftTemplateId: "",
   draftTemplateConfig: null,
-  videoIntroCount: 3,
-  videoIntroDurationMode: "narration",
-  videoIntroDuration: 3,
+  videoIntroCount: 0,
+  videoIntroDurationMode: "fixed",
+  videoIntroDuration: 6,
   bgmSync: false,
   coverMode: "off",
   coverTemplateId: "cinematic-poster",
   coverRatio: "3:4",
   secondCover: false,
+  secondCoverMode: "titled",
+  secondCoverTemplateId: "cinematic-poster",
+  secondCoverRatio: "3:4",
   voiceSource: "tts",
+  ttsProvider: "volcengine",
   ttsVoiceId: "",
   ttsVoiceIdB: "",
   ttsSpeed: 1,
   ttsMode: "original-segmented",
   podcastImageMode: "multi",
-  podcastPair: "自定义双主播",
+  podcastPair: "mizai_dayi",
 };
 
-export function formFromTask(task: StoryboundTask): BuilderFormState {
+export function formFromTask(task: StoryboundTask, fallbackTtsProvider: TtsProvider = "volcengine"): BuilderFormState {
   return {
     ...defaultBuilderForm,
     title: task.title,
@@ -112,6 +126,8 @@ export function formFromTask(task: StoryboundTask): BuilderFormState {
     customPauseSteps: task.customPauseSteps,
     videoForm: task.videoForm,
     track: task.track,
+    promptTemplateId: task.options.promptTemplateId ?? `system-${task.track}`,
+    promptTemplateOverride: task.options.promptTemplateOverride ?? null,
     visualStyle: task.visualStyle,
     aspectRatio: task.aspectRatio,
     rewriteIntensity: (task.options.rewriteIntensity as string) === "light"
@@ -131,30 +147,39 @@ export function formFromTask(task: StoryboundTask): BuilderFormState {
     lockIntroDirty: task.options.lockIntroDirty ?? false,
     outroCtaEnabled: task.options.outroCtaEnabled ?? Boolean(task.options.outroCta),
     outroCta: task.options.outroCta ?? "",
-    materialSource: task.options.materialSource ?? "ai",
-    autoBorrowImage: task.options.autoBorrowImage ?? true,
+    materialSource: task.options.materialSource === "person" ? "local" : task.options.materialSource ?? "ai",
+    autoBorrowImage: task.options.autoBorrowImage ?? false,
     dynamicStoryboard: task.options.videoIntro ?? task.options.dynamicStoryboard ?? false,
-    draftTemplateId: task.options.draftTemplateId ?? "default-portrait-9-16",
+    draftTemplateId: task.options.draftTemplateId ?? "",
     draftTemplateConfig: task.options.draftTemplateConfig ?? null,
-    videoIntroCount: task.options.videoIntroCount ?? 3,
-    videoIntroDurationMode: task.options.videoIntroDurationMode ?? "narration",
-    videoIntroDuration: task.options.videoIntroDuration ?? 3,
+    videoIntroCount: task.options.videoIntroCount ?? 0,
+    videoIntroDurationMode: task.options.videoIntroDurationMode ?? ((task.options.videoIntroDuration ?? 6) === 0 ? "narration" : "fixed"),
+    videoIntroDuration: task.options.videoIntroDuration && task.options.videoIntroDuration > 0 ? task.options.videoIntroDuration : 6,
     bgmSync: task.options.bgmSync ?? false,
     coverMode: task.options.coverMode ?? "off",
     coverTemplateId: task.options.coverTemplateId ?? "cinematic-poster",
     coverRatio: task.options.coverRatio ?? "3:4",
     secondCover: task.options.secondCover ?? false,
+    secondCoverMode: task.options.secondCoverMode ?? "titled",
+    secondCoverTemplateId: task.options.secondCoverTemplateId ?? "cinematic-poster",
+    secondCoverRatio: task.options.secondCoverRatio ?? "3:4",
     voiceSource: task.options.voiceSource ?? "tts",
+    ttsProvider: task.options.ttsProvider ?? fallbackTtsProvider,
     ttsVoiceId: task.options.ttsVoiceId ?? "",
     ttsVoiceIdB: task.options.ttsVoiceIdB ?? "",
     ttsSpeed: task.options.ttsSpeed ?? 1,
     ttsMode: task.options.ttsMode ?? "original-segmented",
     podcastImageMode: task.options.podcastImageMode ?? "multi",
-    podcastPair: task.options.podcastPair ?? "自定义双主播",
+    podcastPair: task.options.podcastPair ?? "mizai_dayi",
   };
 }
 
 export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTask> {
+  const dynamicStoryboard = form.materialSource === "ai"
+    && form.videoForm === "narration"
+    && form.dynamicStoryboard;
+  const coverEnabled = form.materialSource !== "stock" && form.coverMode !== "off";
+  const disabledPauseSteps = form.mode === "direct" ? [0, 1, 2] : form.mode === "semi_auto" ? [0, 1] : [];
   return {
     title: form.title.trim() || form.inputText.trim().slice(0, 22) || "未命名视频",
     inputText: form.inputText.trim(),
@@ -162,7 +187,7 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
     aiBrief: form.aiBrief.trim(),
     mode: form.mode,
     pausePreset: form.pausePreset,
-    customPauseSteps: form.customPauseSteps,
+    customPauseSteps: form.customPauseSteps.filter((step) => !disabledPauseSteps.includes(step)),
     videoForm: form.videoForm,
     track: form.track,
     visualStyle: form.visualStyle,
@@ -172,6 +197,8 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       narrativePov: form.narrativePov,
       targetLength: form.targetLength,
       targetScenes: form.targetScenes,
+      promptTemplateId: form.promptTemplateId,
+      promptTemplateOverride: form.promptTemplateOverride,
       keepPromotion: form.keepPromotion,
       fixedIntroEnabled: form.fixedIntroEnabled,
       fixedIntroMode: form.fixedIntroMode,
@@ -183,19 +210,23 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       outroCta: form.outroCta,
       materialSource: form.materialSource,
       autoBorrowImage: form.autoBorrowImage,
-      dynamicStoryboard: form.dynamicStoryboard,
+      dynamicStoryboard,
       draftTemplateId: form.draftTemplateId,
       draftTemplateConfig: form.draftTemplateConfig ?? undefined,
-      videoIntro: form.dynamicStoryboard,
-      videoIntroCount: form.dynamicStoryboard ? form.videoIntroCount : 0,
+      videoIntro: dynamicStoryboard,
+      videoIntroCount: dynamicStoryboard ? form.videoIntroCount : 0,
       videoIntroDurationMode: form.videoIntroDurationMode,
-      videoIntroDuration: form.dynamicStoryboard && form.videoIntroDurationMode === "fixed" ? form.videoIntroDuration : 0,
+      videoIntroDuration: dynamicStoryboard && form.videoIntroDurationMode === "fixed" ? form.videoIntroDuration : 0,
       bgmSync: form.bgmSync,
-      coverMode: form.coverMode,
+      coverMode: coverEnabled ? form.coverMode : "off",
       coverTemplateId: form.coverTemplateId,
       coverRatio: form.coverRatio,
-      secondCover: form.secondCover,
+      secondCover: coverEnabled && form.coverMode !== "local" && form.secondCover,
+      secondCoverMode: form.secondCoverMode,
+      secondCoverTemplateId: form.secondCoverTemplateId,
+      secondCoverRatio: form.secondCoverRatio,
       voiceSource: form.voiceSource,
+      ttsProvider: form.videoForm === "podcast" ? "volcengine" : form.ttsProvider,
       ttsVoiceId: form.ttsVoiceId,
       ttsVoiceIdB: form.ttsVoiceIdB,
       ttsSpeed: form.ttsSpeed,
