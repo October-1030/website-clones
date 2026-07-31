@@ -13,6 +13,7 @@
 - HTML 动画和音乐 MV 的真实本地任务、素材上传、断点状态、FFmpeg MP4 和剪映草稿
 - 画图实验室真实 MiniMax 批量生图、参考图、尺寸后处理与本地历史
 - 人物素材库、提示词模板、选品助手、对标监控和创作市场的本地可持久化工作台
+- 对标监控公开单视频解析：标题、作者、封面、数据、无水印媒体、保存资料库和本地文案提取
 - Storybound 1.16.1 字幕行号、单行字数限制和超字标红
 - 火山引擎 / 豆包 TTS 1.0、2.0 的真实 MP3 合成
 - MiniMax `speech-2.8-hd` / `speech-2.8-turbo`、平台音色同步与声音克隆
@@ -68,9 +69,31 @@ STORYBOUND_LLM_MODEL=deepseek-chat
 
 `STORYBOUND_LLM_PROVIDER` 可选：`minimax`、`deepseek`、`openai`、`siliconflow`、`custom`。未单独配置 LLM 时，会使用 `minimax-secrets.txt` 中同一份 MiniMax Key 调用兼容文本接口。服务端只向页面返回“凭据是否可用”和 provider/model，不返回密钥内容。
 
-### 可选本地 ASR
+### 对标监控
 
-对标监控可以把本地音频或视频交给你自己的 ASR 命令。命令需要把转写纯文本，或 `{"text":"..."}` JSON 写到 stdout：
+“单视频解析”使用从原客户端 1.16.1 公开代码确认的数据路径，可解析公开分享链接并返回标题、作者、封面、清晰度和可下载媒体；结果可保存到本地资料库。保存后打开作品，点击“一键提取公开视频文案”，服务会重新解析媒体、下载到临时目录并用本机 ASR 转写，完成后自动删除临时媒体。
+
+原版的“添加账号／刷新全部作品”属于绑定邮箱、设备指纹和积分的私有账号能力。本项目不会冒用或绕过原站授权；页面会明确显示“账号自动刷新：未配置”。仅当你拥有自己的原站授权参数时，才可在启动前设置：
+
+```powershell
+$env:STORYBOUND_BENCHMARK_EMAIL = "你的绑定邮箱"
+$env:STORYBOUND_BENCHMARK_FINGERPRINT = "你的设备指纹"
+npm run dev
+```
+
+刷新账号前页面会再次确认，因为原数据源可能扣除积分。公开单视频解析不依赖上述参数。
+
+### 本地 ASR
+
+项目会自动查找已安装 `faster-whisper` 的 Python，并默认使用适合中文的 `small` 模型、CPU `int8` 推理。首次使用若本机没有模型，需要从 Hugging Face 下载模型；之后可离线运行。可用环境变量调整：
+
+```powershell
+$env:STORYBOUND_ASR_MODEL = "small"
+$env:STORYBOUND_ASR_LANGUAGE = "zh"
+$env:STORYBOUND_ASR_DEVICE = "cpu"
+```
+
+也可以覆盖为你自己的 ASR 命令。命令需要把转写纯文本，或 `{"text":"..."}` JSON 写到 stdout：
 
 ```powershell
 $env:STORYBOUND_ASR_COMMAND = "faster-whisper"
@@ -78,7 +101,7 @@ $env:STORYBOUND_ASR_ARGS = '["{input}","--language","zh","--output_format","json
 npm run dev
 ```
 
-`STORYBOUND_ASR_ARGS` 必须是 JSON 字符串数组，`{input}` 会替换为临时媒体路径；执行使用 `execFile`，不会经过 shell。未配置时页面保留导入 transcript 和手工粘贴模式。
+`STORYBOUND_ASR_ARGS` 必须是 JSON 字符串数组，`{input}` 会替换为临时媒体路径；执行使用 `execFile`，不会经过 shell。若未检测到 `faster-whisper` 且未配置命令，页面仍保留导入 transcript 和手工粘贴模式。
 
 生产检查：
 

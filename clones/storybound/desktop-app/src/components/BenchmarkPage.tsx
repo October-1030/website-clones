@@ -8,6 +8,15 @@ import {
   type FormEvent,
 } from "react";
 
+import {
+  fetchBenchmarkProviderStatus,
+  fetchBenchmarkWorks,
+  parseBenchmarkVideo,
+  resolveBenchmarkAccount,
+  type BenchmarkProviderStatus,
+  type ParsedBenchmarkVideo,
+} from "../lib/benchmark-api";
+import { fetchAsrStatus, type AsrStatus } from "../lib/asr-api";
 import "./BenchmarkPage.css";
 
 export interface BenchmarkAccount {
@@ -18,6 +27,11 @@ export interface BenchmarkAccount {
   track: string;
   notes: string;
   favorite: boolean;
+  avatar: string;
+  remoteId: string;
+  lastBuffer: string;
+  continueFlag: number;
+  lastRefreshAt: string;
   createdAt: string;
 }
 
@@ -41,6 +55,16 @@ export interface BenchmarkWork {
   localMediaName: string;
   localMediaType: string;
   localMediaSize: number;
+  remoteWorkId: string;
+  description: string;
+  coverUrl: string;
+  quality: string;
+  format: string;
+  codec: string;
+  plays: number;
+  expiresAt: string;
+  duration: number;
+  decodeKey: string;
   createdAt: string;
 }
 
@@ -65,6 +89,7 @@ export interface BenchmarkPageProps {
   onAiCorrect?: (payload: BenchmarkAiPayload) => Promise<string> | string;
   onAiAnalyze?: (payload: BenchmarkAiPayload) => Promise<string> | string;
   onTranscribeMedia?: (file: File, work: BenchmarkWork) => Promise<string>;
+  onTranscribeSource?: (url: string, work: BenchmarkWork) => Promise<string>;
 }
 
 type WorkFilter = "all" | "favorite" | "created" | "uncreated";
@@ -158,6 +183,11 @@ function normalizeAccount(value: unknown): BenchmarkAccount | null {
     track: readString(value.track),
     notes: readString(value.notes),
     favorite: value.favorite === true,
+    avatar: readString(value.avatar),
+    remoteId: readString(value.remoteId),
+    lastBuffer: readString(value.lastBuffer),
+    continueFlag: readNumber(value.continueFlag),
+    lastRefreshAt: readString(value.lastRefreshAt),
     createdAt: readString(value.createdAt) || new Date().toISOString(),
   };
 }
@@ -187,6 +217,16 @@ function normalizeWork(value: unknown, accountIds: Set<string>): BenchmarkWork |
     localMediaName: readString(value.localMediaName),
     localMediaType: readString(value.localMediaType),
     localMediaSize: readNumber(value.localMediaSize),
+    remoteWorkId: readString(value.remoteWorkId),
+    description: readString(value.description),
+    coverUrl: readString(value.coverUrl),
+    quality: readString(value.quality),
+    format: readString(value.format),
+    codec: readString(value.codec),
+    plays: readNumber(value.plays),
+    expiresAt: readString(value.expiresAt),
+    duration: readNumber(value.duration),
+    decodeKey: readString(value.decodeKey),
     createdAt: readString(value.createdAt) || new Date().toISOString(),
   };
 }
@@ -217,6 +257,13 @@ function formatFileSize(value: number): string {
   if (value <= 0) return "";
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function isoFromEpoch(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const milliseconds = value > 10_000_000_000 ? value : value * 1000;
+  const date = new Date(milliseconds);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
 function downloadText(fileName: string, content: string, type: string): void {
@@ -275,6 +322,7 @@ export function BenchmarkPage({
   onAiCorrect,
   onAiAnalyze,
   onTranscribeMedia,
+  onTranscribeSource,
 }: BenchmarkPageProps) {
   const [store, setStore] = useState<BenchmarkStore>(readStore);
   const [query, setQuery] = useState(initialSearch);
@@ -291,6 +339,11 @@ export function BenchmarkPage({
   const [localMedia, setLocalMedia] = useState<Record<string, LocalMediaSession>>({});
   const [notice, setNotice] = useState("");
   const [busyAction, setBusyAction] = useState("");
+  const [showParser, setShowParser] = useState(false);
+  const [parserUrl, setParserUrl] = useState("");
+  const [parsedVideo, setParsedVideo] = useState<ParsedBenchmarkVideo | null>(null);
+  const [providerStatus, setProviderStatus] = useState<BenchmarkProviderStatus | null>(null);
+  const [asrStatus, setAsrStatus] = useState<AsrStatus | null>(null);
   const localMediaRef = useRef(localMedia);
 
   useEffect(() => {
@@ -300,6 +353,15 @@ export function BenchmarkPage({
   useEffect(() => {
     setQuery(initialSearch);
   }, [initialSearch]);
+
+  useEffect(() => {
+    void fetchBenchmarkProviderStatus()
+      .then(setProviderStatus)
+      .catch(() => setProviderStatus(null));
+    void fetchAsrStatus()
+      .then(setAsrStatus)
+      .catch(() => setAsrStatus(null));
+  }, []);
 
   useEffect(() => {
     localMediaRef.current = localMedia;
@@ -411,6 +473,11 @@ export function BenchmarkPage({
         track: accountDraft.track.trim(),
         notes: accountDraft.notes.trim(),
         favorite: false,
+        avatar: "",
+        remoteId: "",
+        lastBuffer: "",
+        continueFlag: 0,
+        lastRefreshAt: "",
         createdAt: new Date().toISOString(),
       };
       setStore((current) => ({ ...current, accounts: [account, ...current.accounts] }));
@@ -475,6 +542,16 @@ export function BenchmarkPage({
       localMediaName: "",
       localMediaType: "",
       localMediaSize: 0,
+      remoteWorkId: "",
+      description: "",
+      coverUrl: "",
+      quality: "",
+      format: "",
+      codec: "",
+      plays: 0,
+      expiresAt: "",
+      duration: 0,
+      decodeKey: "",
       createdAt: new Date().toISOString(),
     };
     setStore((current) => ({ ...current, works: [work, ...current.works] }));
@@ -483,6 +560,225 @@ export function BenchmarkPage({
     setWorkDraft(EMPTY_WORK_DRAFT);
     setShowWorkForm(false);
     setNotice("作品已保存到本地；未调用平台私有接口。");
+  };
+
+  const runVideoParser = async (): Promise<void> => {
+    const url = parserUrl.trim();
+    if (!url) {
+      setNotice("请先粘贴公开视频分享链接。");
+      return;
+    }
+    setBusyAction("parse-video");
+    setParsedVideo(null);
+    setNotice("");
+    try {
+      const video = await parseBenchmarkVideo(url);
+      setParsedVideo(video);
+      setNotice(`解析完成：${video.title}`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "视频解析失败。");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const saveParsedVideo = (): void => {
+    if (!parsedVideo) return;
+    const namedAccount = parsedVideo.authorName
+      ? store.accounts.find((account) => account.name === parsedVideo.authorName)
+      : undefined;
+    const selectedAccount = selectedAccountId === "all"
+      ? undefined
+      : store.accounts.find((account) => account.id === selectedAccountId);
+    const account = namedAccount || selectedAccount;
+    const accountId = account?.id || createId("account");
+    const workId = store.works.find((work) => work.url === parsedVideo.sourceUrl)?.id || createId("work");
+    const now = new Date().toISOString();
+    const nextAccount: BenchmarkAccount = account || {
+      id: accountId,
+      name: parsedVideo.authorName || "解析视频账号",
+      sourceUrl: parsedVideo.sourceUrl,
+      group: "",
+      track: "",
+      notes: "由单视频解析自动建立",
+      favorite: false,
+      avatar: parsedVideo.authorAvatar,
+      remoteId: "",
+      lastBuffer: "",
+      continueFlag: 0,
+      lastRefreshAt: "",
+      createdAt: now,
+    };
+    const nextWork: BenchmarkWork = {
+      id: workId,
+      accountId,
+      url: parsedVideo.sourceUrl,
+      mediaUrl: parsedVideo.mediaUrl,
+      title: parsedVideo.title,
+      publishTime: isoFromEpoch(parsedVideo.publishTime),
+      likes: parsedVideo.likes,
+      favorites: parsedVideo.favorites,
+      comments: parsedVideo.comments,
+      forwards: parsedVideo.forwards,
+      growth: 0,
+      notes: parsedVideo.description,
+      favorite: false,
+      created: false,
+      transcript: "",
+      analysis: "",
+      localMediaName: "",
+      localMediaType: "",
+      localMediaSize: 0,
+      remoteWorkId: "",
+      description: parsedVideo.description,
+      coverUrl: parsedVideo.coverUrl,
+      quality: parsedVideo.quality,
+      format: parsedVideo.format,
+      codec: parsedVideo.codec,
+      plays: parsedVideo.plays,
+      expiresAt: parsedVideo.expiresAt,
+      duration: 0,
+      decodeKey: "",
+      createdAt: now,
+    };
+    setStore((current) => {
+      const hasAccount = current.accounts.some((item) => item.id === accountId);
+      const hasWork = current.works.some((item) => item.id === workId);
+      return {
+        ...current,
+        accounts: hasAccount
+          ? current.accounts.map((item) =>
+              item.id === accountId && parsedVideo.authorAvatar
+                ? { ...item, avatar: parsedVideo.authorAvatar }
+                : item,
+            )
+          : [nextAccount, ...current.accounts],
+        works: hasWork
+          ? current.works.map((item) => item.id === workId ? { ...item, ...nextWork } : item)
+          : [nextWork, ...current.works],
+      };
+    });
+    setSelectedAccountId(accountId);
+    setSelectedWorkId(workId);
+    setShowParser(false);
+    setParsedVideo(null);
+    setParserUrl("");
+    setNotice(account ? "解析结果已更新到现有账号。" : `已建立账号“${nextAccount.name}”并保存作品。`);
+  };
+
+  const recognizeAccountFromLink = async (): Promise<void> => {
+    const url = accountDraft.sourceUrl.trim();
+    if (!url) {
+      setNotice("请先粘贴该账号任意一条公开视频分享链接。");
+      return;
+    }
+    setBusyAction("recognize-account");
+    setNotice("");
+    try {
+      if (providerStatus?.accountSync.configured) {
+        const remote = await resolveBenchmarkAccount(url);
+        setAccountDraft((draft) => ({ ...draft, name: remote.name || draft.name }));
+        setNotice(`已由账号数据源识别：${remote.name}`);
+      } else {
+        const video = await parseBenchmarkVideo(url);
+        setAccountDraft((draft) => ({
+          ...draft,
+          name: video.authorName || draft.name,
+        }));
+        setNotice(video.authorName
+          ? `已从公开视频识别作者：${video.authorName}`
+          : "视频已解析，但服务未返回作者名，请手工填写账号名。");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "账号识别失败。");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
+  const refreshAccount = async (account: BenchmarkAccount): Promise<void> => {
+    if (!providerStatus?.accountSync.configured) {
+      setNotice("自动刷新尚未配置。原版账号列表接口需要绑定邮箱、设备指纹并可能扣除积分；单视频解析仍可直接使用。");
+      return;
+    }
+    if (!account.remoteId && !account.sourceUrl) {
+      setNotice("此账号没有远端 ID 或公开视频分享链接，无法识别并刷新。");
+      return;
+    }
+    if (!window.confirm(`刷新“${account.name}”将调用配置的账号数据源，并可能扣除原站积分。是否继续？`)) return;
+    setBusyAction(`refresh-${account.id}`);
+    setNotice("");
+    try {
+      const resolved = account.remoteId
+        ? { remoteId: account.remoteId, name: account.name, sourceUrl: account.sourceUrl, objectId: "" }
+        : await resolveBenchmarkAccount(account.sourceUrl);
+      const result = await fetchBenchmarkWorks(resolved.remoteId);
+      const refreshedAt = new Date().toISOString();
+      setStore((current) => {
+        const existingByRemoteId = new Map(
+          current.works.filter((work) => work.remoteWorkId).map((work) => [work.remoteWorkId, work]),
+        );
+        const existingByUrl = new Map(
+          current.works.filter((work) => work.url).map((work) => [work.url, work]),
+        );
+        const syncedWorks = result.works.map((remoteWork) => {
+          const existing = existingByRemoteId.get(remoteWork.remoteWorkId)
+            || existingByUrl.get(remoteWork.sourceUrl);
+          return {
+            id: existing?.id || createId("work"),
+            accountId: account.id,
+            url: remoteWork.sourceUrl,
+            mediaUrl: remoteWork.mediaUrl,
+            title: remoteWork.title,
+            publishTime: isoFromEpoch(remoteWork.publishTime),
+            likes: remoteWork.likes,
+            favorites: remoteWork.favorites,
+            comments: remoteWork.comments,
+            forwards: remoteWork.forwards,
+            growth: existing?.growth || 0,
+            notes: existing?.notes || "",
+            favorite: existing?.favorite || false,
+            created: existing?.created || false,
+            transcript: existing?.transcript || "",
+            analysis: existing?.analysis || "",
+            localMediaName: existing?.localMediaName || "",
+            localMediaType: existing?.localMediaType || "",
+            localMediaSize: existing?.localMediaSize || 0,
+            remoteWorkId: remoteWork.remoteWorkId,
+            description: existing?.description || "",
+            coverUrl: remoteWork.coverUrl,
+            quality: existing?.quality || "",
+            format: existing?.format || "mp4",
+            codec: existing?.codec || "",
+            plays: existing?.plays || 0,
+            expiresAt: existing?.expiresAt || "",
+            duration: remoteWork.duration,
+            decodeKey: remoteWork.decodeKey,
+            createdAt: existing?.createdAt || refreshedAt,
+          } satisfies BenchmarkWork;
+        });
+        const syncedIds = new Set(syncedWorks.map((work) => work.id));
+        return {
+          ...current,
+          accounts: current.accounts.map((item) => item.id === account.id ? {
+            ...item,
+            name: result.accountName || resolved.name || item.name,
+            avatar: result.avatar || item.avatar,
+            remoteId: result.remoteId || resolved.remoteId,
+            lastBuffer: result.lastBuffer,
+            continueFlag: result.continueFlag,
+            lastRefreshAt: refreshedAt,
+          } : item),
+          works: [...syncedWorks, ...current.works.filter((work) => !syncedIds.has(work.id))],
+        };
+      });
+      setSelectedAccountId(account.id);
+      setNotice(`已刷新 ${result.works.length} 条作品${result.cost ? `，数据源报告消耗 ${result.cost} 积分` : ""}。`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "账号刷新失败。");
+    } finally {
+      setBusyAction("");
+    }
   };
 
   const deleteWork = (work: BenchmarkWork): void => {
@@ -564,6 +860,29 @@ export function BenchmarkPage({
     }
   };
 
+  const transcribeSource = async (): Promise<void> => {
+    if (!selectedWork?.url) {
+      setNotice("当前作品没有可重新解析的公开视频来源。");
+      return;
+    }
+    if (!onTranscribeSource) {
+      setNotice("当前未接入链接转写服务；可以下载媒体后选择本地文件转写。");
+      return;
+    }
+    setBusyAction("transcribe-source");
+    setNotice("正在下载无水印媒体并进行本地转写，首次加载模型可能需要一些时间……");
+    try {
+      const transcript = await onTranscribeSource(selectedWork.url, selectedWork);
+      if (!transcript.trim()) throw new Error("转写服务未返回文本");
+      updateWork(selectedWork.id, { transcript });
+      setNotice("公开视频文案提取完成，已写入转写文案。");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "公开视频文案提取失败。");
+    } finally {
+      setBusyAction("");
+    }
+  };
+
   const runAiAction = async (kind: "correct" | "analyze"): Promise<void> => {
     if (!selectedWork) return;
     const callback = kind === "correct" ? onAiCorrect : onAiAnalyze;
@@ -612,15 +931,28 @@ export function BenchmarkPage({
   };
 
   const mediaSource = selectedWork ? selectedWork.mediaUrl || selectedWork.url : "";
-  const hasDirectMedia = DIRECT_MEDIA_PATTERN.test(mediaSource);
+  const hasDirectMedia = Boolean(selectedWork?.mediaUrl) || DIRECT_MEDIA_PATTERN.test(mediaSource);
 
   return (
     <main className="benchmark-page">
       <header className="benchmark-page__header">
         <div>
-          <span className="benchmark-page__eyebrow">LOCAL COMPETITOR LIBRARY</span>
+          <span className="benchmark-page__eyebrow">VIDEO BENCHMARK WORKBENCH</span>
           <h1>对标监控</h1>
-          <p>保存公开视频线索、作品数据与转写文案；不抓取登录平台，也不调用私有接口。</p>
+          <p>解析公开视频、保存账号作品、提取文案；自动刷新仅在你明确配置账号数据源后启用。</p>
+          <div className="benchmark-provider-status" aria-label="对标数据源状态">
+            <span className={providerStatus?.singleVideoParser.available ? "is-ready" : ""}>
+              单视频解析：{providerStatus?.singleVideoParser.available ? "可用" : "检查中"}
+            </span>
+            <span className={providerStatus?.accountSync.configured ? "is-ready" : "is-limited"}>
+              账号自动刷新：{providerStatus?.accountSync.configured ? "已配置" : "未配置"}
+            </span>
+            <span className={asrStatus?.available ? "is-ready" : "is-limited"}>
+              本地转写：{asrStatus?.available
+                ? `${asrStatus.model || asrStatus.provider}${asrStatus.device ? ` · ${asrStatus.device}` : ""}`
+                : "未就绪"}
+            </span>
+          </div>
         </div>
         <div className="benchmark-page__summary" aria-label="本地资料统计">
           <strong>{store.accounts.length}</strong><span>账号</span>
@@ -633,6 +965,53 @@ export function BenchmarkPage({
           <span>{notice}</span>
           <button type="button" onClick={() => setNotice("")} aria-label="关闭提示">×</button>
         </div>
+      ) : null}
+
+      {showParser ? (
+        <section className="benchmark-parser-panel" aria-label="单视频解析">
+          <header>
+            <div>
+              <strong>单视频解析 / 无水印链接</strong>
+              <span>使用原版客户端同一路径的公开免费解析接口，不扣 Storybound 积分。</span>
+            </div>
+            <button type="button" onClick={() => setShowParser(false)} aria-label="关闭单视频解析">×</button>
+          </header>
+          <div className="benchmark-parser-input">
+            <input
+              type="url"
+              value={parserUrl}
+              onChange={(event) => setParserUrl(event.target.value)}
+              placeholder="粘贴 https://weixin.qq.com/sph/... 或其他公开视频分享链接"
+              aria-label="待解析视频链接"
+            />
+            <button
+              className="benchmark-primary"
+              type="button"
+              disabled={busyAction === "parse-video"}
+              onClick={() => void runVideoParser()}
+            >
+              {busyAction === "parse-video" ? "解析中…" : parsedVideo ? "重新解析" : "解析"}
+            </button>
+          </div>
+          {parsedVideo ? (
+            <div className="benchmark-parser-result">
+              {parsedVideo.coverUrl ? <img src={parsedVideo.coverUrl} alt="" /> : <div className="benchmark-parser-cover">VIDEO</div>}
+              <div>
+                <span>{parsedVideo.authorName || "未识别作者"} · {[parsedVideo.quality, parsedVideo.codec.toUpperCase()].filter(Boolean).join(" · ")}</span>
+                <strong>{parsedVideo.title}</strong>
+                <small>
+                  {parsedVideo.mediaUrl ? "已取得媒体直链" : "未取得媒体直链"}
+                  {parsedVideo.expiresAt ? ` · 链接有效期至 ${parsedVideo.expiresAt}` : ""}
+                </small>
+              </div>
+              <div className="benchmark-parser-actions">
+                <a href={parsedVideo.sourceUrl} target="_blank" rel="noreferrer">原作品</a>
+                {parsedVideo.mediaUrl ? <a href={parsedVideo.mediaUrl} target="_blank" rel="noreferrer" download>下载视频</a> : null}
+                <button className="benchmark-primary" type="button" onClick={saveParsedVideo}>保存到资料库</button>
+              </div>
+            </div>
+          ) : null}
+        </section>
       ) : null}
 
       <div className="benchmark-layout">
@@ -657,7 +1036,17 @@ export function BenchmarkPage({
                 <button type="button" onClick={() => setShowAccountForm(false)} aria-label="关闭账号表单">×</button>
               </div>
               <label>账号名<input required value={accountDraft.name} onChange={(event) => setAccountDraft((draft) => ({ ...draft, name: event.target.value }))} /></label>
-              <label>公开视频/分享 URL<input type="url" value={accountDraft.sourceUrl} onChange={(event) => setAccountDraft((draft) => ({ ...draft, sourceUrl: event.target.value }))} placeholder="https://..." /></label>
+              <label>公开视频/分享 URL<input type="url" value={accountDraft.sourceUrl} onChange={(event) => setAccountDraft((draft) => ({ ...draft, sourceUrl: event.target.value }))} placeholder="粘贴该账号任意一条公开视频" /></label>
+              {!editingAccountId ? (
+                <button
+                  className="benchmark-recognize-button"
+                  type="button"
+                  disabled={busyAction === "recognize-account"}
+                  onClick={() => void recognizeAccountFromLink()}
+                >
+                  {busyAction === "recognize-account" ? "识别中…" : "从分享链接识别账号"}
+                </button>
+              ) : null}
               <div className="benchmark-form-grid benchmark-form-grid--two">
                 <label>分组<input list="benchmark-groups" value={accountDraft.group} onChange={(event) => setAccountDraft((draft) => ({ ...draft, group: event.target.value }))} /></label>
                 <label>赛道<input list="benchmark-tracks" value={accountDraft.track} onChange={(event) => setAccountDraft((draft) => ({ ...draft, track: event.target.value }))} /></label>
@@ -695,6 +1084,13 @@ export function BenchmarkPage({
                     {account.favorite ? <em title="已收藏">★</em> : null}
                   </button>
                   <div className="benchmark-account-actions">
+                    <button
+                      type="button"
+                      disabled={busyAction === `refresh-${account.id}`}
+                      onClick={() => void refreshAccount(account)}
+                    >
+                      {busyAction === `refresh-${account.id}` ? "刷新中" : "刷新作品"}
+                    </button>
                     <button type="button" onClick={() => setStore((current) => ({ ...current, accounts: current.accounts.map((item) => item.id === account.id ? { ...item, favorite: !item.favorite } : item) }))}>{account.favorite ? "取消收藏" : "收藏"}</button>
                     <button type="button" onClick={() => openRenameAccountForm(account)}>重命名</button>
                     <button className="is-danger" type="button" onClick={() => deleteAccount(account)}>删除</button>
@@ -736,7 +1132,10 @@ export function BenchmarkPage({
                 <option value="growth">增长</option>
               </select>
             </label>
-            <button className="benchmark-primary" type="button" onClick={openNewWorkForm} disabled={store.accounts.length === 0}>＋ 导入单个视频</button>
+            <div className="benchmark-toolbar-actions">
+              <button type="button" onClick={() => { setShowParser(true); setParsedVideo(null); }}>单视频解析</button>
+              <button className="benchmark-primary" type="button" onClick={openNewWorkForm} disabled={store.accounts.length === 0}>＋ 手工导入</button>
+            </div>
           </div>
 
           {showWorkForm ? (
@@ -771,8 +1170,11 @@ export function BenchmarkPage({
             <div className="benchmark-empty">
               <span aria-hidden="true">◎</span>
               <strong>先建立一个对标账号</strong>
-              <p>粘贴公开分享链接或手工填写资料。搜索框只过滤你的本地账号库。</p>
-              <button className="benchmark-primary" type="button" onClick={openNewAccountForm}>添加第一个账号</button>
+              <p>可以先解析一条公开视频自动建立作者账号，也可以手工添加。</p>
+              <div className="benchmark-empty-actions">
+                <button type="button" onClick={() => setShowParser(true)}>单视频解析</button>
+                <button className="benchmark-primary" type="button" onClick={openNewAccountForm}>手工添加账号</button>
+              </div>
             </div>
           ) : visibleWorks.length === 0 ? (
             <div className="benchmark-empty">
@@ -787,7 +1189,8 @@ export function BenchmarkPage({
                 const account = store.accounts.find((item) => item.id === work.accountId);
                 return (
                   <article className={selectedWorkId === work.id ? "is-selected" : ""} key={work.id}>
-                    <button className="benchmark-work-main" type="button" onClick={() => setSelectedWorkId(work.id)}>
+                    <button className={`benchmark-work-main${work.coverUrl ? " has-cover" : ""}`} type="button" onClick={() => setSelectedWorkId(work.id)}>
+                      {work.coverUrl ? <img className="benchmark-work-cover" src={work.coverUrl} alt="" /> : null}
                       <div className="benchmark-work-title">
                         <span>{work.created ? "已创作" : "待创作"}</span>
                         <strong>{work.title}</strong>
@@ -834,11 +1237,21 @@ export function BenchmarkPage({
                   <strong>本地音视频</strong>
                   <span>{selectedWork.localMediaName ? `${selectedWork.localMediaName} · ${formatFileSize(selectedWork.localMediaSize)}` : "尚未选择文件"}</span>
                 </div>
+                {selectedWork.url ? (
+                  <button
+                    className="benchmark-primary"
+                    type="button"
+                    disabled={!asrStatus?.available || Boolean(busyAction)}
+                    onClick={() => void transcribeSource()}
+                  >
+                    {busyAction === "transcribe-source" ? "提取中…" : "一键提取公开视频文案"}
+                  </button>
+                ) : null}
                 <label className="benchmark-file-button">
                   选择文件
                   <input type="file" accept="audio/*,video/*" onChange={attachMedia} />
                 </label>
-                <button type="button" disabled={busyAction === "transcribe"} onClick={() => void transcribeMedia()}>
+                <button type="button" disabled={!asrStatus?.available || Boolean(busyAction)} onClick={() => void transcribeMedia()}>
                   {busyAction === "transcribe" ? "转写中…" : "转写本地文件"}
                 </button>
               </div>

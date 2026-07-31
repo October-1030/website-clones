@@ -19,7 +19,7 @@ import { TtsSettingsPage } from "./components/TtsSettingsPage";
 import { VoiceLabPage } from "./components/VoiceLabPage";
 import { defaultLlmConfig } from "./data/llm-data";
 import { defaultTtsConfig } from "./data/tts-data";
-import { transcribeMedia } from "./lib/asr-api";
+import { transcribeBenchmarkVideo, transcribeMedia } from "./lib/asr-api";
 import { fetchLlmStatus } from "./lib/llm-api";
 import { runLlmPipelineStep } from "./lib/llm-api";
 import { saveTaskHandoff } from "./lib/task-handoff";
@@ -330,6 +330,7 @@ function App() {
           onAiCorrect={llmCredentialStatus.available || llmConfig.apiKey.trim() ? handleBenchmarkCorrect : undefined}
           onAiAnalyze={llmCredentialStatus.available || llmConfig.apiKey.trim() ? handleBenchmarkAnalyze : undefined}
           onTranscribeMedia={(file) => transcribeMedia(file)}
+          onTranscribeSource={(url) => transcribeBenchmarkVideo(url)}
         />
       ) : null}
       {currentPage === "book-selection" ? (

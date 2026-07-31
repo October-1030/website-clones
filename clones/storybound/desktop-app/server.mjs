@@ -1,7 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
+import { lookup } from "node:dns/promises";
 import { createReadStream, existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
+import { isIP } from "node:net";
 import { basename, dirname, extname, join, normalize, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -65,6 +67,15 @@ const asrArgs = (() => {
     return [];
   }
 })();
+const asrModel = String(process.env.STORYBOUND_ASR_MODEL || "small").trim();
+const asrLanguage = String(process.env.STORYBOUND_ASR_LANGUAGE || "zh").trim();
+const asrDevice = String(process.env.STORYBOUND_ASR_DEVICE || "cpu").trim() === "cuda" ? "cuda" : "cpu";
+let detectedAsrRuntimePromise;
+const benchmarkProviderBase = String(
+  process.env.STORYBOUND_BENCHMARK_API_BASE_URL || "https://api.joy1412.cn",
+).trim().replace(/\/+$/, "");
+const benchmarkAccountEmail = String(process.env.STORYBOUND_BENCHMARK_EMAIL || "").trim();
+const benchmarkAccountFingerprint = String(process.env.STORYBOUND_BENCHMARK_FINGERPRINT || "").trim();
 
 function parseMinimaxApiKey(contents) {
   const lines = String(contents || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -1251,16 +1262,401 @@ function safeUploadName(value, fallback = "media.bin") {
   return normalized.slice(0, 120) || fallback;
 }
 
+function benchmarkSourceUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.length > 4096) throw new Error("请粘贴有效的公开视频分享链接");
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("视频分享链接格式不正确");
+  }
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("视频分享链接必须使用 HTTP 或 HTTPS");
+  return url.toString();
+}
+
+function benchmarkProviderUrl(pathname) {
+  let base;
+  try {
+    base = new URL(benchmarkProviderBase);
+  } catch {
+    throw new Error("STORYBOUND_BENCHMARK_API_BASE_URL 配置无效");
+  }
+  const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(base.hostname);
+  if (base.protocol !== "https:" && !isLoopback) throw new Error("对标数据源必须使用 HTTPS");
+  return new URL(pathname, `${base.toString().replace(/\/+$/, "")}/`);
+}
+
+function benchmarkText(value, fallback = "") {
+  return String(value ?? fallback).trim().slice(0, 10_000);
+}
+
+function benchmarkCount(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+async function parseBenchmarkVideo(input) {
+  const sourceUrl = benchmarkSourceUrl(input?.url);
+  const endpoint = benchmarkProviderUrl("/v1/bugpk/parse");
+  endpoint.searchParams.set("url", sourceUrl);
+  const providerResponse = await fetchWithTimeout(
+    endpoint,
+    { headers: { Accept: "application/json" } },
+    45_000,
+  );
+  const providerText = await providerResponse.text();
+  let payload;
+  try {
+    payload = JSON.parse(providerText);
+  } catch {
+    throw new Error(`视频解析服务返回异常（HTTP ${providerResponse.status}）`);
+  }
+  if (!providerResponse.ok || payload?.ok === false || (Number.isFinite(Number(payload?.code)) && Number(payload.code) !== 200)) {
+    throw new Error(benchmarkText(payload?.error?.message || payload?.msg, `视频解析失败（HTTP ${providerResponse.status}）`));
+  }
+  const data = payload?.data && typeof payload.data === "object" ? payload.data : {};
+  const backups = Array.isArray(data.video_backup) ? data.video_backup : [];
+  const preferred = backups.find((item) => benchmarkText(item?.codec).toLowerCase() === "h264")
+    || backups[0]
+    || {};
+  const statistics = data?.extra?.statistics && typeof data.extra.statistics === "object"
+    ? data.extra.statistics
+    : {};
+  const mediaUrl = benchmarkText(preferred.url || data.url);
+  return {
+    sourceUrl,
+    title: benchmarkText(data.title, "未命名视频"),
+    description: benchmarkText(data.desc),
+    authorName: benchmarkText(data?.author?.name),
+    authorAvatar: benchmarkText(data?.author?.avatar),
+    coverUrl: benchmarkText(data.cover),
+    mediaUrl,
+    quality: benchmarkText(preferred.quality || data.quality, "原画"),
+    format: benchmarkText(preferred.format || data.format, "mp4"),
+    codec: benchmarkText(preferred.codec || data.codec),
+    publishTime: benchmarkCount(data?.extra?.create_time),
+    expiresAt: benchmarkText(data?.extra?.expire_time),
+    likes: benchmarkCount(statistics.like_count),
+    favorites: benchmarkCount(statistics.fav_count || statistics.favorite_count),
+    comments: benchmarkCount(statistics.comment_count),
+    forwards: benchmarkCount(statistics.share_count),
+    plays: benchmarkCount(statistics.play_count),
+    parser: benchmarkText(payload?.bktip?.Auther, "BugPk-Api"),
+    parserWebsite: benchmarkText(payload?.bktip?.website),
+  };
+}
+
+async function benchmarkAccountRequest(pathname, body) {
+  if (!benchmarkAccountEmail || !benchmarkAccountFingerprint) {
+    const error = new Error(
+      "账号自动刷新未配置。原版接口要求绑定邮箱、设备指纹并可能扣除积分；请设置 STORYBOUND_BENCHMARK_EMAIL 和 STORYBOUND_BENCHMARK_FINGERPRINT。",
+    );
+    error.statusCode = 503;
+    throw error;
+  }
+  const providerResponse = await fetchWithTimeout(
+    benchmarkProviderUrl(pathname),
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-Sb-Email": benchmarkAccountEmail,
+        "X-Sb-Fp": benchmarkAccountFingerprint,
+      },
+      body: JSON.stringify(body),
+    },
+    45_000,
+  );
+  const providerText = await providerResponse.text();
+  let payload;
+  try {
+    payload = JSON.parse(providerText);
+  } catch {
+    throw new Error(`账号数据源返回异常（HTTP ${providerResponse.status}）`);
+  }
+  if (!providerResponse.ok || payload?.ok === false || (Number.isFinite(Number(payload?.code)) && Number(payload.code) !== 0)) {
+    const providerError = new Error(
+      benchmarkText(payload?.error?.message || payload?.msg, `账号数据源请求失败（HTTP ${providerResponse.status}）`),
+    );
+    providerError.statusCode = providerResponse.status === 401 || providerResponse.status === 402
+      ? providerResponse.status
+      : 502;
+    throw providerError;
+  }
+  return payload;
+}
+
+async function resolveBenchmarkAccount(input) {
+  const sourceUrl = benchmarkSourceUrl(input?.url);
+  const payload = await benchmarkAccountRequest("/v1/dajiala/feed-info", { feed_info: sourceUrl });
+  return {
+    sourceUrl,
+    remoteId: benchmarkText(payload?.data?.v2_name),
+    name: benchmarkText(payload?.data?.nickname, "未知账号"),
+    objectId: benchmarkText(payload?.data?.object_id),
+  };
+}
+
+async function fetchBenchmarkWorks(input) {
+  const remoteId = benchmarkText(input?.remoteId);
+  if (!remoteId) throw new Error("缺少可刷新的远端账号 ID");
+  const lastBuffer = benchmarkText(input?.lastBuffer);
+  const payload = await benchmarkAccountRequest("/v1/dajiala/feed-list", {
+    v2_name: remoteId,
+    last_buffer: lastBuffer,
+  });
+  const rawWorks = Array.isArray(payload?.object) ? payload.object : [];
+  return {
+    remoteId: benchmarkText(payload?.contact?.username, remoteId),
+    accountName: benchmarkText(payload?.contact?.nickname),
+    avatar: benchmarkText(payload?.contact?.head_url),
+    lastBuffer: benchmarkText(payload?.last_buffer),
+    continueFlag: benchmarkCount(payload?.continue_flag),
+    cost: benchmarkCount(payload?.cost),
+    works: rawWorks.map((work) => ({
+      remoteWorkId: benchmarkText(work?.object_id),
+      title: benchmarkText(work?.title, "未命名视频"),
+      coverUrl: benchmarkText(work?.cover_url),
+      mediaUrl: benchmarkText(work?.download_url),
+      decodeKey: benchmarkText(work?.decode_key),
+      sourceUrl: benchmarkText(work?.openurl),
+      forwards: benchmarkCount(work?.forward_count),
+      likes: benchmarkCount(work?.like_count),
+      comments: benchmarkCount(work?.comment_count),
+      favorites: benchmarkCount(work?.fav_count),
+      duration: benchmarkCount(work?.video_play_len),
+      publishTime: benchmarkCount(work?.publish_time),
+    })),
+  };
+}
+
+async function handleBenchmarkApi(request, response, pathname) {
+  if (pathname === "/api/benchmark/status" && request.method === "GET") {
+    sendJson(response, 200, {
+      singleVideoParser: {
+        available: true,
+        provider: benchmarkProviderUrl("/").hostname,
+      },
+      accountSync: {
+        configured: Boolean(benchmarkAccountEmail && benchmarkAccountFingerprint),
+        provider: benchmarkProviderUrl("/").hostname,
+        requiresOriginalAccount: true,
+        mayConsumeCredits: true,
+      },
+    });
+    return;
+  }
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "只支持 POST" });
+    return;
+  }
+  try {
+    const body = await readJson(request);
+    if (pathname === "/api/benchmark/parse-video") {
+      sendJson(response, 200, { video: await parseBenchmarkVideo(body) });
+      return;
+    }
+    if (pathname === "/api/benchmark/resolve-account") {
+      sendJson(response, 200, { account: await resolveBenchmarkAccount(body) });
+      return;
+    }
+    if (pathname === "/api/benchmark/fetch-works") {
+      sendJson(response, 200, { result: await fetchBenchmarkWorks(body) });
+      return;
+    }
+    sendJson(response, 404, { error: "未知对标监控接口" });
+  } catch (error) {
+    sendJson(response, Number(error?.statusCode) || 400, {
+      error: providerMessage(error, "对标数据请求失败"),
+    });
+  }
+}
+
+function pythonAsrCandidates() {
+  const localAppData = String(process.env.LOCALAPPDATA || "").trim();
+  const candidates = [
+    process.env.STORYBOUND_ASR_PYTHON,
+    ...(localAppData
+      ? ["Python313", "Python312", "Python311", "Python310", "Python314"].map((version) =>
+          join(localAppData, "Programs", "Python", version, "python.exe"),
+        )
+      : []),
+    "python",
+    "python3",
+  ].filter(Boolean);
+  return [...new Set(candidates)].filter((command) =>
+    command === "python" || command === "python3" || existsSync(command),
+  );
+}
+
+async function detectAsrRuntime() {
+  if (asrCommand) {
+    return {
+      command: asrCommand,
+      args: asrArgs.length ? asrArgs : ["{input}"],
+      provider: "local-command",
+      model: null,
+      device: null,
+    };
+  }
+  for (const command of pythonAsrCandidates()) {
+    try {
+      await execFileAsync(command, ["-c", "import faster_whisper; print(faster_whisper.__version__)"], {
+        timeout: 15_000,
+        windowsHide: true,
+        maxBuffer: 1024 * 1024,
+      });
+      return {
+        command,
+        args: [
+          join(root, "server", "asr-transcriber.py"),
+          "{input}",
+          "--model",
+          asrModel,
+          "--language",
+          asrLanguage,
+          "--device",
+          asrDevice,
+        ],
+        provider: "faster-whisper",
+        model: asrModel,
+        device: asrDevice,
+      };
+    } catch {
+      // Keep probing other installed Python runtimes.
+    }
+  }
+  return null;
+}
+
+function resolveAsrRuntime() {
+  detectedAsrRuntimePromise ||= detectAsrRuntime();
+  return detectedAsrRuntimePromise;
+}
+
+async function runAsrFile(inputFile) {
+  const runtime = await resolveAsrRuntime();
+  if (!runtime) {
+    const error = new Error(
+      "本地 ASR 未就绪。请安装 faster-whisper，或设置 STORYBOUND_ASR_COMMAND 和 JSON 数组格式的 STORYBOUND_ASR_ARGS。",
+    );
+    error.statusCode = 503;
+    throw error;
+  }
+  const args = runtime.args.map((arg) => String(arg).replaceAll("{input}", inputFile));
+  const { stdout } = await execFileAsync(runtime.command, args, {
+    cwd: dirname(inputFile),
+    env: {
+      ...process.env,
+      PYTHONIOENCODING: "utf-8",
+      PYTHONUTF8: "1",
+    },
+    timeout: 20 * 60 * 1000,
+    windowsHide: true,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  let text = String(stdout || "").trim();
+  try {
+    const parsed = JSON.parse(text);
+    text = String(parsed?.text || parsed?.transcript || parsed?.content || "").trim();
+  } catch {
+    // Plain text stdout is an accepted adapter response.
+  }
+  if (!text) throw new Error("ASR 命令未返回转写文本");
+  return text;
+}
+
+function privateIpAddress(address) {
+  const normalized = String(address || "").toLowerCase();
+  if (!normalized) return true;
+  if (normalized === "::1" || normalized === "::") return true;
+  if (normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe8")
+    || normalized.startsWith("fe9") || normalized.startsWith("fea") || normalized.startsWith("feb")) {
+    return true;
+  }
+  const ipv4 = normalized.startsWith("::ffff:") ? normalized.slice(7) : normalized;
+  if (isIP(ipv4) !== 4) return false;
+  const octets = ipv4.split(".").map(Number);
+  return octets[0] === 0
+    || octets[0] === 10
+    || octets[0] === 127
+    || (octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127)
+    || (octets[0] === 169 && octets[1] === 254)
+    || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
+    || (octets[0] === 192 && octets[1] === 168)
+    || (octets[0] === 198 && (octets[1] === 18 || octets[1] === 19))
+    || octets[0] >= 224;
+}
+
+async function validateRemoteMediaUrl(value) {
+  let url;
+  try {
+    url = new URL(String(value || ""));
+  } catch {
+    throw new Error("解析服务没有返回有效媒体地址");
+  }
+  if (url.protocol !== "https:") throw new Error("只允许下载 HTTPS 媒体");
+  const addresses = await lookup(url.hostname, { all: true, verbatim: true });
+  if (!addresses.length || addresses.some((entry) => privateIpAddress(entry.address))) {
+    throw new Error("媒体地址指向本地或保留网络，已拒绝下载");
+  }
+  return url;
+}
+
+async function downloadRemoteMedia(value, targetFile) {
+  const maxBytes = 128 * 1024 * 1024;
+  let current = await validateRemoteMediaUrl(value);
+  for (let redirect = 0; redirect < 5; redirect += 1) {
+    const remoteResponse = await fetch(current, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(5 * 60 * 1000),
+    });
+    if (remoteResponse.status >= 300 && remoteResponse.status < 400) {
+      const location = remoteResponse.headers.get("location");
+      if (!location) throw new Error("媒体下载重定向缺少地址");
+      current = await validateRemoteMediaUrl(new URL(location, current).toString());
+      continue;
+    }
+    if (!remoteResponse.ok || !remoteResponse.body) {
+      throw new Error(`媒体下载失败（HTTP ${remoteResponse.status}）`);
+    }
+    const declaredLength = Number(remoteResponse.headers.get("content-length") || 0);
+    if (declaredLength > maxBytes) throw new Error("媒体超过 128 MB，暂不支持在线转写");
+    const reader = remoteResponse.body.getReader();
+    const chunks = [];
+    let total = 0;
+    while (true) {
+      const { done, value: chunk } = await reader.read();
+      if (done) break;
+      total += chunk.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        throw new Error("媒体超过 128 MB，暂不支持在线转写");
+      }
+      chunks.push(Buffer.from(chunk));
+    }
+    if (!total) throw new Error("下载到的媒体为空");
+    await writeFile(targetFile, Buffer.concat(chunks, total), { flag: "wx" });
+    return;
+  }
+  throw new Error("媒体下载重定向次数过多");
+}
+
 async function handleAsrApi(request, response, pathname) {
   if (pathname === "/api/asr/status" && request.method === "GET") {
+    const runtime = await resolveAsrRuntime();
     sendJson(response, 200, {
-      available: Boolean(asrCommand),
-      provider: asrCommand ? "local-command" : null,
+      available: Boolean(runtime),
+      provider: runtime?.provider || null,
+      model: runtime?.model || null,
+      device: runtime?.device || null,
       accepts: ["audio", "video"],
     });
     return;
   }
-  if (pathname !== "/api/asr/transcribe") {
+  if (!["/api/asr/transcribe", "/api/asr/transcribe-benchmark"].includes(pathname)) {
     sendJson(response, 404, { error: "未知 ASR 接口" });
     return;
   }
@@ -1268,40 +1664,34 @@ async function handleAsrApi(request, response, pathname) {
     sendJson(response, 405, { error: "只支持 POST" });
     return;
   }
-  if (!asrCommand) {
+  if (!await resolveAsrRuntime()) {
     sendJson(response, 503, {
-      error: "本地 ASR 未配置。请设置 STORYBOUND_ASR_COMMAND 和 JSON 数组格式的 STORYBOUND_ASR_ARGS。",
+      error: "本地 ASR 未就绪。请安装 faster-whisper，或配置 STORYBOUND_ASR_COMMAND。",
     });
     return;
   }
   let inputFile = "";
   try {
     const body = await readJson(request);
-    const buffer = Buffer.from(String(body.base64 || ""), "base64");
-    if (!buffer.length) throw new Error("上传媒体为空");
-    if (buffer.length > 18 * 1024 * 1024) throw new Error("媒体超过 18 MB，请先截取或压缩");
     const asrRoot = join(storyboundDataRoot, "asr");
     await mkdir(asrRoot, { recursive: true });
-    inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(body.fileName)}`);
-    await writeFile(inputFile, buffer, { flag: "wx" });
-    const args = (asrArgs.length ? asrArgs : ["{input}"]).map((arg) => arg.replaceAll("{input}", inputFile));
-    const { stdout } = await execFileAsync(asrCommand, args, {
-      cwd: asrRoot,
-      timeout: 20 * 60 * 1000,
-      windowsHide: true,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    let text = String(stdout || "").trim();
-    try {
-      const parsed = JSON.parse(text);
-      text = String(parsed?.text || parsed?.transcript || parsed?.content || "").trim();
-    } catch {
-      // Plain text stdout is an accepted adapter response.
+    if (pathname === "/api/asr/transcribe-benchmark") {
+      const video = await parseBenchmarkVideo({ url: body.url });
+      inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(`benchmark.${video.format || "mp4"}`)}`);
+      await downloadRemoteMedia(video.mediaUrl, inputFile);
+    } else {
+      const buffer = Buffer.from(String(body.base64 || ""), "base64");
+      if (!buffer.length) throw new Error("上传媒体为空");
+      if (buffer.length > 18 * 1024 * 1024) throw new Error("媒体超过 18 MB，请先截取或压缩");
+      inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(body.fileName)}`);
+      await writeFile(inputFile, buffer, { flag: "wx" });
     }
-    if (!text) throw new Error("ASR 命令未返回转写文本");
+    const text = await runAsrFile(inputFile);
     sendJson(response, 200, { text });
   } catch (error) {
-    sendJson(response, 400, { error: providerMessage(error, "本地媒体转写失败") });
+    sendJson(response, Number(error?.statusCode) || 400, {
+      error: providerMessage(error, "本地媒体转写失败"),
+    });
   } finally {
     if (inputFile) await rm(inputFile, { force: true }).catch(() => undefined);
   }
@@ -1523,6 +1913,10 @@ const server = createServer(async (request, response) => {
   }
   if (pathname.startsWith("/api/images/")) {
     await handleImageApi(request, response, pathname);
+    return;
+  }
+  if (pathname.startsWith("/api/benchmark/")) {
+    await handleBenchmarkApi(request, response, pathname);
     return;
   }
   if (pathname.startsWith("/api/asr/")) {

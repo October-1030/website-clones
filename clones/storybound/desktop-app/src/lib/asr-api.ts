@@ -1,6 +1,8 @@
 export interface AsrStatus {
   available: boolean;
   provider: string | null;
+  model: string | null;
+  device: string | null;
   accepts: string[];
 }
 
@@ -37,6 +39,17 @@ export async function transcribeMedia(file: File): Promise<string> {
       mediaType: file.type,
       base64: await fileToBase64(file),
     }),
+  });
+  if (!response.ok) throw new Error(await responseError(response));
+  const payload = await response.json() as { text?: string };
+  return String(payload.text || "");
+}
+
+export async function transcribeBenchmarkVideo(url: string): Promise<string> {
+  const response = await fetch("/api/asr/transcribe-benchmark", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
   });
   if (!response.ok) throw new Error(await responseError(response));
   const payload = await response.json() as { text?: string };
