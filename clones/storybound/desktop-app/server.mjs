@@ -953,11 +953,69 @@ function pipelineContextPayload(context, artifacts) {
       narrativePov: context.narrativePov,
       targetLength: context.targetLength,
       targetScenes: context.targetScenes,
+      keepPromotion: Boolean(context.keepPromotion),
+      fixedIntroEnabled: Boolean(context.fixedIntroEnabled),
+      fixedIntroMode: context.fixedIntroMode,
       fixedIntro: context.fixedIntro,
+      lockIntroSentences: context.lockIntroSentences,
+      outroCtaEnabled: Boolean(context.outroCtaEnabled),
       outroCta: context.outroCta,
       ttsMode: context.ttsMode,
     },
   };
+}
+
+function splitLockedSource(text, sentenceCount) {
+  const source = String(text || "").trim();
+  const count = Math.max(0, Math.min(20, Number(sentenceCount) || 0));
+  if (!source || !count) return { head: "", rest: source };
+  const pattern = /[^。！？…；\n]*[。！？…；]+\s*|[^。！？…；\n]+\n+\s*/g;
+  let end = 0;
+  let matched = 0;
+  let result;
+  while ((result = pattern.exec(source)) && matched < count) {
+    end = result.index + result[0].length;
+    matched += 1;
+  }
+  if (!end || end >= source.length) return { head: "", rest: source };
+  return { head: source.slice(0, end).trim(), rest: source.slice(end).trim() };
+}
+
+function replaceLeadPlaceholder(text, title) {
+  const lead = String(title || "").trim();
+  return lead ? String(text || "").replace(/\{主角\}/g, lead) : String(text || "");
+}
+
+function composeConfiguredNarration(narration, context, title) {
+  const body = String(narration || "").trim();
+  if (context.videoForm === "podcast") return body;
+  const intro = context.fixedIntroEnabled ? replaceLeadPlaceholder(context.fixedIntro, title).trim() : "";
+  const outro = context.outroCtaEnabled ? replaceLeadPlaceholder(context.outroCta, title).trim() : "";
+  return [
+    intro && !body.startsWith(intro) ? intro : "",
+    body,
+    outro && !body.endsWith(outro) ? outro : "",
+  ].filter(Boolean).join("\n\n");
+}
+
+function copyOptionPrompt(context) {
+  const rules = [
+    `改写强度：${context.rewriteIntensity === "rewrite" ? "高度原创" : context.rewriteIntensity === "deep" ? "深度改写" : "标准改写"}。`,
+    `叙事视角：${context.narrativePov === "first" ? "第一人称" : context.narrativePov === "third" ? "第三人称" : "保持原文"}。`,
+    context.keepPromotion
+      ? "带货模式已开启：保留产品推荐、购买引导和促单内容。"
+      : "带货模式未开启：删除以销售为目的的产品推荐、购买引导、促单话术和优惠信息，并自然衔接上下文。",
+  ];
+  if (context.fixedIntroEnabled && String(context.fixedIntro || "").trim()) {
+    rules.push(`系统会把以下固定开头原样拼在正文前，你不得输出、重复或复述它：${String(context.fixedIntro).trim()}`);
+    rules.push(context.fixedIntroMode === "lock"
+      ? "原文开头已经锁定并从待改写正文中切出；直接承接后续叙事，不要再造第二个开场。"
+      : "固定开头可能是账号人设语；正文要自然衔接，若它不是钩子，正文仍需提供有效钩子。");
+  }
+  if (context.outroCtaEnabled && String(context.outroCta || "").trim()) {
+    rules.push(`系统会把以下尾部引导原样拼在正文末尾，你不得提前输出或改写它：${String(context.outroCta).trim()}`);
+  }
+  return `## 本次文案选项（高优先级）\n${rules.map((rule) => `- ${rule}`).join("\n")}`;
 }
 
 function pipelineMessages(parts, contract, userPayload) {
@@ -1064,17 +1122,41 @@ async function runLlmPipeline(body) {
   }
 
   if (step === "rewrite") {
+    let rewriteBase = base;
+    let rewriteContext = context;
+    if (
+      context.fixedIntroEnabled
+      && context.fixedIntroMode === "lock"
+      && Number(context.lockIntroSentences) > 0
+    ) {
+      const locked = splitLockedSource(base.sourceText, context.lockIntroSentences);
+      if (locked.head && locked.rest) {
+        rewriteContext = { ...context, fixedIntro: String(context.fixedIntro || "").trim() || locked.head };
+        rewriteBase = {
+          ...base,
+          sourceText: locked.rest,
+          creationRequirements: {
+            ...base.creationRequirements,
+            fixedIntro: rewriteContext.fixedIntro,
+          },
+        };
+      } else {
+        rewriteContext = { ...context, fixedIntroEnabled: false, fixedIntro: "" };
+      }
+    }
     const rewritePayload = await callLlmJson(config, pipelineMessages(
-      [originalPromptLibrary.writerAgentPrompt, track?.rewritePrompt],
+      [originalPromptLibrary.writerAgentPrompt, track?.rewritePrompt, copyOptionPrompt(rewriteContext)],
       `只执行 WriterAgent 的改写与自评阶段，严格返回 JSON：${JSON.stringify({ narration: "完整改写正文", scores: { hook: 0, fluency: 0, empathy: 0, visual: 0, originality: 0, spoken: 0 }, totalScore: 0 })}`,
-      base,
+      rewriteBase,
     ), 0.52, "WriterAgent 改写");
-    const narration = clampString(rewritePayload.narration || rewritePayload.rewritten_text || rewritePayload.content, artifacts.precheck?.cleanText || context.inputText).slice(0, 10000);
+    const rawNarration = clampString(rewritePayload.narration || rewritePayload.rewritten_text || rewritePayload.content, rewriteBase.sourceText).slice(0, 10000);
+    const narrationForMetadata = composeConfiguredNarration(rawNarration, rewriteContext, context.title);
     const metadataPayload = await callLlmJson(config, pipelineMessages(
       [track?.metadataPrompt],
       `只执行原版封面标题与发布元数据阶段，严格返回 JSON：${JSON.stringify({ title: "", subtitle: ["", ""], summary: "", tags: [], comments: ["", "", "", "", ""] })}`,
-      { ...base, rewrittenText: narration },
+      { ...base, rewrittenText: narrationForMetadata },
     ), 0.48, "封面与发布元数据");
+    const narration = composeConfiguredNarration(rawNarration, rewriteContext, metadataPayload.title || context.title).slice(0, 10000);
     return normalizePipelineResult(step, { ...metadataPayload, narration, scores: rewritePayload.scores, totalScore: rewritePayload.totalScore || rewritePayload.total_score }, context, artifacts);
   }
 

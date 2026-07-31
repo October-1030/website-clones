@@ -50,6 +50,22 @@ function fallbackTitle(text: string): string {
   return compact ? `${compact.slice(0, 22)}${compact.length > 22 ? "…" : ""}` : "未命名视频";
 }
 
+function composeNarrationText(text: string, form: BuilderFormState): string {
+  const body = text.trim();
+  if (form.videoForm === "podcast") return body;
+  const lead = form.title.trim();
+  const applyLead = (value: string) => lead ? value.replace(/\{主角\}/g, lead) : value;
+  const intro = form.fixedIntroEnabled
+    ? (form.fixedIntroMode === "lock" ? form.lockIntroText : form.fixedIntro).trim()
+    : "";
+  const outro = form.outroCtaEnabled ? form.outroCta.trim() : "";
+  return [
+    intro && !body.startsWith(intro) ? applyLead(intro) : "",
+    body,
+    outro && !body.endsWith(outro) ? applyLead(outro) : "",
+  ].filter(Boolean).join("\n\n");
+}
+
 function mechanicalShots(text: string, targetScenes: number | null, maxChars = 55): StoryboardShot[] {
   const paragraphs = text.split(/\n\s*\n+/).map((item) => item.trim()).filter(Boolean);
   const rawPieces = (paragraphs.length > 1 ? paragraphs : text.split(/(?<=[。！？!?；;])|\n+/))
@@ -224,6 +240,13 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }, []);
 
   function pipelineContext(activeForm = form, inputText = activeForm.inputText): PipelineContext {
+    const fixedIntro = activeForm.fixedIntroEnabled
+      ? (
+        activeForm.fixedIntroMode === "lock"
+          ? (activeForm.lockIntroDirty ? activeForm.lockIntroText : "")
+          : activeForm.fixedIntro
+      ).trim()
+      : "";
     return {
       title: activeForm.title,
       inputText,
@@ -236,8 +259,15 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       narrativePov: activeForm.narrativePov,
       targetLength: activeForm.targetLength,
       targetScenes: activeForm.targetScenes,
-      fixedIntro: activeForm.fixedIntro,
-      outroCta: activeForm.outroCta,
+      keepPromotion: activeForm.keepPromotion,
+      fixedIntroEnabled: activeForm.fixedIntroEnabled,
+      fixedIntroMode: activeForm.fixedIntroMode,
+      fixedIntro,
+      lockIntroSentences: activeForm.fixedIntroEnabled && activeForm.fixedIntroMode === "lock"
+        ? activeForm.lockIntroSentences
+        : 0,
+      outroCtaEnabled: activeForm.outroCtaEnabled,
+      outroCta: activeForm.outroCtaEnabled ? activeForm.outroCta.trim() : "",
       ttsMode: activeForm.ttsMode,
     };
   }
@@ -289,7 +319,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (!hasLlmCredentials) throw new Error("LLM 未配置，无法执行原版预审、改写、分镜和绘图提示词逻辑");
     if (step === 2 && activeTask.mode === "direct") {
       const shots = mechanicalShots(
-        activeTask.inputText,
+        composeNarrationText(activeTask.inputText, form),
         activeTask.options.targetScenes ?? null,
         activeTask.options.ttsMode === "continuous" ? 28 : 55,
       );
@@ -297,7 +327,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       return persistState(activeTask, { artifacts: { ...activeTask.artifacts, storyboard: { shots } } });
     }
     const stepName = (["precheck", "rewrite", "storyboard", "prompts"] as const)[step];
-    const result = await runLlmPipelineStep({ step: stepName, config: llmConfig, context: pipelineContext(form, activeTask.inputText), artifacts: activeTask.artifacts, signal });
+    const inputText = activeTask.mode === "auto"
+      ? activeTask.inputText
+      : composeNarrationText(activeTask.inputText, form);
+    const result = await runLlmPipelineStep({ step: stepName, config: llmConfig, context: pipelineContext(form, inputText), artifacts: activeTask.artifacts, signal });
     const artifacts = { ...activeTask.artifacts, [result.step]: result.data };
     const patch: Partial<StoryboundTask> = { artifacts };
     if (result.step === "rewrite") {

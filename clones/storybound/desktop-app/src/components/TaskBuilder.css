@@ -541,6 +541,267 @@
   border-color: rgba(18, 214, 160, 0.26);
 }
 
+.copy-options-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.copy-field-heading {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-bottom: 9px;
+}
+
+.copy-field-heading .field-label {
+  margin: 0;
+}
+
+.copy-field-heading > small,
+.field-label > small {
+  color: var(--builder-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.copy-option-card {
+  min-height: 74px;
+  padding: 12px 14px;
+}
+
+.copy-option-card strong {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.copy-option-card strong em {
+  padding: 1px 6px;
+  color: var(--builder-brand);
+  background: var(--builder-brand-soft);
+  border: 1px solid rgba(18, 214, 160, 0.26);
+  border-radius: 999px;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.copy-inline-setting {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.copy-inline-setting .field-label {
+  margin: 0;
+}
+
+.copy-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0;
+  color: var(--builder-muted);
+  background: transparent;
+  border: 0;
+  text-align: left;
+}
+
+.copy-toggle > span {
+  position: relative;
+  width: 34px;
+  height: 19px;
+  background: #313941;
+  border: 1px solid #47515a;
+  border-radius: 999px;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.copy-toggle > span::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  content: "";
+  background: #dce2e6;
+  border-radius: 50%;
+  transition: transform 160ms ease;
+}
+
+.copy-toggle.is-on > span {
+  background: rgba(18, 214, 160, 0.42);
+  border-color: var(--builder-brand);
+}
+
+.copy-toggle.is-on > span::after {
+  transform: translateX(15px);
+  background: var(--builder-brand);
+}
+
+.copy-toggle small {
+  color: inherit;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.mode-explanation {
+  display: grid;
+  gap: 3px;
+  padding: 11px 14px;
+  color: var(--builder-muted);
+  background: #0f1317;
+  border: 1px dashed var(--builder-border);
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+
+.mode-explanation strong {
+  color: #b9c1c8;
+  font-weight: 600;
+}
+
+.copy-nested-panel {
+  padding: 14px;
+  background: #0f1317;
+  border: 1px solid var(--builder-border-soft);
+  border-radius: 10px;
+}
+
+.copy-nested-content {
+  display: grid;
+  gap: 9px;
+  margin-top: 11px;
+  padding-top: 11px;
+  border-top: 1px dashed var(--builder-border);
+}
+
+.copy-radio-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+}
+
+.copy-radio-row label,
+.copy-lock-count {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #bac2c8;
+  font-size: 12px;
+}
+
+.copy-radio-row input,
+.cta-item input {
+  accent-color: var(--builder-brand);
+}
+
+.copy-radio-row small,
+.copy-lock-count small {
+  color: var(--builder-muted);
+  font-size: 11px;
+}
+
+.copy-auto-textarea {
+  min-height: 70px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.copy-lock-count .text-input {
+  width: 66px;
+  min-height: 34px;
+}
+
+.copy-lock-count button,
+.cta-item__actions button,
+.cta-editor button,
+.cta-add-button {
+  min-height: 29px;
+  padding: 4px 9px;
+  color: #aeb6bd;
+  background: #11171b;
+  border: 1px solid var(--builder-border);
+  border-radius: 6px;
+}
+
+.copy-help {
+  margin: 0;
+  color: var(--builder-muted);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.cta-library {
+  gap: 7px;
+}
+
+.cta-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  color: #b9c1c8;
+  background: #0b0f12;
+  border: 1px solid var(--builder-border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.cta-item.is-selected {
+  background: var(--builder-brand-soft);
+  border-color: var(--builder-brand);
+}
+
+.cta-item > input {
+  flex: 0 0 auto;
+  margin-top: 4px;
+}
+
+.cta-item > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.cta-item__actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.cta-item__actions button.is-danger {
+  color: #ef7777;
+}
+
+.cta-editor {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  background: #0b0f12;
+  border: 1px solid var(--builder-brand);
+  border-radius: 7px;
+}
+
+.cta-editor > div {
+  display: flex;
+  gap: 7px;
+}
+
+.cta-editor .primary-button {
+  color: #06120e;
+  background: var(--builder-brand);
+  border-color: var(--builder-brand);
+}
+
+.cta-add-button {
+  justify-self: start;
+}
+
 .host-choice {
   align-items: center;
 }

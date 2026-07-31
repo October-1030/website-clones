@@ -21,8 +21,13 @@ export interface BuilderFormState {
   targetLength: number | null;
   targetScenes: number | null;
   keepPromotion: boolean;
+  fixedIntroEnabled: boolean;
+  fixedIntroMode: "account" | "lock";
   fixedIntro: string;
   lockIntroSentences: number;
+  lockIntroText: string;
+  lockIntroDirty: boolean;
+  outroCtaEnabled: boolean;
   outroCta: string;
   materialSource: NonNullable<TaskOptions["materialSource"]>;
   autoBorrowImage: boolean;
@@ -65,8 +70,13 @@ export const defaultBuilderForm: BuilderFormState = {
   targetLength: null,
   targetScenes: null,
   keepPromotion: false,
+  fixedIntroEnabled: false,
+  fixedIntroMode: "account",
   fixedIntro: "",
-  lockIntroSentences: 0,
+  lockIntroSentences: 3,
+  lockIntroText: "",
+  lockIntroDirty: false,
+  outroCtaEnabled: false,
   outroCta: "",
   materialSource: "ai",
   autoBorrowImage: true,
@@ -104,13 +114,22 @@ export function formFromTask(task: StoryboundTask): BuilderFormState {
     track: task.track,
     visualStyle: task.visualStyle,
     aspectRatio: task.aspectRatio,
-    rewriteIntensity: task.options.rewriteIntensity ?? "standard",
+    rewriteIntensity: (task.options.rewriteIntensity as string) === "light"
+      ? "standard"
+      : task.options.rewriteIntensity ?? "standard",
     narrativePov: task.options.narrativePov ?? "original",
     targetLength: task.options.targetLength ?? null,
     targetScenes: task.options.targetScenes ?? null,
     keepPromotion: task.options.keepPromotion ?? false,
+    fixedIntroEnabled: task.options.fixedIntroEnabled ?? Boolean(task.options.fixedIntro || task.options.lockIntroSentences),
+    fixedIntroMode: task.options.fixedIntroMode ?? (task.options.lockIntroSentences ? "lock" : "account"),
     fixedIntro: task.options.fixedIntro ?? "",
-    lockIntroSentences: task.options.lockIntroSentences ?? 0,
+    lockIntroSentences: task.options.lockIntroSentences && task.options.lockIntroSentences > 0
+      ? Math.min(20, task.options.lockIntroSentences)
+      : 3,
+    lockIntroText: task.options.lockIntroText ?? "",
+    lockIntroDirty: task.options.lockIntroDirty ?? false,
+    outroCtaEnabled: task.options.outroCtaEnabled ?? Boolean(task.options.outroCta),
     outroCta: task.options.outroCta ?? "",
     materialSource: task.options.materialSource ?? "ai",
     autoBorrowImage: task.options.autoBorrowImage ?? true,
@@ -154,8 +173,13 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       targetLength: form.targetLength,
       targetScenes: form.targetScenes,
       keepPromotion: form.keepPromotion,
+      fixedIntroEnabled: form.fixedIntroEnabled,
+      fixedIntroMode: form.fixedIntroMode,
       fixedIntro: form.fixedIntro,
       lockIntroSentences: form.lockIntroSentences,
+      lockIntroText: form.lockIntroText,
+      lockIntroDirty: form.lockIntroDirty,
+      outroCtaEnabled: form.outroCtaEnabled,
       outroCta: form.outroCta,
       materialSource: form.materialSource,
       autoBorrowImage: form.autoBorrowImage,

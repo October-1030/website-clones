@@ -10,13 +10,18 @@ export type CoverMode = "off" | "titled" | "plain";
 export type VoiceSource = "tts" | "external";
 
 export interface TaskOptions {
-  rewriteIntensity?: "light" | "standard" | "deep";
+  rewriteIntensity?: "standard" | "deep" | "rewrite";
   narrativePov?: "original" | "first" | "third";
   targetLength?: number | null;
   targetScenes?: number | null;
   keepPromotion?: boolean;
+  fixedIntroEnabled?: boolean;
+  fixedIntroMode?: "account" | "lock";
   fixedIntro?: string;
   lockIntroSentences?: number;
+  lockIntroText?: string;
+  lockIntroDirty?: boolean;
+  outroCtaEnabled?: boolean;
   outroCta?: string;
   materialSource?: MaterialSource;
   autoBorrowImage?: boolean;

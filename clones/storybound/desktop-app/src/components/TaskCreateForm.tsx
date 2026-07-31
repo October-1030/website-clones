@@ -7,6 +7,11 @@ import {
   readCustomVisualStyles,
   writeCustomVisualStyles,
 } from "../lib/custom-style-store";
+import {
+  ctaLibraryStoreEvent,
+  readCtaLibrary,
+  writeCtaLibrary,
+} from "../lib/cta-library-store";
 import { draftTemplateStoreEvent, readCustomDraftTemplates } from "../lib/draft-template-store";
 import {
   imageProviderStoreEvent,
@@ -59,9 +64,43 @@ const pauseOptions = [
   { value: "custom" as const, title: "自定义", description: "选择需要确认的步骤" },
 ];
 const ratios = ["9:16", "16:9", "1:1", "3:4", "4:3"] as const;
+const rewriteOptions = [
+  { value: "standard" as const, title: "标准改写", description: "贴近对标结构，延续爆款概率高", badge: "推荐" },
+  { value: "deep" as const, title: "深度改写", description: "大幅变换表达和细节，原创度显著提升" },
+  { value: "rewrite" as const, title: "高度原创", description: "仅保留核心故事线，结构行文几乎全新" },
+];
+const narrativeOptions = [
+  { value: "original" as const, title: "保持原文", description: "不改变叙事人称，保留原稿视角", badge: "默认" },
+  { value: "first" as const, title: "第一人称", description: "以主角「我」的视角讲述，代入感强" },
+  { value: "third" as const, title: "第三人称", description: "旁白视角客观叙述，适合故事类" },
+];
 
 function NumberField({ value, placeholder, onChange }: { value: number | null; placeholder: string; onChange: (value: number | null) => void }) {
   return <input className="text-input" type="number" min="1" value={value ?? ""} placeholder={placeholder} onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)} />;
+}
+
+function ToggleSwitch({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={checked} className={`copy-toggle ${checked ? "is-on" : ""}`} onClick={() => onChange(!checked)}>
+      <span aria-hidden="true" />
+      <small>{label}</small>
+    </button>
+  );
+}
+
+function extractLockedIntro(text: string, count: number): string {
+  const trimmed = text.trim();
+  if (!trimmed || count < 1) return "";
+  const sentencePattern = /[^。！？…；\n]*[。！？…；]+\s*|[^。！？…；\n]+\n+\s*/g;
+  let end = 0;
+  let matched = 0;
+  let result: RegExpExecArray | null;
+  while ((result = sentencePattern.exec(trimmed)) && matched < count) {
+    end = result.index + result[0].length;
+    matched += 1;
+  }
+  if (!end) return trimmed;
+  return trimmed.slice(0, end).trim();
 }
 
 export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredentials, aiGenerating, taskReady, referenceName, externalAudioName, bgmName, onChange, onGenerateCopy, onUploadImages, onUploadReference, onUploadTemplateBackground, onUploadExternalAudio, onUploadBgm }: TaskCreateFormProps) {
@@ -74,6 +113,9 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
   const [imageProviderConfig, setImageProviderConfig] = useState(readImageProviderConfig);
   const [newStyleName, setNewStyleName] = useState("");
   const [newStylePrompt, setNewStylePrompt] = useState("");
+  const [ctaLibrary, setCtaLibrary] = useState(readCtaLibrary);
+  const [editingCtaIndex, setEditingCtaIndex] = useState<number | null>(null);
+  const [editingCtaText, setEditingCtaText] = useState("");
   useEffect(() => {
     const refresh = () => setCustomTemplates(readCustomDraftTemplates());
     window.addEventListener(draftTemplateStoreEvent, refresh);
@@ -113,6 +155,28 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
       window.removeEventListener("storage", refresh);
     };
   }, []);
+  useEffect(() => {
+    const refresh = () => setCtaLibrary(readCtaLibrary());
+    window.addEventListener(ctaLibraryStoreEvent, refresh);
+    window.addEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener(ctaLibraryStoreEvent, refresh);
+      window.removeEventListener("storage", refresh);
+    };
+  }, []);
+  const automaticLockIntro = useMemo(
+    () => extractLockedIntro(form.inputText, form.lockIntroSentences),
+    [form.inputText, form.lockIntroSentences],
+  );
+  useEffect(() => {
+    if (
+      form.fixedIntroMode === "lock"
+      && !form.lockIntroDirty
+      && form.lockIntroText !== automaticLockIntro
+    ) {
+      onChange({ lockIntroText: automaticLockIntro });
+    }
+  }, [automaticLockIntro, form.fixedIntroMode, form.lockIntroDirty, form.lockIntroText, onChange]);
   const availableTemplates = useMemo(() => [...draftTemplates, ...customTemplates], [customTemplates]);
   const updateTrack = (track: string) => onChange({ track, visualStyle: originalDefaultStyleByTrack[track] ?? form.visualStyle });
   const selectedTemplate = availableTemplates.find((template) => template.id === form.draftTemplateId) ?? availableTemplates[0];
@@ -129,6 +193,36 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
     ...(item.apply.visualStyle ? { visualStyle: item.apply.visualStyle } : {}),
     ...(item.apply.coverTemplateId ? { coverMode: "titled", coverTemplateId: item.apply.coverTemplateId } : {}),
   });
+  const startCtaEdit = (index: number) => {
+    setEditingCtaIndex(index);
+    setEditingCtaText(index === ctaLibrary.length ? "" : ctaLibrary[index]);
+  };
+  const cancelCtaEdit = () => {
+    setEditingCtaIndex(null);
+    setEditingCtaText("");
+  };
+  const saveCtaEdit = () => {
+    if (editingCtaIndex === null) return;
+    const value = editingCtaText.trim();
+    if (!value) {
+      cancelCtaEdit();
+      return;
+    }
+    const isNew = editingCtaIndex === ctaLibrary.length;
+    const previous = isNew ? null : ctaLibrary[editingCtaIndex];
+    const next = [...ctaLibrary];
+    if (isNew) next.push(value);
+    else next[editingCtaIndex] = value;
+    writeCtaLibrary(next);
+    if (isNew || previous === form.outroCta) onChange({ outroCta: value });
+    cancelCtaEdit();
+  };
+  const deleteCta = (index: number) => {
+    const removed = ctaLibrary[index];
+    writeCtaLibrary(ctaLibrary.filter((_, itemIndex) => itemIndex !== index));
+    if (removed === form.outroCta) onChange({ outroCta: "" });
+    if (editingCtaIndex === index) cancelCtaEdit();
+  };
   return (
     <>
       <section className="builder-card">
@@ -161,10 +255,89 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
         <span className="field-label field-label--standalone">执行模式</span><div className="choice-grid choice-grid--three">{modeOptions.map((item) => <button key={item.value} type="button" className={`choice-card ${form.mode === item.value ? "is-selected" : ""}`} onClick={() => onChange({ mode: item.value })}><span className="choice-card__radio" /><span><strong>{item.title}</strong><small>{item.description}</small></span></button>)}</div>
         <div className="field-group"><span className="field-label field-label--standalone">暂停策略</span><div className="choice-grid choice-grid--four">{pauseOptions.map((item) => <button key={item.value} type="button" className={`choice-card choice-card--compact ${form.pausePreset === item.value ? "is-selected" : ""}`} onClick={() => onChange({ pausePreset: item.value })}><span className="choice-card__radio" /><span><strong>{item.title}</strong><small>{item.description}</small></span></button>)}</div></div>
         {form.pausePreset === "custom" ? <div className="custom-pause-panel"><span>完成以下步骤后暂停</span><div className="custom-pause-grid">{pipelineSteps.slice(0, 6).map((step) => <label key={step.id}><input type="checkbox" checked={form.customPauseSteps.includes(step.id)} onChange={(event) => onChange({ customPauseSteps: event.target.checked ? [...form.customPauseSteps, step.id] : form.customPauseSteps.filter((id) => id !== step.id) })} />{step.id + 1}. {step.title}</label>)}</div></div> : null}
-        <div className="field-group form-grid form-grid--three"><div><span className="field-label field-label--standalone">改写强度</span><div className="segmented-control">{[["light", "轻度"], ["standard", "标准"], ["deep", "深度"]].map(([value, label]) => <button key={value} type="button" className={form.rewriteIntensity === value ? "is-selected" : ""} onClick={() => onChange({ rewriteIntensity: value as BuilderFormState["rewriteIntensity"] })}>{label}</button>)}</div></div><div><span className="field-label field-label--standalone">叙事视角</span><div className="segmented-control">{[["original", "保持"], ["first", "第一人称"], ["third", "第三人称"]].map(([value, label]) => <button key={value} type="button" className={form.narrativePov === value ? "is-selected" : ""} onClick={() => onChange({ narrativePov: value as BuilderFormState["narrativePov"] })}>{label}</button>)}</div></div><div><span className="field-label field-label--standalone">电商内容</span><label className="toggle-row"><input type="checkbox" checked={form.keepPromotion} onChange={(event) => onChange({ keepPromotion: event.target.checked })} />保留商品卖点与促销信息</label></div></div>
-        <div className="field-group form-grid form-grid--two"><label><span className="field-label field-label--standalone">目标字数</span><NumberField value={form.targetLength} placeholder="自动" onChange={(targetLength) => onChange({ targetLength })} /></label><label><span className="field-label field-label--standalone">目标分镜数</span><NumberField value={form.targetScenes} placeholder="自动" onChange={(targetScenes) => onChange({ targetScenes })} /></label></div>
-        <div className="field-group form-grid form-grid--two"><label><span className="field-label field-label--standalone">固定开场</span><input className="text-input" value={form.fixedIntro} placeholder="可固定前几句钩子" onChange={(event) => onChange({ fixedIntro: event.target.value })} /></label><label><span className="field-label field-label--standalone">锁定开场句数</span><input className="text-input" type="number" min="0" max="10" value={form.lockIntroSentences} onChange={(event) => onChange({ lockIntroSentences: Number(event.target.value) || 0 })} /></label></div>
-        <div className="field-group"><label className="field-label">结尾 CTA <small>可选</small></label><input className="text-input" value={form.outroCta} placeholder="例如：关注我，下期继续讲这个故事" onChange={(event) => onChange({ outroCta: event.target.value })} /></div>
+        {form.mode === "auto" ? (
+          <div className="copy-options-stack field-group">
+            <div>
+              <div className="copy-field-heading"><span className="field-label field-label--standalone">改写强度</span><small>强度越高原创度越高，但与对标结构差异越大</small></div>
+              <div className="choice-grid choice-grid--three">{rewriteOptions.map((item) => <button key={item.value} type="button" className={`choice-card copy-option-card ${form.rewriteIntensity === item.value ? "is-selected" : ""}`} onClick={() => onChange({ rewriteIntensity: item.value })}><span className="choice-card__radio" /><span><strong>{item.title}{item.badge ? <em>{item.badge}</em> : null}</strong><small>{item.description}</small></span></button>)}</div>
+            </div>
+            <div>
+              <div className="copy-field-heading"><span className="field-label field-label--standalone">叙事视角</span><small>切换人称可大幅提升原创度</small></div>
+              <div className="choice-grid choice-grid--three">{narrativeOptions.map((item) => <button key={item.value} type="button" className={`choice-card copy-option-card ${form.narrativePov === item.value ? "is-selected" : ""}`} onClick={() => onChange({ narrativePov: item.value })}><span className="choice-card__radio" /><span><strong>{item.title}{item.badge ? <em>{item.badge}</em> : null}</strong><small>{item.description}</small></span></button>)}</div>
+            </div>
+            <div className="copy-inline-setting">
+              <span className="field-label field-label--standalone">带货模式</span>
+              <ToggleSwitch checked={form.keepPromotion} label={form.keepPromotion ? "保留产品推荐和促单内容" : "改写时删除带货段落"} onChange={(keepPromotion) => onChange({ keepPromotion })} />
+            </div>
+          </div>
+        ) : (
+          <div className="mode-explanation field-group">
+            {form.mode === "semi_auto"
+              ? "半自动：完全用你的原文，AI 不改写，只帮你智能分句（断句更顺、配图更贴）。"
+              : "直接出片：完全用你的原文，AI 不改写也不重新分句，按你写的空行 / 句号机械切分。"}
+            <strong>此模式无改写过程，改写强度、叙事视角和带货模式已自动隐藏。</strong>
+          </div>
+        )}
+        {form.videoForm === "narration" ? (
+          <div className="copy-options-stack field-group">
+            <div className="copy-nested-panel">
+              <div className="copy-inline-setting">
+                <span className="field-label field-label--standalone">固定开头</span>
+                <ToggleSwitch checked={form.fixedIntroEnabled} label={form.fixedIntroEnabled ? "这段开场白原样拼在正文最前，AI 不改写" : "每条视频固定的开场白（如账号人设语）"} onChange={(fixedIntroEnabled) => onChange({ fixedIntroEnabled })} />
+              </div>
+              {form.fixedIntroEnabled ? (
+                <div className="copy-nested-content">
+                  <div className="copy-radio-row">
+                    <label><input type="radio" name="fixed-intro-mode" checked={form.fixedIntroMode === "account"} onChange={() => onChange({ fixedIntroMode: "account" })} />账号开场白 <small>（自己写，每次任务自动带上）</small></label>
+                    <label><input type="radio" name="fixed-intro-mode" checked={form.fixedIntroMode === "lock"} onChange={() => onChange({ fixedIntroMode: "lock" })} />锁定原文开头 <small>（前 N 句原样保留，AI 只改写其余部分）</small></label>
+                  </div>
+                  {form.fixedIntroMode === "account" ? (
+                    <>
+                      <textarea className="text-input copy-auto-textarea" rows={2} value={form.fixedIntro} placeholder="例：大家好，我是老张，专注讲述那些不该被遗忘的故事。" onChange={(event) => onChange({ fixedIntro: event.target.value })} />
+                      <p className="copy-help">这段原样拼在正文最前，AI 正文自动衔接、不重复自我介绍 · 约多 1 个分镜成本</p>
+                    </>
+                  ) : (
+                    <>
+                      <label className="copy-lock-count">锁定前 <input className="text-input" type="number" min="1" max="20" value={form.lockIntroSentences} onChange={(event) => onChange({ lockIntroSentences: Math.max(1, Math.min(20, Number(event.target.value) || 1)), lockIntroDirty: false })} /> 句 <small>（1–20，选中的句子自动回填到下方，可修改删减）</small>{form.lockIntroDirty ? <button type="button" onClick={() => onChange({ lockIntroText: automaticLockIntro, lockIntroDirty: false })}>↺ 重新加载</button> : null}</label>
+                      <textarea className="text-input copy-auto-textarea" rows={3} value={form.lockIntroText} placeholder="粘贴文案后，选中的开头几句会自动回填到这里；可修改删减，最终以这里的内容为准" onChange={(event) => onChange({ lockIntroText: event.target.value, lockIntroDirty: true })} />
+                      <p className="copy-help">{form.lockIntroDirty ? "已手动编辑——将以此内容作为锁定开头；点「重新加载」可恢复自动切片" : "未编辑时按当前文本自动锁定；AI 只改写其余部分、不复述开头信息"}</p>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <div className="copy-nested-panel">
+              <div className="copy-inline-setting">
+                <span className="field-label field-label--standalone">尾部引导</span>
+                <ToggleSwitch checked={form.outroCtaEnabled} label={form.outroCtaEnabled ? "选中的引导文案原样拼在正文末尾" : "改写后自动追加引导关注 / 互动文案"} onChange={(outroCtaEnabled) => onChange({ outroCtaEnabled })} />
+              </div>
+              {form.outroCtaEnabled ? (
+                <div className="copy-nested-content cta-library">
+                  {ctaLibrary.map((item, index) => editingCtaIndex === index ? (
+                    <div className="cta-editor" key={`edit-${index}`}>
+                      <textarea className="text-input copy-auto-textarea" rows={2} value={editingCtaText} autoFocus onChange={(event) => setEditingCtaText(event.target.value)} />
+                      <div><button type="button" className="primary-button" onClick={saveCtaEdit}>保存</button><button type="button" onClick={cancelCtaEdit}>取消</button></div>
+                    </div>
+                  ) : (
+                    <label key={`${item}-${index}`} className={`cta-item ${form.outroCta === item ? "is-selected" : ""}`}>
+                      <input type="radio" name="outro-cta-item" checked={form.outroCta === item} onChange={() => onChange({ outroCta: item })} />
+                      <span>{item}</span>
+                      <span className="cta-item__actions"><button type="button" onClick={(event) => { event.preventDefault(); startCtaEdit(index); }}>编辑</button><button type="button" className="is-danger" onClick={(event) => { event.preventDefault(); deleteCta(index); }}>删除</button></span>
+                    </label>
+                  ))}
+                  {editingCtaIndex === ctaLibrary.length ? (
+                    <div className="cta-editor">
+                      <textarea className="text-input copy-auto-textarea" rows={2} value={editingCtaText} autoFocus placeholder="写一条自己的引导文案，可用 {主角} 占位符" onChange={(event) => setEditingCtaText(event.target.value)} />
+                      <div><button type="button" className="primary-button" onClick={saveCtaEdit}>保存</button><button type="button" onClick={cancelCtaEdit}>取消</button></div>
+                    </div>
+                  ) : <button type="button" className="cta-add-button" onClick={() => startCtaEdit(ctaLibrary.length)}>＋ 新增一条</button>}
+                  <p className="copy-help">{"{主角}"} 自动替换为当期人物 / 主题名 · 互动类句式建议偶尔使用，避免每条都带 · 约多 1 个分镜的图与配音成本</p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {form.mode !== "direct" ? <div className="field-group form-grid form-grid--two">{form.mode === "auto" ? <label><span className="field-label field-label--standalone">目标字数 <small>±15%，留空跟随原文</small></span><NumberField value={form.targetLength} placeholder="自动" onChange={(targetLength) => onChange({ targetLength })} /></label> : <div />}<label><span className="field-label field-label--standalone">目标分镜数 <small>±10%，建议每镜 25–45 字</small></span><NumberField value={form.targetScenes} placeholder="自动" onChange={(targetScenes) => onChange({ targetScenes })} /></label></div> : null}
       </section>
 
       <section className="builder-card">

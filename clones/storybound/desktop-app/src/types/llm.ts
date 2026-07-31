@@ -32,7 +32,12 @@ export interface PipelineContext {
   narrativePov?: string;
   targetLength?: number | null;
   targetScenes?: number | null;
+  keepPromotion?: boolean;
+  fixedIntroEnabled?: boolean;
+  fixedIntroMode?: "account" | "lock";
   fixedIntro?: string;
+  lockIntroSentences?: number;
+  outroCtaEnabled?: boolean;
   outroCta?: string;
   ttsMode?: "original-segmented" | "continuous";
 }
