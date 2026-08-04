@@ -226,15 +226,15 @@ export function TtsSettingsPage({
   };
 
   const handleSync = async () => {
-    setRequestState({ kind: "busy", message: "正在从 MiniMax 同步克隆音色…" });
+    setRequestState({ kind: "busy", message: "正在读取 MiniMax 账号已有音色；不会上传本地文件…" });
     try {
       const synced = await fetchMinimaxVoices(config.minimax.apiKey);
       const merged = new Map<string, TtsVoice>();
       for (const voice of [...config.minimax.clonedVoices, ...synced]) merged.set(voice.id, voice);
       updateMinimax({ clonedVoices: [...merged.values()] });
-      setRequestState({ kind: "success", message: `同步完成 · ${synced.length} 个平台音色` });
+      setRequestState({ kind: "success", message: `已读取 ${synced.length} 个平台已有音色 · 未上传本地文件` });
     } catch (error) {
-      setRequestState({ kind: "error", message: error instanceof Error ? error.message : "同步失败" });
+      setRequestState({ kind: "error", message: error instanceof Error ? error.message : "读取平台音色失败" });
     }
   };
 
@@ -435,8 +435,11 @@ export function TtsSettingsPage({
                     </Field>
                     <Field label="系统精选音色" help="创建任务时会以此为默认。"><VoiceCards voices={voices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} /></Field>
                     <div className="tts-clone-actions">
-                      <strong>我的克隆音色</strong>
-                      <div><button type="button" onClick={() => setShowCloneForm((open) => !open)}>＋ 上传新克隆</button><button type="button" onClick={handleSync} disabled={requestState.kind === "busy"}>⟳ 从平台同步</button></div>
+                      <div className="tts-clone-heading">
+                        <strong>MiniMax 账号已有克隆音色</strong>
+                        <small>“读取平台已有音色”只查询音色 ID，不会读取或上传电脑文件。</small>
+                      </div>
+                      <div><button type="button" onClick={() => setShowCloneForm((open) => !open)}>＋ 上传并创建新克隆</button><button type="button" onClick={handleSync} disabled={requestState.kind === "busy"}>⟳ 读取平台已有音色</button></div>
                     </div>
                     {showCloneForm ? (
                       <div className="tts-clone-form">

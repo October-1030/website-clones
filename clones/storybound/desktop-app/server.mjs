@@ -474,7 +474,7 @@ async function listMinimaxVoices(body) {
     .map((voice) => ({
       id: voice.voice_id,
       name: voice.voice_name || voice.description?.find((item) => typeof item === "string") || voice.voice_id,
-      tag: type === "system" ? "MiniMax 系统音色" : "我的克隆音色",
+      tag: type === "system" ? "MiniMax 系统音色" : "MiniMax 平台克隆音色",
       provider: "minimax",
       cloned: type !== "system",
     }));
