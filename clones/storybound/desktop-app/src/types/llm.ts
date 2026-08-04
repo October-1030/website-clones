@@ -97,6 +97,12 @@ export interface ImagePrompt {
   shotId: number;
   prompt: string;
   negativePrompt: string;
+  /**
+   * Mirrors the original client's per-shot `use_reference` flag. Character
+   * references must only be sent for shots in which the protagonist is
+   * actually visible; environment and prop inserts stay text-to-image.
+   */
+  useReference?: boolean;
 }
 
 export interface PromptResult {

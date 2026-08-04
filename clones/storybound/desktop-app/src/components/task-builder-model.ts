@@ -42,6 +42,7 @@ export interface BuilderFormState {
   videoIntroDurationMode: "narration" | "fixed";
   videoIntroDuration: number;
   bgmSync: boolean;
+  bgmId: NonNullable<TaskOptions["bgmId"]>;
   coverMode: NonNullable<TaskOptions["coverMode"]>;
   coverTemplateId: string;
   coverRatio: string;
@@ -97,6 +98,7 @@ export const defaultBuilderForm: BuilderFormState = {
   videoIntroDurationMode: "fixed",
   videoIntroDuration: 6,
   bgmSync: false,
+  bgmId: "__builtin__",
   coverMode: "off",
   coverTemplateId: "cinematic-poster",
   coverRatio: "3:4",
@@ -156,6 +158,7 @@ export function formFromTask(task: StoryboundTask, fallbackTtsProvider: TtsProvi
     videoIntroDurationMode: task.options.videoIntroDurationMode ?? ((task.options.videoIntroDuration ?? 6) === 0 ? "narration" : "fixed"),
     videoIntroDuration: task.options.videoIntroDuration && task.options.videoIntroDuration > 0 ? task.options.videoIntroDuration : 6,
     bgmSync: task.options.bgmSync ?? false,
+    bgmId: task.options.bgmId ?? (task.media.bgm?.path ? "uploaded" : "__builtin__"),
     coverMode: task.options.coverMode ?? "off",
     coverTemplateId: task.options.coverTemplateId ?? "cinematic-poster",
     coverRatio: task.options.coverRatio ?? "3:4",
@@ -218,6 +221,7 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       videoIntroDurationMode: form.videoIntroDurationMode,
       videoIntroDuration: dynamicStoryboard && form.videoIntroDurationMode === "fixed" ? form.videoIntroDuration : 0,
       bgmSync: form.bgmSync,
+      bgmId: form.bgmId,
       coverMode: coverEnabled ? form.coverMode : "off",
       coverTemplateId: form.coverTemplateId,
       coverRatio: form.coverRatio,

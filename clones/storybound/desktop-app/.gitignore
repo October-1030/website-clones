@@ -14,6 +14,10 @@ dist-ssr
 .storybound-data/
 .draft-probe/
 
+# The original client's bundled music has no verified redistribution license.
+# Keep the authorized local copy out of the public repository.
+public/audio/default-bgm.mp3
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

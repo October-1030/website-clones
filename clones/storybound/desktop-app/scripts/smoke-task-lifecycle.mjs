@@ -64,7 +64,7 @@ try {
       runState: "paused",
       currentStep: 6,
       stepStatuses: ["skipped", "skipped", "done", "done", "done", "done", "pending"],
-      options: { draftTemplateId: "default-portrait-9-16", dynamicStoryboard: true, videoIntro: true, videoIntroCount: 1, videoIntroDurationMode: "fixed", videoIntroDuration: 1 },
+      options: { draftTemplateId: "default-portrait-9-16", dynamicStoryboard: true, videoIntro: true, videoIntroCount: 1, videoIntroDurationMode: "fixed", videoIntroDuration: 1, bgmId: "uploaded" },
       artifacts: {
         rewrite: { title: "测试片头标题", subtitle: ["第一行副标题", "第二行副标题"], narration: `${longSubtitle}第二句测试字幕。`, tags: [], pinnedComment: "", comments: [], publishCopy: "", summary: "" },
         storyboard: { shots: [
@@ -140,8 +140,14 @@ try {
   }
   const firstCaptionMaterial = draftInfo.materials?.texts?.find((item) => item.id === subtitleTrack?.segments?.[0]?.material_id);
   const firstCaptionStyle = firstCaptionMaterial && JSON.parse(firstCaptionMaterial.content).styles?.[0];
-  if (!firstCaptionMaterial || firstCaptionMaterial.background_alpha !== 0.5 || firstCaptionMaterial.font_size !== 15 || firstCaptionMaterial.line_max_width !== 1 || firstCaptionStyle?.size !== 12 || firstCaptionStyle?.strokes?.length !== 1) {
-    throw new Error("默认模板没有按原版 subtitle 素材结构写入");
+  if (!firstCaptionMaterial || firstCaptionMaterial.background_alpha !== 0.5 || firstCaptionMaterial.font_size !== 15 || firstCaptionMaterial.line_max_width !== 1 || firstCaptionStyle?.size !== 14 || firstCaptionStyle?.strokes?.length !== 1) {
+    throw new Error(`默认模板没有按原版 subtitle 素材结构写入：${JSON.stringify({
+      backgroundAlpha: firstCaptionMaterial?.background_alpha,
+      materialFontSize: firstCaptionMaterial?.font_size,
+      lineMaxWidth: firstCaptionMaterial?.line_max_width,
+      styleFontSize: firstCaptionStyle?.size,
+      strokeCount: firstCaptionStyle?.strokes?.length,
+    })}`);
   }
   const disclaimerTrack = draftInfo.tracks?.find((track) => track.name === "cover_disclaimer");
   if (!disclaimerTrack || disclaimerTrack.segments?.[0]?.target_timerange?.duration !== draftInfo.duration) throw new Error("免责声明轨未覆盖完整时间线");
@@ -161,10 +167,14 @@ try {
   await json(`/api/tasks/${taskId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ options: { draftTemplateId: "builtin-knowledge-card", dynamicStoryboard: true, videoIntro: true, draftTemplateConfig: { image: { motion: ["zoom_in", "pan_left"], motionStrength: 1.5 } } } }),
+    body: JSON.stringify({ options: { draftTemplateId: "builtin-knowledge-card", dynamicStoryboard: true, videoIntro: true, bgmId: "__builtin__", draftTemplateConfig: { image: { motion: ["zoom_in", "pan_left"], motionStrength: 1.5 } } }, media: { bgm: null } }),
   });
   const frameResult = await json(`/api/tasks/${taskId}/draft`, { method: "POST" });
   const frameDraftInfo = JSON.parse(await readFile(join(frameResult.draft.projectDir, "draft_info.json"), "utf8"));
+  const frameAudioFiles = await readdir(join(frameResult.draft.projectDir, "assets", "audio"));
+  if (!frameAudioFiles.includes("bgm.mp3") || frameDraftInfo.tracks?.find((track) => track.name === "bgm")?.segments?.length !== 1) {
+    throw new Error("原版内置 BGM 未在无上传音频时写入草稿");
+  }
   if (frameDraftInfo.canvas_config?.width !== 1080 || frameDraftInfo.canvas_config?.height !== 1920) throw new Error("知识卡画布尺寸错误");
   for (const trackName of ["bg_main", "mask_top", "mask_bottom"]) {
     if (!frameDraftInfo.tracks?.some((track) => track.name === trackName)) throw new Error(`知识卡缺少 ${trackName}`);

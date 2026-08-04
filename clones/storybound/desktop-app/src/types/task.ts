@@ -36,6 +36,7 @@ export interface TaskOptions {
   videoIntroDurationMode?: "narration" | "fixed";
   videoIntroDuration?: number;
   bgmSync?: boolean;
+  bgmId?: "__builtin__" | "uploaded" | "off";
   referenceImage?: StoredAsset | null;
   coverMode?: CoverMode;
   coverTemplateId?: string;

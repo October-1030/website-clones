@@ -33,6 +33,12 @@ const tutorialImagePrompt = `# 同琛教程绘图提示词补充规则（连续�
 - 禁止生成台词、字幕、书名或水印；禁止用象征、剪影、拼贴、线稿漫画替代真实画面。`;
 const production = process.argv.includes("--production");
 const port = Number(process.env.PORT || 5173);
+const defaultBgmCandidates = [
+  process.env.STORYBOUND_DEFAULT_BGM_PATH,
+  join(root, "public", "audio", "default-bgm.mp3"),
+  resolve(root, "../../..", ".tmp", "storybound-1.17.0", "resources", "default-bgm.mp3"),
+  resolve(root, "../../..", ".tmp", "storybound-1.16.1", "resources", "default-bgm.mp3"),
+].filter(Boolean);
 const publicAccessToken = String(process.env.STORYBOUND_PUBLIC_ACCESS_TOKEN || "").trim();
 const maxJsonBytes = 24 * 1024 * 1024;
 const volcengineEndpoint = "https://openspeech.bytedance.com/api/v3/tts/unidirectional";
@@ -84,6 +90,10 @@ function parseMinimaxApiKey(contents) {
     if (labeled?.[1]?.trim()) return labeled[1].trim();
   }
   return lines.find((line) => /^sk-[A-Za-z0-9_.-]{40,}$/.test(line)) || "";
+}
+
+function resolveDefaultBgmPath() {
+  return defaultBgmCandidates.find((candidate) => existsSync(candidate)) || null;
 }
 
 function parseKeyValueSecrets(contents) {
@@ -530,6 +540,85 @@ function composeOriginalImagePrompt(corePrompt, style, negativePrompt = "") {
   return `${positive}${negative ? `。画面中避免出现：${negative}` : ""}`.slice(0, 1500);
 }
 
+function promptUsesReference(item, shotId, task, track) {
+  if (shotId >= 9000) return true;
+  if (typeof item?.useReference === "boolean") return item.useReference;
+  if (typeof item?.use_reference === "boolean") return item.use_reference;
+  const storyboardShot = task?.artifacts?.storyboard?.shots?.find((shot) => Number(shot.id) === Number(shotId));
+  return shotUsesCharacterReference(storyboardShot, item, track);
+}
+
+function shotUsesCharacterReference(shot, provided, track) {
+  if (!track?.needsCharacterCard) return false;
+  if (typeof provided?.useReference === "boolean") return provided.useReference;
+  if (typeof provided?.use_reference === "boolean") return provided.use_reference;
+  const visual = String(shot?.visual || provided?.prompt || provided?.desc_prompt || "");
+  const environmentOnly = /(?:纯环境|空镜|无人物|不出现人物|建筑空景|街景空景|物件空镜)/u.test(visual);
+  if (environmentOnly) return false;
+  return /(?:主角|人物|男孩|女孩|男人|女人|老人|少年|少女|母亲|父亲|李香兰|山口淑子)/u.test(visual);
+}
+
+const environmentNarrativePattern = /(?:法庭|审判|国籍|身份材料|护照|文件|报纸|学校|广播|银幕|电影公司|电影系统|满映|摄影机|胶片|唱片|影院|舞厅|霓虹|城市|上海|东北|九一八|伪满洲国|战争|侵略|宣传|舞台|名字|身份|参议院|议员|历史|时代|旋律|歌曲)/u;
+const directCharacterPattern = /(?:她|他|李香兰|山口淑子|女人|女孩|人物|主角).{0,12}(?:走|坐|站|唱|演|望|看|说|抬头|被捕|离开|回到|当选|去世)/u;
+
+function environmentScore(shot, provided, index) {
+  const text = String(shot?.text || "");
+  const visual = String(shot?.visual || "");
+  const prompt = String(provided?.prompt || provided?.desc_prompt || "");
+  let score = index === 0 ? 12 : 0;
+  if (typeof provided?.useReference === "boolean" && !provided.useReference) score += 10;
+  if (typeof provided?.use_reference === "boolean" && !provided.use_reference) score += 10;
+  if (/(?:纯环境|空镜|无人物|不出现人物|建筑空景|街景空景|物件空镜)/u.test(`${visual} ${prompt}`)) score += 12;
+  if (environmentNarrativePattern.test(text)) score += 5;
+  if (!/(?:她|他|李香兰|山口淑子|女人|女孩|人物|主角)/u.test(text)) score += 4;
+  if (directCharacterPattern.test(text)) score -= 4;
+  if (index % 4 === 0) score += 1;
+  return score;
+}
+
+function buildReferencePlan(shots, providedPrompts, track) {
+  const plan = new Map();
+  if (!track?.needsCharacterCard) {
+    shots.forEach((shot) => plan.set(shot.id, false));
+    return plan;
+  }
+  const targetEnvironmentCount = Math.max(6, Math.min(22, Math.round(shots.length * 0.28)));
+  const ranked = shots.map((shot, index) => {
+    const provided = providedPrompts.find((item) => Number(item.shotId || item.id) === Number(shot.id)) || providedPrompts[index] || {};
+    return { id: shot.id, index, score: environmentScore(shot, provided, index) };
+  }).sort((left, right) => right.score - left.score || left.index - right.index);
+  const environmentIds = new Set(ranked.slice(0, targetEnvironmentCount).map((item) => item.id));
+  shots.forEach((shot) => plan.set(shot.id, !environmentIds.has(shot.id)));
+  return plan;
+}
+
+function environmentSceneForShot(shot) {
+  const text = String(shot?.text || "");
+  if (/(?:法庭|审判|国籍|身份材料|护照|证明|文件)/u.test(text)) return "对应年代的法庭木桌、国籍证明、旧护照与印章，文件内容虚焦不可读，窗格投下克制阴影，纯物件叙事空镜，不出现人物";
+  if (/(?:电影|银幕|满映|胶片|摄影机|片场|演员)/u.test(text)) return "对应年代的空置电影片场，老式胶片摄影机、放映机与盘绕胶片成为主体，银幕光束穿过尘埃，纯环境建立镜头，不出现人物";
+  if (/(?:歌|唱片|旋律|舞台|演唱会|夜来香|苏州夜曲|何日君再来)/u.test(text)) return "对应年代的空舞台与老式圆形麦克风，唱片机和黑胶唱片置于侧前景，聚光灯照出尘埃，纯场景与物件镜头，不出现人物";
+  if (/(?:上海|舞厅|影院|霓虹|城市)/u.test(text)) return "对应年代的上海街道、影院门厅与舞厅外景，电车轨道和雨湿路面延伸至远处，纪实建立镜头，不出现人物，不出现可读招牌文字";
+  if (/(?:东北|九一八|伪满洲国|战争|侵略|宣传|广播|学校|报纸)/u.test(text)) return "对应年代的东北城市街景与旧报社印刷机、收音机、散落报纸组成历史环境，压抑纪实空镜，不出现人物，不出现可读文字";
+  if (/(?:参议院|议员|政治|国际事务|中日交流|反战)/u.test(text)) return "对应年代的日本国会议事堂外景与空置会议席、桌面文件，庄重克制的历史记录感，不出现人物，不出现可读文字";
+  if (/(?:名字|身份|三个|谁|责任|历史|时代|一生|答案)/u.test(text)) return "三份年代不同的旧证件、镜面倒影、胶片盒与褪色车票组成身份隐喻静物，克制留白，纯物件镜头，不出现人物，不出现可读文字";
+  return `依据本镜叙事重建对应年代的真实环境与关键道具，环境占满画面，细节承担叙事，不出现人物，不生成文字；叙事依据：${text.slice(0, 90)}`;
+}
+
+function removeCameraCliches(value) {
+  return String(value || "")
+    .replace(/(?:大头特写|面部特写|脸部特写|头部特写|半身肖像|近景镜头|中近景|中景镜头|全景镜头|建立镜头)/gu, "")
+    .replace(/[，、]{2,}/gu, "，")
+    .trim();
+}
+
+function cameraComposition(index, useReference) {
+  if (!useReference) return "建立镜头或关键物件特写，按叙事语义选择，画面中不得出现人物或人脸";
+  const slot = index % 10;
+  if ([1, 5, 8].includes(slot)) return "近景但禁止大头照，必须保留肩部和环境线索，人物占画面不超过65%";
+  if ([2, 4, 7, 9].includes(slot)) return "中景，完整展示人物动作与周围时代环境，人物占画面约40%至55%";
+  return "远景或全景，环境占画面60%以上，人物只作为场景中的叙事主体";
+}
+
 async function generateMinimaxImages(body) {
   const prompts = Array.isArray(body.prompts) ? body.prompts : [];
   if (prompts.length === 0) throw new Error("缺少绘图 prompt");
@@ -580,6 +669,7 @@ async function generateMinimaxImages(body) {
   }
   const images = await mapLimit(selectedPrompts, 3, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
+    const useSubjectReference = Boolean(subjectReference) && promptUsesReference(item, shotId, generationTask, track);
     const prompt = coverBackgroundPrompt(String(item.prompt || "").trim(), shotId).slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
     // A failed/aborted browser run may already have written some images before
@@ -593,6 +683,7 @@ async function generateMinimaxImages(body) {
           id: `existing-image-${shotId}`,
           shotId,
           prompt,
+          useReference: useSubjectReference,
           retryLevel: 0,
           url: `/api/tasks/${encodeURIComponent(body.taskId)}/files/images/${encodeURIComponent(`${shotId}.jpg`)}`,
           path: existingPath,
@@ -618,7 +709,7 @@ async function generateMinimaxImages(body) {
           response_format: "base64",
           n: 1,
           prompt_optimizer: true,
-          ...(subjectReference ? { subject_reference: subjectReference } : {}),
+          ...(useSubjectReference ? { subject_reference: subjectReference } : {}),
           aigc_watermark: false,
         }, 180000);
         const base64 = payload.data?.image_base64?.[0];
@@ -632,6 +723,7 @@ async function generateMinimaxImages(body) {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
             prompt: activePrompt,
+            useReference: useSubjectReference,
             retryLevel: attempt,
             url: saved?.url || `data:image/jpeg;base64,${base64}`,
             path: saved?.path,
@@ -648,6 +740,7 @@ async function generateMinimaxImages(body) {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
             prompt: activePrompt,
+            useReference: useSubjectReference,
             retryLevel: attempt,
             url: saved?.url || imageUrl,
             path: saved?.path,
@@ -664,6 +757,7 @@ async function generateMinimaxImages(body) {
       id: `failed-image-${Date.now()}-${index}`,
       shotId: Number(item.shotId || index + 1),
       prompt,
+      useReference: useSubjectReference,
       retryLevel: retryPrompts.length - 1,
       url: "",
       status: "failed",
@@ -1015,6 +1109,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
   const shots = artifacts.storyboard?.shots || [];
   const suppliedPrompts = payload.prompts || payload.sentences || payload.images;
   const prompts = Array.isArray(suppliedPrompts) ? suppliedPrompts : [];
+  const referencePlan = buildReferencePlan(shots, prompts, track);
   return {
     step: "prompts",
     data: {
@@ -1023,16 +1118,20 @@ function normalizePipelineResult(step, payload, context, artifacts) {
       styleId: style?.id || "realistic",
       prompts: shots.map((shot, index) => {
         const provided = prompts.find((item) => Number(item.shotId || item.id) === shot.id) || prompts[index] || {};
-        const fixedCharacter = track?.needsCharacterCard ? characterCardPrompt(artifacts.storyboard?.characterCard) : "";
+        const useReference = referencePlan.get(shot.id) ?? shotUsesCharacterReference(shot, provided, track);
+        const fixedCharacter = useReference ? characterCardPrompt(artifacts.storyboard?.characterCard) : "";
         const fallbackCore = `${shot.visual}，${shot.emotion}`;
-        const suppliedCore = clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore);
+        const suppliedCore = useReference
+          ? removeCameraCliches(clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore))
+          : environmentSceneForShot(shot);
         const narrativeCue = clampString(shot.text).replace(/\s+/g, " ").slice(0, 100);
         const semanticCore = narrativeCue && !suppliedCore.includes(narrativeCue.slice(0, 12))
           ? `${suppliedCore}。本镜叙事内容（仅用于转化成画面，禁止在图中生成文字）：${narrativeCue}`
           : suppliedCore;
-        const corePrompt = fixedCharacter && !semanticCore.includes(fixedCharacter.slice(0, 12))
+        const characterCore = fixedCharacter && !semanticCore.includes(fixedCharacter.slice(0, 12))
           ? `固定主角设定：${fixedCharacter}。当前画面：${semanticCore}`
           : semanticCore;
+        const corePrompt = `${characterCore}。镜头构图硬约束：${cameraComposition(index, useReference)}`;
         const prefixMarker = clampString(style?.prefix).slice(0, 14);
         const negativePrompt = clampString(provided.negativePrompt || provided.negative_prompt, style?.negativePrompt);
         const positivePrompt = prefixMarker && corePrompt.includes(prefixMarker)
@@ -1043,6 +1142,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
           shotId: shot.id,
           prompt,
           negativePrompt,
+          useReference,
         };
       }),
     },
@@ -1326,10 +1426,13 @@ async function runLlmPipeline(body) {
   }
 
   let promptPayload = { prompts: [] };
+  const referenceDiscipline = track?.needsCharacterCard
+    ? `\n人物参考图纪律（与原客户端 use_reference 契约一致）：\n- 每条 prompt 必须返回 useReference 布尔值。\n- 只有主角本人实际出现在画面中时才为 true；纯环境、建筑、街景、道具、文件、唱片、胶片、空镜和配角独立镜头必须为 false。\n- 人物故事应同时包含 true 和 false，禁止整批全为 true。\n- 不得连续 3 镜使用面部近景或大头特写；整体尽量按近景/中景/全景约 3:4:3 分布。\n- 没有人物的句子优先设计可讲故事的时代场景或关键物件，不要为了使用参考图强塞主角。`
+    : "\n每条 prompt 必须返回 useReference: false。";
   try {
     promptPayload = await callLlmJson(config, pipelineMessages(
       [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt, context.ttsMode === "continuous" ? tutorialImagePrompt : "", originalPromptLibrary.producerAgentPrompt],
-      `执行 StoryboardAgent 第二阶段并交接 ProducerAgent。严格返回 JSON：${JSON.stringify({ prompts: [{ shotId: 1, prompt: "只写画面主体、环境、动作、光影和构图", negativePrompt: "" }] })}。不得修改 shotId 与字幕；prompt 不要重复画风前后缀，系统会按原版逻辑统一拼接。`,
+      `执行 StoryboardAgent 第二阶段并交接 ProducerAgent。严格返回 JSON：${JSON.stringify({ prompts: [{ shotId: 1, prompt: "只写画面主体、环境、动作、光影和构图", negativePrompt: "", useReference: true }] })}。不得修改 shotId 与字幕；prompt 不要重复画风前后缀，系统会按原版逻辑统一拼接。${referenceDiscipline}`,
       base,
     ), 0.72, "原版绘图提示词", { attempts: 1, timeoutMs: 90000 });
   } catch (error) {
@@ -2165,6 +2268,15 @@ const server = createServer(async (request, response) => {
   }
   if (pathname === "/api/tasks" || pathname.startsWith("/api/tasks/")) {
     await handleTaskApi(request, response, pathname);
+    return;
+  }
+  if (pathname === "/audio/default-bgm.mp3") {
+    const defaultBgmPath = resolveDefaultBgmPath();
+    if (!defaultBgmPath) {
+      sendJson(response, 404, { error: "未找到本机授权的默认 BGM；请配置 STORYBOUND_DEFAULT_BGM_PATH" });
+      return;
+    }
+    streamFile(response, defaultBgmPath);
     return;
   }
   if (vite) {

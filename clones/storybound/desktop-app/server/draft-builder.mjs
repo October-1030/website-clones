@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { deflateSync } from "node:zlib";
 
@@ -13,6 +15,12 @@ import { writeStoredZip } from "./zip-store.mjs";
 const microseconds = 1_000_000;
 const jieba = Jieba.withDict(jiebaDict);
 const draftTemplates = JSON.parse(await readFile(new URL("../original-draft-templates.json", import.meta.url), "utf8"));
+const bundledBgmCandidates = [
+  process.env.STORYBOUND_DEFAULT_BGM_PATH,
+  fileURLToPath(new URL("../public/audio/default-bgm.mp3", import.meta.url)),
+  fileURLToPath(new URL("../../../../.tmp/storybound-1.17.0/resources/default-bgm.mp3", import.meta.url)),
+  fileURLToPath(new URL("../../../../.tmp/storybound-1.16.1/resources/default-bgm.mp3", import.meta.url)),
+].filter(Boolean);
 const execFileAsync = promisify(execFile);
 const ffmpegCandidates = [
   process.env.FFMPEG_PATH,
@@ -567,6 +575,22 @@ async function prepareBgm(source, audioDirectory, totalDuration, fadeOutMs) {
   return { path: fallback, duration: totalDuration, preRendered: false };
 }
 
+function resolveTaskBgmSource(task) {
+  const selection = task.options?.bgmId;
+  const bundledBgmPath = bundledBgmCandidates.find((candidate) => existsSync(candidate)) || null;
+  if (selection === "off") return null;
+  if (selection === "uploaded") return task.media?.bgm?.path || null;
+  if (selection === "__builtin__") {
+    if (bundledBgmPath) return bundledBgmPath;
+    return task.media?.bgm?.path || null;
+  }
+  if (!selection) {
+    if (task.media?.bgm?.path) return task.media.bgm.path;
+    return bundledBgmPath;
+  }
+  return task.media?.bgm?.path || null;
+}
+
 function resolveShots(task) {
   const podcastSegments = task.media?.podcast?.segments;
   if (task.videoForm === "podcast" && Array.isArray(podcastSegments) && podcastSegments.length) {
@@ -1083,8 +1107,9 @@ export async function buildJianyingDraft(taskStore, task) {
     });
   }
 
-  if (task.media?.bgm?.path) {
-    const prepared = await prepareBgm(task.media.bgm.path, audioDir, totalDuration, template.audio.bgmFadeOutMs);
+  const bgmSource = resolveTaskBgmSource(task);
+  if (bgmSource) {
+    const prepared = await prepareBgm(bgmSource, audioDir, totalDuration, template.audio.bgmFadeOutMs);
     const material = audioMaterial(prepared.path, totalDuration);
     materials.audios.push(material);
     const speedId = id();

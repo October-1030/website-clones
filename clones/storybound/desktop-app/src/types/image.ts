@@ -8,6 +8,7 @@ export interface GeneratedImage {
   path?: string;
   bytes?: number;
   retryLevel?: number;
+  useReference?: boolean;
   status?: "pending" | "ready" | "failed" | "borrowed";
   error?: string;
 }
