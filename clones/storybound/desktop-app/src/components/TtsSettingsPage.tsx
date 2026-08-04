@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { llmProviderOptions } from "../data/llm-data";
 import { minimaxVoices, volcengineVoices } from "../data/tts-data";
@@ -9,7 +9,7 @@ import {
   type ImageProviderId,
 } from "../lib/image-provider-store";
 import { runLlmPipelineStep } from "../lib/llm-api";
-import { cloneMinimaxVoice, fetchMinimaxVoices, testTts } from "../lib/tts-api";
+import { cloneMinimaxVoice, fetchMinimaxVoices, synthesizeTts, testTts } from "../lib/tts-api";
 import type { LlmConfig, LlmCredentialStatus, LlmProvider } from "../types/llm";
 import type {
   MinimaxModel,
@@ -83,6 +83,8 @@ export function TtsSettingsPage({
   const [showCloneForm, setShowCloneForm] = useState(false);
   const [showVoiceCatalog, setShowVoiceCatalog] = useState(false);
   const [voiceSearch, setVoiceSearch] = useState("");
+  const [previewingVoiceId, setPreviewingVoiceId] = useState("");
+  const [voicePreview, setVoicePreview] = useState<{ name: string; url: string } | null>(null);
   const [cloneFile, setCloneFile] = useState<File | null>(null);
   const [cloneName, setCloneName] = useState("");
   const [cloneText, setCloneText] = useState("这是一段示例文本，用来测试克隆音色。");
@@ -97,6 +99,10 @@ export function TtsSettingsPage({
     if (!query) return systemVoices;
     return systemVoices.filter((voice) => `${voice.name} ${voice.tag} ${voice.id}`.toLocaleLowerCase().includes(query));
   }, [systemVoices, voiceSearch]);
+
+  useEffect(() => () => {
+    if (voicePreview?.url) URL.revokeObjectURL(voicePreview.url);
+  }, [voicePreview?.url]);
 
   const imageReady = credentialStatus.minimax.available || Boolean(config.minimax.apiKey.trim());
   const llmReady = llmCredentialStatus.available || Boolean(llmConfig.apiKey.trim());
@@ -226,6 +232,26 @@ export function TtsSettingsPage({
       setRequestState({ kind: "success", message: `连接成功 · 返回 ${audio.segments} 段音频` });
     } catch (error) {
       setRequestState({ kind: "error", message: error instanceof Error ? error.message : "连接失败" });
+    }
+  };
+
+  const handlePreviewVoice = async (voice: TtsVoice) => {
+    setPreviewingVoiceId(voice.id);
+    setRequestState({ kind: "busy", message: `正在生成“${voice.name}”短句试听…` });
+    try {
+      const audio = await synthesizeTts({
+        provider: voice.provider,
+        text: "你好，这是一段音色试听。",
+        voiceId: voice.id,
+        speed: ttsSpeed,
+        config,
+      });
+      setVoicePreview({ name: voice.name, url: URL.createObjectURL(audio.blob) });
+      setRequestState({ kind: "success", message: `试听已生成 · ${voice.name}` });
+    } catch (error) {
+      setRequestState({ kind: "error", message: error instanceof Error ? error.message : "试听生成失败" });
+    } finally {
+      setPreviewingVoiceId("");
     }
   };
 
@@ -425,7 +451,7 @@ export function TtsSettingsPage({
                         <button className={config.volcengine.version === "2.0" ? "selected" : ""} onClick={() => pickVolcengineVersion("2.0")} type="button"><strong>语音合成 2.0</strong><span>更省 · 情感自然</span></button>
                         <button className={config.volcengine.version === "1.0" ? "selected" : ""} onClick={() => pickVolcengineVersion("1.0")} type="button"><strong>语音合成 1.0</strong><span>经典音色</span></button>
                       </div>
-                      <VoiceCards voices={volcengineVoices.filter((voice) => voice.version === config.volcengine.version)} value={config.volcengine.voiceId} onChange={(voiceId) => updateVolcengine({ voiceId })} />
+                      <VoiceCards voices={volcengineVoices.filter((voice) => voice.version === config.volcengine.version)} value={config.volcengine.voiceId} onChange={(voiceId) => updateVolcengine({ voiceId })} onPreview={handlePreviewVoice} previewingVoiceId={previewingVoiceId} />
                     </Field>
                   </>
                 ) : (
@@ -441,11 +467,11 @@ export function TtsSettingsPage({
                         ))}
                       </div>
                     </Field>
-                    <Field label="系统精选音色" help="创建任务时会以此为默认；需要更多选择时读取下方完整音色库。"><VoiceCards voices={minimaxVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} /></Field>
+                    <Field label="系统精选音色" help="创建任务时会以此为默认；点击卡片选择，点击“试听”生成短句音频。"><VoiceCards voices={minimaxVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} onPreview={handlePreviewVoice} previewingVoiceId={previewingVoiceId} /></Field>
                     <div className="tts-clone-actions">
                       <div className="tts-clone-heading">
                         <strong>MiniMax 完整系统音色库</strong>
-                        <small>{systemVoices.length ? `已读取 ${systemVoices.length} 个系统音色，可按名称、标签或 voice ID 搜索。` : "同一 API 当前可返回完整系统音色列表；读取动作不会上传任何电脑文件。"}</small>
+                        <small>{systemVoices.length ? `已读取 ${systemVoices.length} 个系统音色，可按名称、标签或 voice ID 搜索；试听会调用一次短句 TTS。` : "同一 API 当前可返回完整系统音色列表；读取动作不会上传任何电脑文件。"}</small>
                       </div>
                       <div>
                         {systemVoices.length ? <button type="button" onClick={() => setShowVoiceCatalog((open) => !open)}>{showVoiceCatalog ? "收起音色库" : `浏览全部 ${systemVoices.length} 个`}</button> : null}
@@ -458,7 +484,7 @@ export function TtsSettingsPage({
                           <input value={voiceSearch} onChange={(event) => setVoiceSearch(event.target.value)} placeholder="搜索音色名称、标签或 voice ID" />
                           <span>{filteredSystemVoices.length} / {systemVoices.length}</span>
                         </div>
-                        {filteredSystemVoices.length ? <VoiceCards voices={filteredSystemVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} /> : <p>没有匹配的 MiniMax 系统音色。</p>}
+                        {filteredSystemVoices.length ? <VoiceCards voices={filteredSystemVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} onPreview={handlePreviewVoice} previewingVoiceId={previewingVoiceId} /> : <p>没有匹配的 MiniMax 系统音色。</p>}
                       </div>
                     ) : null}
                     <div className="tts-clone-actions">
@@ -468,7 +494,7 @@ export function TtsSettingsPage({
                       </div>
                       <div><button type="button" onClick={() => setShowCloneForm((open) => !open)}>＋ 上传并创建新克隆</button></div>
                     </div>
-                    {config.minimax.clonedVoices.length ? <VoiceCards voices={config.minimax.clonedVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} /> : <p className="tts-empty-voices">读取平台后，会在这里显示账号已有的克隆音色。</p>}
+                    {config.minimax.clonedVoices.length ? <VoiceCards voices={config.minimax.clonedVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} onPreview={handlePreviewVoice} previewingVoiceId={previewingVoiceId} /> : <p className="tts-empty-voices">读取平台后，会在这里显示账号已有的克隆音色。</p>}
                     {showCloneForm ? (
                       <div className="tts-clone-form">
                         <label><span>10 秒至 5 分钟清晰人声</span><input type="file" accept="audio/mp3,audio/mp4,audio/wav,audio/x-m4a" onChange={(event) => setCloneFile(event.target.files?.[0] ?? null)} /></label>
@@ -479,6 +505,7 @@ export function TtsSettingsPage({
                     ) : null}
                   </>
                 )}
+                {voicePreview ? <div className="tts-voice-preview-player" aria-live="polite"><div><strong>试听 · {voicePreview.name}</strong><small>短句试听会按当前 TTS 平台的字符计费规则计费。</small></div><audio autoPlay controls src={voicePreview.url} /></div> : null}
                 <Field label="测试语速" help="仅用于本页试听；创建任务仍以任务表单中选定的速度为准。">
                   <div className="settings-speed-grid">{speedOptions.map((speed) => <button className={ttsSpeed === speed ? "active" : ""} key={speed} onClick={() => setTtsSpeed(speed)} type="button">{speed.toFixed(1)}×</button>)}</div>
                 </Field>
@@ -643,6 +670,6 @@ function DiagnosticItem({ label, ok, detail, unavailable = false }: { label: str
   return <div className="settings-diagnostic-item"><span className={unavailable ? "unavailable" : ok ? "ok" : "fail"}>{unavailable ? "–" : ok ? "✓" : "!"}</span><div><strong>{label}</strong><small>{detail}</small></div></div>;
 }
 
-function VoiceCards({ voices, value, onChange }: { voices: TtsVoice[]; value: string; onChange: (voiceId: string) => void }) {
-  return <div className="tts-voice-grid">{voices.map((voice) => <button className={voice.id === value ? "selected" : ""} key={voice.id} onClick={() => onChange(voice.id)} type="button"><strong>{voice.name}</strong><span>{voice.tag}</span>{voice.cloned ? <em>克隆</em> : null}</button>)}</div>;
+function VoiceCards({ voices, value, onChange, onPreview, previewingVoiceId }: { voices: TtsVoice[]; value: string; onChange: (voiceId: string) => void; onPreview: (voice: TtsVoice) => void; previewingVoiceId: string }) {
+  return <div className="tts-voice-grid">{voices.map((voice) => <div className={`tts-voice-card ${voice.id === value ? "selected" : ""}`} key={voice.id}><button className="tts-voice-select" onClick={() => onChange(voice.id)} type="button"><strong>{voice.name}</strong><span>{voice.tag}</span></button><button aria-label={`试听 ${voice.name}`} className="tts-voice-preview" disabled={Boolean(previewingVoiceId)} onClick={() => onPreview(voice)} type="button">{previewingVoiceId === voice.id ? "生成中" : "试听"}</button>{voice.cloned ? <em>克隆</em> : null}</div>)}</div>;
 }
