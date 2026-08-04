@@ -23,6 +23,7 @@ export interface TtsConfig {
     apiKey: string;
     model: MinimaxModel;
     voiceId: string;
+    systemVoices?: TtsVoice[];
     clonedVoices: TtsVoice[];
   };
 }

@@ -18,6 +18,15 @@ export const minimaxVoices: TtsVoice[] = [
   { id: "Chinese (Mandarin)_Gentle_Senior", name: "温柔学姐", tag: "青年女 · 温暖", provider: "minimax" },
 ];
 
+export function availableMinimaxVoices(config: TtsConfig): TtsVoice[] {
+  const voices = [
+    ...minimaxVoices,
+    ...(config.minimax.systemVoices ?? []),
+    ...config.minimax.clonedVoices,
+  ];
+  return voices.filter((voice, index) => voices.findIndex((candidate) => candidate.id === voice.id) === index);
+}
+
 export const defaultTtsConfig: TtsConfig = {
   provider: "volcengine",
   volcengine: {
@@ -30,6 +39,7 @@ export const defaultTtsConfig: TtsConfig = {
     apiKey: "",
     model: "speech-2.8-hd",
     voiceId: minimaxVoices[0].id,
+    systemVoices: [],
     clonedVoices: [],
   },
 };

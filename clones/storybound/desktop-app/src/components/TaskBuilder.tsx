@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { pipelineSteps } from "../data/app-data";
-import { minimaxVoices, volcengineVoices } from "../data/tts-data";
+import { availableMinimaxVoices, volcengineVoices } from "../data/tts-data";
 import { buildCoverImagePrompt } from "../lib/cover-prompt";
 import { generateImages } from "../lib/image-api";
 import { createAiCopy, runLlmPipelineStep } from "../lib/llm-api";
@@ -187,8 +187,8 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   const activeTtsProvider: TtsProvider = form.videoForm === "podcast" ? "volcengine" : form.ttsProvider;
   const availableVoices = useMemo(() => activeTtsProvider === "minimax"
-    ? [...minimaxVoices, ...config.minimax.clonedVoices]
-    : volcengineVoices.filter((voice) => voice.version === config.volcengine.version), [activeTtsProvider, config.minimax.clonedVoices, config.volcengine.version]);
+    ? availableMinimaxVoices(config)
+    : volcengineVoices.filter((voice) => voice.version === config.volcengine.version), [activeTtsProvider, config]);
   const hasTtsCredentials = activeTtsProvider === "minimax"
     ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
     : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);

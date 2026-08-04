@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { minimaxVoices, speedPresets, volcengineVoices } from "../data/tts-data";
+import { availableMinimaxVoices, speedPresets, volcengineVoices } from "../data/tts-data";
 import { synthesizeTts } from "../lib/tts-api";
 import type { TtsConfig, TtsCredentialStatus, TtsProvider, VoiceLabResult, VolcengineVersion } from "../types/tts";
 import "./TtsPages.css";
@@ -31,9 +31,9 @@ export function VoiceLabPage({ config, credentialStatus, onChange, onOpenSetting
   const provider = config.provider;
   const availableVoices = useMemo(
     () => provider === "minimax"
-      ? [...minimaxVoices, ...config.minimax.clonedVoices]
+      ? availableMinimaxVoices(config)
       : volcengineVoices.filter((voice) => voice.version === config.volcengine.version),
-    [config.minimax.clonedVoices, config.volcengine.version, provider],
+    [config, provider],
   );
   const voiceId = provider === "minimax" ? config.minimax.voiceId : config.volcengine.voiceId;
   const selectedVoice = availableVoices.find((voice) => voice.id === voiceId) ?? availableVoices[0];

@@ -81,6 +81,8 @@ export function TtsSettingsPage({
   const [llmTestState, setLlmTestState] = useState<RequestState>({ kind: "idle", message: "" });
   const [imageTestState, setImageTestState] = useState<RequestState>({ kind: "idle", message: "" });
   const [showCloneForm, setShowCloneForm] = useState(false);
+  const [showVoiceCatalog, setShowVoiceCatalog] = useState(false);
+  const [voiceSearch, setVoiceSearch] = useState("");
   const [cloneFile, setCloneFile] = useState<File | null>(null);
   const [cloneName, setCloneName] = useState("");
   const [cloneText, setCloneText] = useState("这是一段示例文本，用来测试克隆音色。");
@@ -89,10 +91,12 @@ export function TtsSettingsPage({
   const [asrProvider, setAsrProvider] = useState<"local" | "volcengine">("local");
   const [diagnosticMessage, setDiagnosticMessage] = useState("");
 
-  const voices = useMemo(
-    () => [...minimaxVoices, ...config.minimax.clonedVoices],
-    [config.minimax.clonedVoices],
-  );
+  const systemVoices = useMemo(() => config.minimax.systemVoices ?? [], [config.minimax.systemVoices]);
+  const filteredSystemVoices = useMemo(() => {
+    const query = voiceSearch.trim().toLocaleLowerCase();
+    if (!query) return systemVoices;
+    return systemVoices.filter((voice) => `${voice.name} ${voice.tag} ${voice.id}`.toLocaleLowerCase().includes(query));
+  }, [systemVoices, voiceSearch]);
 
   const imageReady = credentialStatus.minimax.available || Boolean(config.minimax.apiKey.trim());
   const llmReady = llmCredentialStatus.available || Boolean(llmConfig.apiKey.trim());
@@ -226,13 +230,17 @@ export function TtsSettingsPage({
   };
 
   const handleSync = async () => {
-    setRequestState({ kind: "busy", message: "正在读取 MiniMax 账号已有音色；不会上传本地文件…" });
+    setRequestState({ kind: "busy", message: "正在读取 MiniMax 系统音色与账号克隆音色；不会上传本地文件…" });
     try {
-      const synced = await fetchMinimaxVoices(config.minimax.apiKey);
+      const [system, synced] = await Promise.all([
+        fetchMinimaxVoices(config.minimax.apiKey, "system"),
+        fetchMinimaxVoices(config.minimax.apiKey, "voice_cloning"),
+      ]);
       const merged = new Map<string, TtsVoice>();
       for (const voice of [...config.minimax.clonedVoices, ...synced]) merged.set(voice.id, voice);
-      updateMinimax({ clonedVoices: [...merged.values()] });
-      setRequestState({ kind: "success", message: `已读取 ${synced.length} 个平台已有音色 · 未上传本地文件` });
+      updateMinimax({ systemVoices: system, clonedVoices: [...merged.values()] });
+      setShowVoiceCatalog(true);
+      setRequestState({ kind: "success", message: `已读取 ${system.length} 个系统音色 + ${synced.length} 个克隆音色 · 未上传本地文件` });
     } catch (error) {
       setRequestState({ kind: "error", message: error instanceof Error ? error.message : "读取平台音色失败" });
     }
@@ -433,14 +441,34 @@ export function TtsSettingsPage({
                         ))}
                       </div>
                     </Field>
-                    <Field label="系统精选音色" help="创建任务时会以此为默认。"><VoiceCards voices={voices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} /></Field>
+                    <Field label="系统精选音色" help="创建任务时会以此为默认；需要更多选择时读取下方完整音色库。"><VoiceCards voices={minimaxVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} /></Field>
+                    <div className="tts-clone-actions">
+                      <div className="tts-clone-heading">
+                        <strong>MiniMax 完整系统音色库</strong>
+                        <small>{systemVoices.length ? `已读取 ${systemVoices.length} 个系统音色，可按名称、标签或 voice ID 搜索。` : "同一 API 当前可返回完整系统音色列表；读取动作不会上传任何电脑文件。"}</small>
+                      </div>
+                      <div>
+                        {systemVoices.length ? <button type="button" onClick={() => setShowVoiceCatalog((open) => !open)}>{showVoiceCatalog ? "收起音色库" : `浏览全部 ${systemVoices.length} 个`}</button> : null}
+                        <button type="button" onClick={handleSync} disabled={requestState.kind === "busy"}>⟳ 读取平台全部音色</button>
+                      </div>
+                    </div>
+                    {showVoiceCatalog && systemVoices.length ? (
+                      <div className="tts-voice-library">
+                        <div className="tts-voice-library-search">
+                          <input value={voiceSearch} onChange={(event) => setVoiceSearch(event.target.value)} placeholder="搜索音色名称、标签或 voice ID" />
+                          <span>{filteredSystemVoices.length} / {systemVoices.length}</span>
+                        </div>
+                        {filteredSystemVoices.length ? <VoiceCards voices={filteredSystemVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} /> : <p>没有匹配的 MiniMax 系统音色。</p>}
+                      </div>
+                    ) : null}
                     <div className="tts-clone-actions">
                       <div className="tts-clone-heading">
                         <strong>MiniMax 账号已有克隆音色</strong>
-                        <small>“读取平台已有音色”只查询音色 ID，不会读取或上传电脑文件。</small>
+                        <small>“读取平台全部音色”只查询音色 ID，不会读取或上传电脑文件。</small>
                       </div>
-                      <div><button type="button" onClick={() => setShowCloneForm((open) => !open)}>＋ 上传并创建新克隆</button><button type="button" onClick={handleSync} disabled={requestState.kind === "busy"}>⟳ 读取平台已有音色</button></div>
+                      <div><button type="button" onClick={() => setShowCloneForm((open) => !open)}>＋ 上传并创建新克隆</button></div>
                     </div>
+                    {config.minimax.clonedVoices.length ? <VoiceCards voices={config.minimax.clonedVoices} value={config.minimax.voiceId} onChange={(voiceId) => updateMinimax({ voiceId })} /> : <p className="tts-empty-voices">读取平台后，会在这里显示账号已有的克隆音色。</p>}
                     {showCloneForm ? (
                       <div className="tts-clone-form">
                         <label><span>10 秒至 5 分钟清晰人声</span><input type="file" accept="audio/mp3,audio/mp4,audio/wav,audio/x-m4a" onChange={(event) => setCloneFile(event.target.files?.[0] ?? null)} /></label>

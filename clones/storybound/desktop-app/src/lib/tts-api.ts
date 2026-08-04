@@ -89,11 +89,11 @@ export function testTts(options: Omit<TtsRequestOptions, "text">): Promise<TtsAu
   return requestAudio("/api/tts/test", { ...options, text: "测" });
 }
 
-export async function fetchMinimaxVoices(apiKey: string): Promise<TtsVoice[]> {
+export async function fetchMinimaxVoices(apiKey: string, voiceType: "system" | "voice_cloning" = "voice_cloning"): Promise<TtsVoice[]> {
   const response = await fetch("/api/tts/minimax/voices", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey, voiceType: "voice_cloning" }),
+    body: JSON.stringify({ apiKey, voiceType }),
   });
   if (!response.ok) throw new Error(await responseError(response));
   const payload = (await response.json()) as { voices?: TtsVoice[] };

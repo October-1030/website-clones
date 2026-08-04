@@ -36,6 +36,12 @@
 .tts-clone-actions > .tts-clone-heading { flex-direction: column; gap: 3px; }
 .tts-clone-heading small { max-width: 520px; color: var(--text-muted); font-size: 11px; font-weight: 500; line-height: 1.5; }
 .tts-clone-actions button, .tts-test-button, .tts-link-button, .tts-secondary, .voice-result-head button { padding: 7px 11px; color: var(--text-secondary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.tts-voice-library { max-height: 440px; padding: 12px; margin-top: 12px; overflow-y: auto; background: color-mix(in oklch, var(--bg-input) 88%, transparent); border: 1px solid var(--border); border-radius: 10px; }
+.tts-voice-library-search { position: sticky; z-index: 2; top: -12px; display: flex; align-items: center; gap: 10px; padding: 10px 0 12px; background: var(--bg-card); }
+.tts-voice-library-search input { min-width: 0; height: 38px; flex: 1; padding: 0 12px; color: var(--text-primary); background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; outline: none; }
+.tts-voice-library-search input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in oklch, var(--brand) 11%, transparent); }
+.tts-voice-library-search span, .tts-empty-voices, .tts-voice-library > p { color: var(--text-muted); font-size: 11px; }
+.tts-empty-voices { margin: 10px 0 0; }
 .tts-clone-form { display: grid; grid-template-columns: 1.2fr .8fr 1.4fr auto; align-items: end; gap: 10px; padding: 14px; margin-top: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; }
 .tts-clone-form label { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: 11px; }
 .tts-clone-form input { height: 38px; }

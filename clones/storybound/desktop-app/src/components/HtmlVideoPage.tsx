@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { defaultLlmConfig } from "../data/llm-data";
-import { defaultTtsConfig, minimaxVoices, speedPresets } from "../data/tts-data";
+import { availableMinimaxVoices, defaultTtsConfig, speedPresets } from "../data/tts-data";
 import { generateMinimaxImages } from "../lib/image-api";
 import { createAiCopy, runLlmPipelineStep } from "../lib/llm-api";
 import {
@@ -432,9 +432,8 @@ export function HtmlVideoPage({ llmConfig = defaultLlmConfig, ttsConfig = defaul
             : 0;
 
   const voiceOptions = useMemo(() => {
-    const values = [...minimaxVoices, ...ttsConfig.minimax.clonedVoices];
-    return values.filter((voice, index) => values.findIndex((candidate) => candidate.id === voice.id) === index);
-  }, [ttsConfig.minimax.clonedVoices]);
+    return availableMinimaxVoices(ttsConfig);
+  }, [ttsConfig]);
 
   const activeTtsConfig = useMemo<TtsConfig>(() => ({
     ...ttsConfig,
