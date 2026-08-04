@@ -135,7 +135,7 @@ export function DraftTemplatesPage() {
   return (
     <main className="draft-templates-page">
       <header>
-        <div><span>STORYBOUND v1.16.1</span><h1>草稿模板</h1><p>编辑画布、文字轨、画面、边框、免责声明与音量；保存后可在图文任务中直接选用。</p></div>
+        <div><span>STORYBOUND v1.17.0</span><h1>草稿模板</h1><p>编辑画布、文字轨、画面、边框、免责声明与音量；保存后可在图文任务中直接选用。</p></div>
         <div><button type="button" onClick={() => importRef.current?.click()}>导入 JSON</button><input ref={importRef} hidden type="file" accept="application/json,.json" onChange={(event) => void importTemplate(event)} /></div>
       </header>
       {notice ? <div className="draft-template-notice" role="status">{notice}</div> : null}

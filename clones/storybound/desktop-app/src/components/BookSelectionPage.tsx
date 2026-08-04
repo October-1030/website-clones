@@ -40,6 +40,17 @@ export interface SelectionBook {
   sellingPoints: string;
   cover: string;
   sourceUrl: string;
+  sourceName: string;
+  subcategory: string;
+  salesVolume: number | null;
+  potential: number | null;
+  fitWeixin: string;
+  fitDouyin: string;
+  audience: string;
+  benchmarkKeywords: string;
+  commission: string;
+  favorite: boolean;
+  created: boolean;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -71,7 +82,7 @@ export interface BookSelectionPageProps {
 }
 
 interface SelectionStore {
-  version: 1;
+  version: 2;
   lists: SelectionBookList[];
   books: SelectionBook[];
 }
@@ -86,6 +97,17 @@ interface BookDraft {
   sellingPoints: string;
   cover: string;
   sourceUrl: string;
+  sourceName: string;
+  subcategory: string;
+  salesVolume: string;
+  potential: string;
+  fitWeixin: string;
+  fitDouyin: string;
+  audience: string;
+  benchmarkKeywords: string;
+  commission: string;
+  favorite: boolean;
+  created: boolean;
   notes: string;
 }
 
@@ -96,6 +118,7 @@ interface TopicPreset {
 }
 
 type ViewMode = "table" | "cards";
+type BookSort = "rank" | "potential" | "sales" | "recent";
 
 const STORAGE_KEY = "storybound-book-selection-workbench-v1";
 const MAX_LOCAL_COVER_BYTES = 1_200_000;
@@ -109,6 +132,17 @@ const EMPTY_BOOK_DRAFT: BookDraft = {
   sellingPoints: "",
   cover: "",
   sourceUrl: "",
+  sourceName: "人工录入",
+  subcategory: "",
+  salesVolume: "",
+  potential: "",
+  fitWeixin: "",
+  fitDouyin: "",
+  audience: "",
+  benchmarkKeywords: "",
+  commission: "",
+  favorite: false,
+  created: false,
   notes: "",
 };
 const TOPIC_PRESETS: readonly TopicPreset[] = [
@@ -132,6 +166,17 @@ const CSV_FIELDS = [
   "sellingPoints",
   "cover",
   "sourceUrl",
+  "sourceName",
+  "subcategory",
+  "salesVolume",
+  "potential",
+  "fitWeixin",
+  "fitDouyin",
+  "audience",
+  "benchmarkKeywords",
+  "commission",
+  "favorite",
+  "created",
   "notes",
 ] as const;
 
@@ -155,6 +200,10 @@ function readOptionalNumber(value: unknown, maximum?: number): number | null {
   const number = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(number) || number < 0) return null;
   return maximum === undefined ? number : Math.min(number, maximum);
+}
+
+function readBoolean(value: unknown): boolean {
+  return value === true || value === 1 || value === "1" || value === "true" || value === "是";
 }
 
 function readCategory(value: unknown): BookCategory {
@@ -190,6 +239,17 @@ function normalizeBook(value: unknown, listId: string): SelectionBook | null {
     sellingPoints: readString(value.sellingPoints),
     cover: readString(value.cover),
     sourceUrl: readString(value.sourceUrl),
+    sourceName: readString(value.sourceName) || "人工录入",
+    subcategory: readString(value.subcategory) || readString(value.cat),
+    salesVolume: readOptionalNumber(value.salesVolume ?? value.comments),
+    potential: readOptionalNumber(value.potential ?? value.star, 5),
+    fitWeixin: readString(value.fitWeixin) || readString(value.fitWx),
+    fitDouyin: readString(value.fitDouyin) || readString(value.fitDy),
+    audience: readString(value.audience),
+    benchmarkKeywords: readString(value.benchmarkKeywords) || readString(value.kw),
+    commission: readString(value.commission),
+    favorite: readBoolean(value.favorite ?? value.fav),
+    created: readBoolean(value.created),
     notes: readString(value.notes),
     createdAt: readString(value.createdAt) || timestamp,
     updatedAt: readString(value.updatedAt) || timestamp,
@@ -203,14 +263,14 @@ function readStore(): SelectionStore {
     preset: "",
     createdAt: new Date().toISOString(),
   };
-  if (typeof window === "undefined") return { version: 1, lists: [initialList], books: [] };
+  if (typeof window === "undefined") return { version: 2, lists: [initialList], books: [] };
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
     if (!isRecord(parsed) || !Array.isArray(parsed.lists)) {
-      return { version: 1, lists: [initialList], books: [] };
+      return { version: 2, lists: [initialList], books: [] };
     }
     const lists = parsed.lists.map(normalizeList).filter((item): item is SelectionBookList => item !== null);
-    if (lists.length === 0) return { version: 1, lists: [initialList], books: [] };
+    if (lists.length === 0) return { version: 2, lists: [initialList], books: [] };
     const listIds = new Set(lists.map((list) => list.id));
     const books = Array.isArray(parsed.books)
       ? parsed.books.flatMap((value) => {
@@ -221,13 +281,13 @@ function readStore(): SelectionStore {
           return book ? [book] : [];
         })
       : [];
-    return { version: 1, lists, books };
+    return { version: 2, lists, books };
   } catch {
-    return { version: 1, lists: [initialList], books: [] };
+    return { version: 2, lists: [initialList], books: [] };
   }
 }
 
-function escapeCsv(value: string | number | null): string {
+function escapeCsv(value: string | number | boolean | null): string {
   if (value === null) return "";
   const text = String(value);
   return /[",\r\n]/.test(text) ? `"${text.replaceAll("\"", "\"\"")}"` : text;
@@ -335,7 +395,14 @@ export function BookSelectionPage({
   const [categoryFilter, setCategoryFilter] = useState<"all" | BookCategory>("all");
   const [maxRank, setMaxRank] = useState("");
   const [minRating, setMinRating] = useState("");
+  const [minPotential, setMinPotential] = useState("");
+  const [createdFilter, setCreatedFilter] = useState<"all" | "yes" | "no">("all");
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [sort, setSort] = useState<BookSort>("rank");
   const [viewMode, setViewMode] = useState<ViewMode>("table");
+  const [themeQuery, setThemeQuery] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [preciseUrl, setPreciseUrl] = useState("");
   const [newListName, setNewListName] = useState("");
   const [showListForm, setShowListForm] = useState(false);
   const [showBookForm, setShowBookForm] = useState(false);
@@ -376,9 +443,17 @@ export function BookSelectionPage({
         if (categoryFilter !== "all" && book.category !== categoryFilter) return false;
         if (maximumRank !== null && (book.salesRank === null || book.salesRank > maximumRank)) return false;
         if (minimumRating !== null && (book.rating === null || book.rating < minimumRating)) return false;
+        const minimumPotential = readOptionalNumber(minPotential, 5);
+        if (minimumPotential !== null && (book.potential === null || book.potential < minimumPotential)) return false;
+        if (createdFilter === "yes" && !book.created) return false;
+        if (createdFilter === "no" && book.created) return false;
+        if (favoriteOnly && !book.favorite) return false;
         return true;
       })
       .toSorted((left, right) => {
+        if (sort === "potential") return (right.potential ?? -1) - (left.potential ?? -1);
+        if (sort === "sales") return (right.salesVolume ?? -1) - (left.salesVolume ?? -1);
+        if (sort === "recent") return right.updatedAt.localeCompare(left.updatedAt);
         if (left.salesRank === null && right.salesRank !== null) return 1;
         if (left.salesRank !== null && right.salesRank === null) return -1;
         if (left.salesRank !== null && right.salesRank !== null && left.salesRank !== right.salesRank) {
@@ -386,7 +461,7 @@ export function BookSelectionPage({
         }
         return right.createdAt.localeCompare(left.createdAt);
       });
-  }, [categoryFilter, deferredQuery, maxRank, minRating, selectedBooks]);
+  }, [categoryFilter, createdFilter, deferredQuery, favoriteOnly, maxRank, minPotential, minRating, selectedBooks, sort]);
 
   const createList = (name: string, preset = ""): SelectionBookList | null => {
     const trimmedName = name.trim();
@@ -470,6 +545,17 @@ export function BookSelectionPage({
       sellingPoints: book.sellingPoints,
       cover: book.cover,
       sourceUrl: book.sourceUrl,
+      sourceName: book.sourceName,
+      subcategory: book.subcategory,
+      salesVolume: book.salesVolume === null ? "" : String(book.salesVolume),
+      potential: book.potential === null ? "" : String(book.potential),
+      fitWeixin: book.fitWeixin,
+      fitDouyin: book.fitDouyin,
+      audience: book.audience,
+      benchmarkKeywords: book.benchmarkKeywords,
+      commission: book.commission,
+      favorite: book.favorite,
+      created: book.created,
       notes: book.notes,
     });
     setShowBookForm(true);
@@ -503,6 +589,17 @@ export function BookSelectionPage({
                 sellingPoints: bookDraft.sellingPoints.trim(),
                 cover: bookDraft.cover.trim(),
                 sourceUrl: bookDraft.sourceUrl.trim(),
+                sourceName: bookDraft.sourceName.trim() || "人工录入",
+                subcategory: bookDraft.subcategory.trim(),
+                salesVolume: readOptionalNumber(bookDraft.salesVolume),
+                potential: readOptionalNumber(bookDraft.potential, 5),
+                fitWeixin: bookDraft.fitWeixin.trim(),
+                fitDouyin: bookDraft.fitDouyin.trim(),
+                audience: bookDraft.audience.trim(),
+                benchmarkKeywords: bookDraft.benchmarkKeywords.trim(),
+                commission: bookDraft.commission.trim(),
+                favorite: bookDraft.favorite,
+                created: bookDraft.created,
                 notes: bookDraft.notes.trim(),
                 updatedAt: timestamp,
               }
@@ -523,6 +620,17 @@ export function BookSelectionPage({
         sellingPoints: bookDraft.sellingPoints.trim(),
         cover: bookDraft.cover.trim(),
         sourceUrl: bookDraft.sourceUrl.trim(),
+        sourceName: bookDraft.sourceName.trim() || "人工录入",
+        subcategory: bookDraft.subcategory.trim(),
+        salesVolume: readOptionalNumber(bookDraft.salesVolume),
+        potential: readOptionalNumber(bookDraft.potential, 5),
+        fitWeixin: bookDraft.fitWeixin.trim(),
+        fitDouyin: bookDraft.fitDouyin.trim(),
+        audience: bookDraft.audience.trim(),
+        benchmarkKeywords: bookDraft.benchmarkKeywords.trim(),
+        commission: bookDraft.commission.trim(),
+        favorite: bookDraft.favorite,
+        created: bookDraft.created,
         notes: bookDraft.notes.trim(),
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -611,7 +719,7 @@ export function BookSelectionPage({
     }
     onCreateCommerceTask({
       bookId: book.id,
-      listName: selectedList?.name ?? "",
+      listName: store.lists.find((list) => list.id === book.listId)?.name ?? selectedList?.name ?? "",
       title: book.title,
       author: book.author,
       price: book.price,
@@ -619,9 +727,21 @@ export function BookSelectionPage({
       sellingPoints: book.sellingPoints,
       cover: book.cover,
       sourceUrl: book.sourceUrl,
-      notes: book.notes,
+      notes: [
+        book.subcategory ? `细分类目：${book.subcategory}` : "",
+        book.audience ? `目标人群：${book.audience}` : "",
+        book.benchmarkKeywords ? `对标关键词：${book.benchmarkKeywords}` : "",
+        book.commission ? `佣金比例：${book.commission}` : "",
+        book.notes,
+      ].filter(Boolean).join("\n"),
     });
-    setNotice(`已把《${book.title}》的商品信息交给带货任务流程。`);
+    setStore((current) => ({
+      ...current,
+      books: current.books.map((item) => item.id === book.id
+        ? { ...item, created: true, updatedAt: new Date().toISOString() }
+        : item),
+    }));
+    setNotice(`已把《${book.title}》的真实本地资料交给带货任务流程，并标记为已创作。`);
   };
 
   const searchBenchmark = (book: SelectionBook): void => {
@@ -629,16 +749,51 @@ export function BookSelectionPage({
       setNotice(`尚未接入页面跳转回调；可在对标监控中搜索“${book.title}”。`);
       return;
     }
-    onSearchBenchmark(book.title, book);
+    onSearchBenchmark(book.benchmarkKeywords || book.title, book);
+  };
+
+  const toggleBookFlag = (bookId: string, flag: "favorite" | "created"): void => {
+    setStore((current) => ({
+      ...current,
+      books: current.books.map((book) => book.id === bookId
+        ? { ...book, [flag]: !book[flag], updatedAt: new Date().toISOString() }
+        : book),
+    }));
+  };
+
+  const explainRemoteGeneration = (): void => {
+    setNotice(`“${themeQuery.trim() || "当前主题"}”的当当抓榜与 LLM 智能筛选依赖原版桌面端私有抓取环境，当前不可用。请使用下方快捷赛道创建空书单，再手工添加或导入真实数据。`);
+  };
+
+  const openPreciseEntry = (): void => {
+    if (!selectedList) {
+      setNotice("请先创建或选择一个书单。");
+      return;
+    }
+    const sourceUrl = preciseUrl.trim();
+    if (!sourceUrl) {
+      setNotice("请粘贴商品页或资料来源链接。");
+      return;
+    }
+    const preset = TOPIC_PRESETS.find((item) => item.name === selectedList.preset);
+    setEditingBookId("");
+    setBookDraft({
+      ...EMPTY_BOOK_DRAFT,
+      category: preset?.categories[0] ?? "文学",
+      sourceUrl,
+      sourceName: "链接人工录入",
+    });
+    setShowBookForm(true);
+    setNotice("已把链接带入本地编辑器；当前不会伪装成已抓取，请核对并填写真实书名、价格和销量资料。");
   };
 
   return (
     <main className="book-selection-page">
       <header className="book-selection-header">
         <div>
-          <span>LOCAL PRODUCT LIBRARY</span>
-          <h1>选品助手</h1>
-          <p>建立自己的选题与图书商品资料库。排名、评分和价格均为手工或导入数据，不代表实时销售。</p>
+          <span>BOOK COMMERCE WORKBENCH</span>
+          <h1>选品助手 · 图书带货</h1>
+          <p>保留 v1.17 的选题、书单、筛选、详情、对标与建任务流程；本地数据不会冒充当当实时榜单。</p>
         </div>
         <div className="book-selection-stats">
           <span><strong>{store.lists.length}</strong> 书单</span>
@@ -653,9 +808,31 @@ export function BookSelectionPage({
         </div>
       ) : null}
 
+      <section className="book-quest" aria-labelledby="book-quest-title">
+        <div className="book-quest__heading">
+          <div><strong id="book-quest-title">主题生成书单</strong><span>原版：当当畅销榜抓取 + LLM 智能筛选</span></div>
+          <em>私有抓取依赖未连接</em>
+        </div>
+        <div className="book-quest__input">
+          <span aria-hidden="true">⌕</span>
+          <input value={themeQuery} onChange={(event) => setThemeQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") explainRemoteGeneration(); }} placeholder="输入人群/主题方向，如：民国才女 · 抗衰养生 · 认知成长…" />
+          <button className="book-primary" type="button" onClick={explainRemoteGeneration}>生成书单</button>
+        </div>
+        <p className="book-quest__hint"><strong>当前真实边界：</strong>没有原站的 Tauri 抓取命令、当当反爬环境和榜单 LLM 服务，因此不会填充虚构书目。可用下方预设建空书单，或导入/录入真实资料。</p>
+        <button className={`book-advanced-toggle ${advancedOpen ? "is-open" : ""}`} type="button" onClick={() => setAdvancedOpen((value) => !value)}>高级选项 <span>⌄</span></button>
+        {advancedOpen ? (
+          <div className="book-advanced-panel">
+            <div className="book-private-option"><span>时间窗</span><button type="button" disabled>近 7 天</button><button type="button" disabled>近 30 天</button><button type="button" disabled>近一年</button><small>需原站榜单服务</small></div>
+            <div className="book-private-option"><span>抓取页数</span><button type="button" disabled>1 页</button><button type="button" disabled>2 页</button><button type="button" disabled>3 页</button><small>需原站抓取命令</small></div>
+            <div className="book-private-option"><span>叠加豆瓣评分</span><button type="button" disabled>关闭</button><small>逐本抓取依赖不可用</small></div>
+            <div className="book-precise-entry"><label>精准加书 · 本地回退<input value={preciseUrl} onChange={(event) => setPreciseUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") openPreciseEntry(); }} placeholder="粘贴当当商品链接或其他公开资料来源" /></label><button className="book-primary" type="button" onClick={openPreciseEntry}>带入编辑器</button></div>
+          </div>
+        ) : null}
+      </section>
+
       <section className="book-topic-presets" aria-labelledby="book-topic-title">
         <div className="book-section-heading">
-          <div><strong id="book-topic-title">九个主题预设</strong><span>点击只会创建空的专题书单，不会生成虚构书籍或销量。</span></div>
+          <div><strong id="book-topic-title">快捷赛道</strong><span>对应 v1.17 的九个主题入口；点击只创建空书单，不生成虚构书籍或销量。</span></div>
         </div>
         <div className="book-topic-grid">
           {TOPIC_PRESETS.map((preset) => (
@@ -716,6 +893,10 @@ export function BookSelectionPage({
             <label><span>类别</span><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as "all" | BookCategory)}><option value="all">全部类别</option>{BOOK_CATEGORIES.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
             <label><span>排名 ≤</span><input min="1" type="number" value={maxRank} onChange={(event) => setMaxRank(event.target.value)} placeholder="不限" /></label>
             <label><span>评分 ≥</span><input min="0" max="10" step=".1" type="number" value={minRating} onChange={(event) => setMinRating(event.target.value)} placeholder="不限" /></label>
+            <label><span>潜力 ≥</span><select value={minPotential} onChange={(event) => setMinPotential(event.target.value)}><option value="">全部潜力</option><option value="5">★ 5</option><option value="4">★ 4+</option><option value="3">★ 3+</option></select></label>
+            <label><span>创作状态</span><select value={createdFilter} onChange={(event) => setCreatedFilter(event.target.value as "all" | "yes" | "no")}><option value="all">全部</option><option value="no">未创作</option><option value="yes">已创作</option></select></label>
+            <label><span>排序</span><select value={sort} onChange={(event) => setSort(event.target.value as BookSort)}><option value="rank">榜单排名</option><option value="potential">带货潜力</option><option value="sales">销量级</option><option value="recent">最近更新</option></select></label>
+            <button className={favoriteOnly ? "book-favorite-filter is-selected" : "book-favorite-filter"} type="button" onClick={() => setFavoriteOnly((value) => !value)}>☆ 只看收藏</button>
           </div>
 
           <div className="book-actionbar">
@@ -746,11 +927,22 @@ export function BookSelectionPage({
                 <label>价格<input min="0" step=".01" type="number" value={bookDraft.price} onChange={(event) => setBookDraft((draft) => ({ ...draft, price: event.target.value }))} placeholder="手工填写" /></label>
                 <label>销售排名<input min="1" type="number" value={bookDraft.salesRank} onChange={(event) => setBookDraft((draft) => ({ ...draft, salesRank: event.target.value }))} placeholder="非实时" /></label>
                 <label>评分<input min="0" max="10" step=".1" type="number" value={bookDraft.rating} onChange={(event) => setBookDraft((draft) => ({ ...draft, rating: event.target.value }))} /></label>
+                <label>细分类目<input value={bookDraft.subcategory} onChange={(event) => setBookDraft((draft) => ({ ...draft, subcategory: event.target.value }))} placeholder="如：民国才女" /></label>
+                <label>销量级 / 评论数<input min="0" type="number" value={bookDraft.salesVolume} onChange={(event) => setBookDraft((draft) => ({ ...draft, salesVolume: event.target.value }))} placeholder="真实来源值" /></label>
+                <label>带货潜力<input min="1" max="5" type="number" value={bookDraft.potential} onChange={(event) => setBookDraft((draft) => ({ ...draft, potential: event.target.value }))} placeholder="1-5" /></label>
+                <label>佣金比例<input value={bookDraft.commission} onChange={(event) => setBookDraft((draft) => ({ ...draft, commission: event.target.value }))} placeholder="人工查询，如 25%" /></label>
                 <label className="book-editor-span-two">封面 URL<input value={bookDraft.cover} onChange={(event) => setBookDraft((draft) => ({ ...draft, cover: event.target.value }))} placeholder="https://... 或选择本地小图" /></label>
                 <label className="book-local-cover">本地封面<input type="file" accept="image/*" onChange={(event) => void importCover(event)} /></label>
+                <label>数据来源<input value={bookDraft.sourceName} onChange={(event) => setBookDraft((draft) => ({ ...draft, sourceName: event.target.value }))} placeholder="如：当当·手工添加" /></label>
                 <label className="book-editor-span-four">来源 URL<input type="url" value={bookDraft.sourceUrl} onChange={(event) => setBookDraft((draft) => ({ ...draft, sourceUrl: event.target.value }))} placeholder="商品页或资料来源" /></label>
                 <label className="book-editor-span-four">核心卖点 *<textarea value={bookDraft.sellingPoints} onChange={(event) => setBookDraft((draft) => ({ ...draft, sellingPoints: event.target.value }))} placeholder="每行一个卖点，或粘贴一段商品信息…" /></label>
+                <label className="book-editor-span-two">目标人群<input value={bookDraft.audience} onChange={(event) => setBookDraft((draft) => ({ ...draft, audience: event.target.value }))} placeholder="如：40-65 岁女性" /></label>
+                <label>视频号适合度<input value={bookDraft.fitWeixin} onChange={(event) => setBookDraft((draft) => ({ ...draft, fitWeixin: event.target.value }))} placeholder="极高 / 高 / 中 / 低" /></label>
+                <label>抖音适合度<input value={bookDraft.fitDouyin} onChange={(event) => setBookDraft((draft) => ({ ...draft, fitDouyin: event.target.value }))} placeholder="极高 / 高 / 中 / 低" /></label>
+                <label className="book-editor-span-four">对标视频关键词<input value={bookDraft.benchmarkKeywords} onChange={(event) => setBookDraft((draft) => ({ ...draft, benchmarkKeywords: event.target.value }))} placeholder="用于交接到对标监控" /></label>
                 <label className="book-editor-span-four">备注<textarea value={bookDraft.notes} onChange={(event) => setBookDraft((draft) => ({ ...draft, notes: event.target.value }))} /></label>
+                <label className="book-editor-check"><input type="checkbox" checked={bookDraft.favorite} onChange={(event) => setBookDraft((draft) => ({ ...draft, favorite: event.target.checked }))} /> 收藏进选品库</label>
+                <label className="book-editor-check"><input type="checkbox" checked={bookDraft.created} onChange={(event) => setBookDraft((draft) => ({ ...draft, created: event.target.checked }))} /> 已用此书创建任务</label>
               </div>
               {bookDraft.cover ? <div className="book-cover-preview"><img src={bookDraft.cover} alt="待保存书籍封面预览" /><button type="button" onClick={() => setBookDraft((draft) => ({ ...draft, cover: "" }))}>移除封面</button></div> : null}
               <div className="book-editor__actions">
@@ -771,19 +963,22 @@ export function BookSelectionPage({
             <>
               <div className={`book-table-wrap ${viewMode === "table" ? "is-visible" : ""}`}>
                 <table className="book-table">
-                  <thead><tr><th>书籍</th><th>类别</th><th>价格</th><th>排名</th><th>评分</th><th>核心卖点</th><th>操作</th></tr></thead>
+                  <thead><tr><th>当当榜</th><th>书籍</th><th>细分类目</th><th>核心卖点</th><th>销量级</th><th>带货潜力</th><th>视频号</th><th>对标关键词</th><th>已创作</th><th>操作</th></tr></thead>
                   <tbody>
                     {visibleBooks.map((book) => {
                       const incomplete = !book.author || !book.sellingPoints || !book.price;
                       return (
                         <tr key={book.id}>
-                          <td><div className="book-title-cell">{book.cover ? <img src={book.cover} alt="" /> : <span>书</span>}<div><strong>{book.title}</strong><small>{book.author || "作者未填"}{incomplete ? <em>资料待补</em> : null}</small></div></div></td>
-                          <td><span className="book-category">{book.category}</span></td>
-                          <td>{book.price ? `¥${book.price}` : <span className="book-warning">未填</span>}</td>
                           <td className={rankClass(book.salesRank)}>{book.salesRank === null ? "—" : `#${book.salesRank}`}</td>
-                          <td>{book.rating === null ? "—" : book.rating.toFixed(1)}</td>
+                          <td><div className="book-title-cell">{book.cover ? <img src={book.cover} alt="" /> : <span>书</span>}<div><strong>{book.title}</strong><small>{book.author || "作者未填"}{book.price ? ` · ¥${book.price}` : ""}{incomplete ? <em>资料待补</em> : null}</small></div></div></td>
+                          <td><span className="book-category">{book.subcategory || book.category}</span></td>
                           <td><p className="book-selling-points">{book.sellingPoints || "暂无卖点"}</p></td>
-                          <td><div className="book-row-actions"><button type="button" onClick={() => openEditBookForm(book)}>编辑</button><button type="button" onClick={() => createCommerceTask(book)}>带货任务</button><button type="button" onClick={() => searchBenchmark(book)}>查对标</button><button className="is-danger" type="button" onClick={() => deleteBook(book)}>删除</button></div></td>
+                          <td><span className="book-sales-value">{book.salesVolume === null ? "—" : book.salesVolume.toLocaleString("zh-CN")}</span>{book.rating !== null ? <small className="book-douban-score">评分 {book.rating.toFixed(1)}</small> : null}</td>
+                          <td><span className="book-potential">{book.potential === null ? "—" : Array.from({ length: 5 }, (_, index) => index < Math.round(book.potential ?? 0) ? "★" : "☆").join("")}</span></td>
+                          <td><span className="book-fit">{book.fitWeixin || "—"}</span></td>
+                          <td><button className="book-keyword" type="button" onClick={() => searchBenchmark(book)}>{book.benchmarkKeywords || book.title}</button></td>
+                          <td><button className={book.created ? "book-created is-selected" : "book-created"} type="button" onClick={() => toggleBookFlag(book.id, "created")}>{book.created ? "✓ 已创作" : "未创作"}</button></td>
+                          <td><div className="book-row-actions"><button type="button" onClick={() => toggleBookFlag(book.id, "favorite")}>{book.favorite ? "★" : "☆"}</button><button type="button" onClick={() => openEditBookForm(book)}>编辑</button><button type="button" onClick={() => createCommerceTask(book)}>建任务</button><button className="is-danger" type="button" onClick={() => deleteBook(book)}>删除</button></div></td>
                         </tr>
                       );
                     })}
@@ -801,11 +996,12 @@ export function BookSelectionPage({
                         <div className="book-card-heading"><span>{book.category}</span>{incomplete ? <em>资料待补</em> : null}</div>
                         <h2>{book.title}</h2>
                         <p className="book-card-author">{book.author || "作者未填写"}</p>
-                        <dl><div><dt>价格</dt><dd>{book.price ? `¥${book.price}` : "—"}</dd></div><div><dt>评分</dt><dd>{book.rating === null ? "—" : book.rating.toFixed(1)}</dd></div></dl>
+                        <dl><div><dt>价格</dt><dd>{book.price ? `¥${book.price}` : "—"}</dd></div><div><dt>评分</dt><dd>{book.rating === null ? "—" : book.rating.toFixed(1)}</dd></div><div><dt>潜力</dt><dd>{book.potential === null ? "—" : `${Math.round(book.potential)}★`}</dd></div></dl>
                         <p className="book-card-points">{book.sellingPoints || "暂无核心卖点"}</p>
+                        <p className="book-card-source">{book.sourceName || "人工录入"}{book.created ? " · 已创作" : ""}{book.favorite ? " · 已收藏" : ""}</p>
                         {book.sourceUrl ? <a href={book.sourceUrl} target="_blank" rel="noreferrer">打开资料来源 ↗</a> : null}
                       </div>
-                      <footer><button type="button" onClick={() => openEditBookForm(book)}>编辑</button><button type="button" onClick={() => searchBenchmark(book)}>去对标监控搜索</button><button className="book-primary" type="button" onClick={() => createCommerceTask(book)}>用此书商品信息创建带货任务</button><button className="is-danger" type="button" onClick={() => deleteBook(book)}>删除</button></footer>
+                      <footer><button type="button" onClick={() => toggleBookFlag(book.id, "favorite")}>{book.favorite ? "★ 已收藏" : "☆ 收藏"}</button><button type="button" onClick={() => openEditBookForm(book)}>编辑</button><button type="button" onClick={() => searchBenchmark(book)}>去对标监控搜索</button><button className="book-primary" type="button" onClick={() => createCommerceTask(book)}>用此书商品信息创建带货任务</button><button className="is-danger" type="button" onClick={() => deleteBook(book)}>删除</button></footer>
                     </article>
                   );
                 })}

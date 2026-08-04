@@ -509,7 +509,7 @@ export function BenchmarkPage({
 
   const openNewAccountForm = (): void => {
     setEditingAccountId("");
-    setAccountDraft({ ...EMPTY_ACCOUNT_DRAFT, name: query.trim() });
+    setAccountDraft(EMPTY_ACCOUNT_DRAFT);
     setShowAccountForm(true);
   };
 
@@ -525,14 +525,14 @@ export function BenchmarkPage({
     setShowAccountForm(true);
   };
 
-  const saveAccount = (event: FormEvent<HTMLFormElement>): void => {
+  const saveAccount = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
-    const name = accountDraft.name.trim();
-    if (!name) {
-      setNotice("请填写账号名。");
-      return;
-    }
     if (editingAccountId) {
+      const name = accountDraft.name.trim();
+      if (!name) {
+        setNotice("请填写账号名。");
+        return;
+      }
       setStore((current) => ({
         ...current,
         accounts: current.accounts.map((account) =>
@@ -549,30 +549,63 @@ export function BenchmarkPage({
         ),
       }));
       setNotice(`已更新账号“${name}”。`);
-    } else {
-      const account: BenchmarkAccount = {
-        id: createId("account"),
-        name,
-        sourceUrl: accountDraft.sourceUrl.trim(),
-        group: accountDraft.group.trim(),
-        track: accountDraft.track.trim(),
-        notes: accountDraft.notes.trim(),
-        favorite: false,
-        avatar: "",
-        remoteId: "",
-        lastBuffer: "",
-        continueFlag: 0,
-        pageDepth: 0,
-        lastRefreshAt: "",
-        createdAt: new Date().toISOString(),
-      };
-      setStore((current) => ({ ...current, accounts: [account, ...current.accounts] }));
-      setSelectedAccountId(account.id);
-      setNotice(`已添加账号“${name}”，仅保存公开来源与手工资料。`);
+      setShowAccountForm(false);
+      setEditingAccountId("");
+      setAccountDraft(EMPTY_ACCOUNT_DRAFT);
+      return;
     }
-    setShowAccountForm(false);
-    setEditingAccountId("");
-    setAccountDraft(EMPTY_ACCOUNT_DRAFT);
+
+    const sourceUrl = accountDraft.sourceUrl.trim();
+    if (!sourceUrl) {
+      setNotice("请粘贴视频分享链接");
+      return;
+    }
+
+    setBusyAction("add-account");
+    setNotice("");
+    try {
+      const resolved = await resolveBenchmarkAccount(sourceUrl);
+      if (!resolved.remoteId) {
+        throw new Error("没解析出账号，确认链接是该账号的视频分享链接");
+      }
+      const existing = store.accounts.find((account) =>
+        account.remoteId === resolved.remoteId
+        || (!account.remoteId && account.sourceUrl === resolved.sourceUrl));
+      const accountId = existing?.id || createId("account");
+      const account: BenchmarkAccount = {
+        id: accountId,
+        name: resolved.name || existing?.name || "未知账号",
+        sourceUrl: resolved.sourceUrl,
+        group: accountDraft.group.trim() || existing?.group || "",
+        track: existing?.track || "",
+        notes: existing?.notes || "",
+        favorite: existing?.favorite || false,
+        avatar: existing?.avatar || "",
+        remoteId: resolved.remoteId,
+        lastBuffer: existing?.lastBuffer || "",
+        continueFlag: existing?.continueFlag || 0,
+        pageDepth: existing?.pageDepth || 0,
+        lastRefreshAt: existing?.lastRefreshAt || "",
+        createdAt: existing?.createdAt || new Date().toISOString(),
+      };
+      setStore((current) => ({
+        ...current,
+        accounts: existing
+          ? current.accounts.map((item) => item.id === existing.id ? account : item)
+          : [account, ...current.accounts],
+      }));
+      setSelectedAccountId(accountId);
+      setNotice(existing
+        ? `已识别并更新账号“${account.name}”。`
+        : `已识别并添加账号“${account.name}”。`);
+      setShowAccountForm(false);
+      setEditingAccountId("");
+      setAccountDraft(EMPTY_ACCOUNT_DRAFT);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "账号识别失败。");
+    } finally {
+      setBusyAction("");
+    }
   };
 
   const deleteAccount = (account: BenchmarkAccount): void => {
@@ -651,7 +684,7 @@ export function BenchmarkPage({
   const runVideoParser = async (): Promise<void> => {
     const url = parserUrl.trim();
     if (!url) {
-      setNotice("请先粘贴公开视频分享链接。");
+      setNotice("请先粘贴视频号视频分享链接。");
       return;
     }
     setBusyAction("parse-video");
@@ -753,43 +786,13 @@ export function BenchmarkPage({
     setNotice(account ? "解析结果已更新到现有账号。" : `已建立账号“${nextAccount.name}”并保存作品。`);
   };
 
-  const recognizeAccountFromLink = async (): Promise<void> => {
-    const url = accountDraft.sourceUrl.trim();
-    if (!url) {
-      setNotice("请先粘贴该账号任意一条公开视频分享链接。");
-      return;
-    }
-    setBusyAction("recognize-account");
-    setNotice("");
-    try {
-      if (providerStatus?.accountSync.configured) {
-        const remote = await resolveBenchmarkAccount(url);
-        setAccountDraft((draft) => ({ ...draft, name: remote.name || draft.name }));
-        setNotice(`已由账号数据源识别：${remote.name}`);
-      } else {
-        const video = await parseBenchmarkVideo(url);
-        setAccountDraft((draft) => ({
-          ...draft,
-          name: video.authorName || draft.name,
-        }));
-        setNotice(video.authorName
-          ? `已从公开视频识别作者：${video.authorName}`
-          : "视频已解析，但服务未返回作者名，请手工填写账号名。");
-      }
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "账号识别失败。");
-    } finally {
-      setBusyAction("");
-    }
-  };
-
   const refreshAccount = async (account: BenchmarkAccount): Promise<void> => {
     if (!providerStatus?.accountSync.configured) {
       setNotice("自动刷新尚未配置。原版账号列表接口需要绑定邮箱、设备指纹并可能扣除积分；单视频解析仍可直接使用。");
       return;
     }
     if (!account.remoteId && !account.sourceUrl) {
-      setNotice("此账号没有远端 ID 或公开视频分享链接，无法识别并刷新。");
+      setNotice("此账号没有远端 ID 或视频号分享链接，无法识别并刷新。");
       return;
     }
     if (!window.confirm(`刷新“${account.name}”的最新 15 条作品将调用配置的账号数据源，并可能扣除原站积分。是否继续？`)) return;
@@ -858,7 +861,7 @@ export function BenchmarkPage({
       return;
     }
     if (!account.remoteId && !account.sourceUrl) {
-      setNotice("此账号没有远端 ID 或公开视频分享链接，无法识别并同步。");
+      setNotice("此账号没有远端 ID 或视频号分享链接，无法识别并同步。");
       return;
     }
     if (account.pageDepth > 0 && account.continueFlag !== 1) {
@@ -1005,7 +1008,7 @@ export function BenchmarkPage({
 
   const transcribeSource = async (): Promise<void> => {
     if (!selectedWork?.url) {
-      setNotice("当前作品没有可重新解析的公开视频来源。");
+      setNotice("当前作品没有可重新解析的视频号来源。");
       return;
     }
     if (!onTranscribeSource) {
@@ -1018,9 +1021,9 @@ export function BenchmarkPage({
       const transcript = await onTranscribeSource(selectedWork.url, selectedWork);
       if (!transcript.trim()) throw new Error("转写服务未返回文本");
       updateWork(selectedWork.id, { transcript });
-      setNotice("公开视频文案提取完成，已写入转写文案。");
+      setNotice("视频号视频文案提取完成，已写入转写文案。");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "公开视频文案提取失败。");
+      setNotice(error instanceof Error ? error.message : "视频号视频文案提取失败。");
     } finally {
       setBusyAction("");
     }
@@ -1082,7 +1085,7 @@ export function BenchmarkPage({
         <div>
           <span className="benchmark-page__eyebrow">VIDEO BENCHMARK WORKBENCH</span>
           <h1>对标监控</h1>
-          <p>解析公开视频、同步账号作品、提取文案；账号列表按原版规则分页载入。</p>
+          <p>解析视频号视频、同步视频号账号作品、提取文案；账号列表按原版规则分页载入。</p>
           <div className="benchmark-provider-status" aria-label="对标数据源状态">
             <span className={providerStatus?.singleVideoParser.available ? "is-ready" : ""}>
               单视频解析：{providerStatus?.singleVideoParser.available ? "可用" : "检查中"}
@@ -1115,7 +1118,7 @@ export function BenchmarkPage({
           <header>
             <div>
               <strong>单视频解析 / 无水印链接</strong>
-              <span>使用原版客户端同一路径的公开免费解析接口，不扣 Storybound 积分。</span>
+              <span>粘贴视频号视频分享链接，直接获取数据和无水印下载，不扣 Storybound 积分。</span>
             </div>
             <button type="button" onClick={() => setShowParser(false)} aria-label="关闭单视频解析">×</button>
           </header>
@@ -1124,7 +1127,7 @@ export function BenchmarkPage({
               type="url"
               value={parserUrl}
               onChange={(event) => setParserUrl(event.target.value)}
-              placeholder="粘贴 https://weixin.qq.com/sph/... 或其他公开视频分享链接"
+              placeholder="https://weixin.qq.com/sph/...  或  channels 链接"
               aria-label="待解析视频链接"
             />
             <button
@@ -1173,31 +1176,55 @@ export function BenchmarkPage({
           </div>
 
           {showAccountForm ? (
-            <form className="benchmark-inline-form" onSubmit={saveAccount}>
+            <form className="benchmark-inline-form" onSubmit={(event) => void saveAccount(event)}>
               <div className="benchmark-inline-form__head">
-                <strong>{editingAccountId ? "编辑账号" : "添加账号"}</strong>
+                <div>
+                  <strong>{editingAccountId ? "编辑账号" : "添加对标账号"}</strong>
+                  {!editingAccountId ? <p>粘贴该账号任意一条视频的分享链接，自动识别账号</p> : null}
+                </div>
                 <button type="button" onClick={() => setShowAccountForm(false)} aria-label="关闭账号表单">×</button>
               </div>
-              <label>账号名<input required value={accountDraft.name} onChange={(event) => setAccountDraft((draft) => ({ ...draft, name: event.target.value }))} /></label>
-              <label>公开视频/分享 URL<input type="url" value={accountDraft.sourceUrl} onChange={(event) => setAccountDraft((draft) => ({ ...draft, sourceUrl: event.target.value }))} placeholder="粘贴该账号任意一条公开视频" /></label>
-              {!editingAccountId ? (
-                <button
-                  className="benchmark-recognize-button"
-                  type="button"
-                  disabled={busyAction === "recognize-account"}
-                  onClick={() => void recognizeAccountFromLink()}
-                >
-                  {busyAction === "recognize-account" ? "识别中…" : "从分享链接识别账号"}
-                </button>
-              ) : null}
-              <div className="benchmark-form-grid benchmark-form-grid--two">
-                <label>分组<input list="benchmark-groups" value={accountDraft.group} onChange={(event) => setAccountDraft((draft) => ({ ...draft, group: event.target.value }))} /></label>
-                <label>赛道<input list="benchmark-tracks" value={accountDraft.track} onChange={(event) => setAccountDraft((draft) => ({ ...draft, track: event.target.value }))} /></label>
-              </div>
-              <label>备注<textarea value={accountDraft.notes} onChange={(event) => setAccountDraft((draft) => ({ ...draft, notes: event.target.value }))} /></label>
+              {editingAccountId ? (
+                <>
+                  <label>账号名<input required value={accountDraft.name} onChange={(event) => setAccountDraft((draft) => ({ ...draft, name: event.target.value }))} /></label>
+                  <label>视频号分享 URL<input type="url" value={accountDraft.sourceUrl} onChange={(event) => setAccountDraft((draft) => ({ ...draft, sourceUrl: event.target.value }))} /></label>
+                  <div className="benchmark-form-grid benchmark-form-grid--two">
+                    <label>分组<input list="benchmark-groups" value={accountDraft.group} onChange={(event) => setAccountDraft((draft) => ({ ...draft, group: event.target.value }))} /></label>
+                    <label>赛道<input list="benchmark-tracks" value={accountDraft.track} onChange={(event) => setAccountDraft((draft) => ({ ...draft, track: event.target.value }))} /></label>
+                  </div>
+                  <label>备注<textarea value={accountDraft.notes} onChange={(event) => setAccountDraft((draft) => ({ ...draft, notes: event.target.value }))} /></label>
+                </>
+              ) : (
+                <>
+                  <label>
+                    视频号视频分享链接
+                    <input
+                      required
+                      type="url"
+                      value={accountDraft.sourceUrl}
+                      onChange={(event) => setAccountDraft((draft) => ({ ...draft, sourceUrl: event.target.value }))}
+                      placeholder="https://weixin.qq.com/sph/...  或  channels 链接"
+                    />
+                  </label>
+                  <label>
+                    分组 / 赛道（可选）
+                    <input
+                      list="benchmark-groups"
+                      value={accountDraft.group}
+                      onChange={(event) => setAccountDraft((draft) => ({ ...draft, group: event.target.value }))}
+                      placeholder="输入或选择已有分组"
+                    />
+                  </label>
+                  <p className="benchmark-account-contract-note">
+                    识别账号会调用一次原版兼容接口，可能扣除原版积分；未识别到远端账号 ID 时不会保存。
+                  </p>
+                </>
+              )}
               <div className="benchmark-inline-form__actions">
                 <button type="button" onClick={() => setShowAccountForm(false)}>取消</button>
-                <button className="benchmark-primary" type="submit">保存</button>
+                <button className="benchmark-primary" type="submit" disabled={busyAction === "add-account"}>
+                  {editingAccountId ? "保存" : busyAction === "add-account" ? "识别中…" : "识别并添加"}
+                </button>
               </div>
             </form>
           ) : null}
@@ -1222,16 +1249,24 @@ export function BenchmarkPage({
                     <span className="benchmark-account-avatar">{account.name.slice(0, 1)}</span>
                     <span>
                       <strong>{account.name}</strong>
-                      <small>{[account.group, account.track].filter(Boolean).join(" · ") || "未分组"} · {workCount}</small>
+                      <small>
+                        {account.remoteId
+                          ? `${[account.group, account.track].filter(Boolean).join(" · ") || "未分组"} · ${workCount}`
+                          : `未识别 · 不可刷新 · ${workCount}`}
+                      </small>
                     </span>
                     {account.favorite ? <em title="已收藏">★</em> : null}
                   </button>
                   <div className="benchmark-account-actions">
                     <button
                       type="button"
-                      disabled={!providerStatus?.accountSync.configured || Boolean(busyAction)}
+                      disabled={!providerStatus?.accountSync.configured || !account.remoteId || Boolean(busyAction)}
                       onClick={() => void refreshAccount(account)}
-                      title={providerStatus?.accountSync.configured ? "同步最新一页（最多 15 条）" : "原客户端尚未绑定账号数据源"}
+                      title={!account.remoteId
+                        ? "旧本地记录没有远端账号 ID，请删除后使用视频号分享链接重新识别"
+                        : providerStatus?.accountSync.configured
+                          ? "同步最新一页（最多 15 条）"
+                          : "原客户端尚未绑定账号数据源"}
                     >
                       {busyAction === `refresh-${account.id}` ? "刷新中" : "刷新最新"}
                     </button>
@@ -1278,7 +1313,7 @@ export function BenchmarkPage({
             </label>
             <div className="benchmark-toolbar-actions">
               <button type="button" onClick={() => { setShowParser(true); setParsedVideo(null); }}>单视频解析</button>
-              <button className="benchmark-primary" type="button" onClick={openNewWorkForm} disabled={store.accounts.length === 0}>＋ 手工导入</button>
+              <button className="benchmark-primary" type="button" onClick={openNewWorkForm} disabled={store.accounts.length === 0}>＋ 本地扩展导入</button>
             </div>
           </div>
 
@@ -1337,7 +1372,7 @@ export function BenchmarkPage({
                 </button>
               </div>
               {!providerStatus?.accountSync.configured ? (
-                <p>当前未配置原版账号凭据，因此不能自动拉取作品。单视频解析仍可使用；MiniMax API 不负责账号作品同步。</p>
+                <p>当前未配置原版账号凭据，因此不能识别账号或自动拉取作品。单视频解析仍可使用；MiniMax API 不负责账号作品同步。</p>
               ) : (
                 <p>账号同步调用原版兼容数据源并可能按页扣积分；每次操作前都会再次确认。</p>
               )}
@@ -1347,13 +1382,13 @@ export function BenchmarkPage({
           {showWorkForm ? (
             <form className="benchmark-work-form" onSubmit={saveWork}>
               <div className="benchmark-work-form__head">
-                <div><strong>导入单个视频</strong><span>仅保存你填写的公开信息，不自动抓取平台数据。</span></div>
+                <div><strong>本地扩展：导入单个视频</strong><span>此表单不是原版自动同步功能，仅保存你填写的公开信息。</span></div>
                 <button type="button" onClick={() => setShowWorkForm(false)} aria-label="关闭作品表单">×</button>
               </div>
               <div className="benchmark-form-grid benchmark-form-grid--three">
                 <label>账号<select required value={workDraft.accountId} onChange={(event) => setWorkDraft((draft) => ({ ...draft, accountId: event.target.value }))}><option value="">请选择</option>{store.accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}</select></label>
                 <label className="benchmark-span-two">作品标题<input required value={workDraft.title} onChange={(event) => setWorkDraft((draft) => ({ ...draft, title: event.target.value }))} /></label>
-                <label className="benchmark-span-two">公开视频/分享 URL<input type="url" value={workDraft.url} onChange={(event) => setWorkDraft((draft) => ({ ...draft, url: event.target.value }))} placeholder="保留原作品来源" /></label>
+                <label className="benchmark-span-two">作品来源 URL<input type="url" value={workDraft.url} onChange={(event) => setWorkDraft((draft) => ({ ...draft, url: event.target.value }))} placeholder="保留原作品来源" /></label>
                 <label>发布时间<input type="datetime-local" value={workDraft.publishTime} onChange={(event) => setWorkDraft((draft) => ({ ...draft, publishTime: event.target.value }))} /></label>
                 <label className="benchmark-span-three">可下载媒体 URL（可选）<input type="url" value={workDraft.mediaUrl} onChange={(event) => setWorkDraft((draft) => ({ ...draft, mediaUrl: event.target.value }))} placeholder="仅扩展名明确的 mp4/mp3 等直链会显示下载" /></label>
               </div>
@@ -1376,10 +1411,10 @@ export function BenchmarkPage({
             <div className="benchmark-empty">
               <span aria-hidden="true">◎</span>
               <strong>先建立一个对标账号</strong>
-              <p>可以先解析一条公开视频自动建立作者账号，也可以手工添加。</p>
+              <p>粘贴该视频号账号任意一条视频分享链接，识别成功后才会保存账号。</p>
               <div className="benchmark-empty-actions">
                 <button type="button" onClick={() => setShowParser(true)}>单视频解析</button>
-                <button className="benchmark-primary" type="button" onClick={openNewAccountForm}>手工添加账号</button>
+                <button className="benchmark-primary" type="button" onClick={openNewAccountForm}>识别并添加账号</button>
               </div>
             </div>
           ) : visibleWorks.length === 0 ? (
@@ -1450,7 +1485,7 @@ export function BenchmarkPage({
                     disabled={!asrStatus?.available || Boolean(busyAction)}
                     onClick={() => void transcribeSource()}
                   >
-                    {busyAction === "transcribe-source" ? "提取中…" : "一键提取公开视频文案"}
+                    {busyAction === "transcribe-source" ? "提取中…" : "一键提取视频号文案"}
                   </button>
                 ) : null}
                 <label className="benchmark-file-button">

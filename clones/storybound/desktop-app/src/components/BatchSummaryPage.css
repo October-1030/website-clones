@@ -1,0 +1,22 @@
+.batch-summary-page { padding: 34px 42px 72px; color: var(--text); }
+.batch-summary-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+.batch-summary-hero span { color: var(--brand); font-size: 12px; font-weight: 700; letter-spacing: .12em; }
+.batch-summary-hero h1 { margin: 7px 0 5px; font-size: 30px; }
+.batch-summary-hero p, .batch-summary-list p, .batch-summary-actions p { margin: 0; color: var(--text-muted); }
+.batch-summary-hero button, .batch-summary-list button, .batch-summary-actions button, .batch-summary-empty button { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elevated); color: var(--text); padding: 10px 15px; }
+.batch-summary-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 24px; }
+.batch-summary-stats article { padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elevated); }
+.batch-summary-stats span { display: block; color: var(--text-muted); font-size: 12px; }
+.batch-summary-stats strong { display: block; margin-top: 6px; font-size: 28px; }
+.batch-summary-stats .is-success strong { color: var(--brand); }
+.batch-summary-stats .is-danger strong, .batch-summary-error { color: var(--danger); }
+.batch-summary-list { display: grid; gap: 10px; }
+.batch-summary-list article { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elevated); }
+.batch-summary-list article > div { display: flex; align-items: center; gap: 12px; }
+.batch-status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-faint); }
+.batch-status-dot.is-completed { background: var(--brand); }
+.batch-status-dot.is-failed { background: var(--danger); }
+.batch-summary-actions { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 22px; padding: 18px; border: 1px solid color-mix(in oklch, var(--danger) 38%, var(--border)); border-radius: 12px; background: color-mix(in oklch, var(--danger) 7%, var(--bg-elevated)); }
+.batch-summary-actions button { border-color: var(--brand); color: var(--brand); }
+.batch-summary-empty { max-width: 620px; margin: 16vh auto; padding: 32px; text-align: center; border: 1px solid var(--border); border-radius: 14px; background: var(--bg-elevated); }
+@media (max-width: 820px) { .batch-summary-page { padding: 24px 18px 56px; } .batch-summary-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .batch-summary-hero, .batch-summary-actions { align-items: stretch; flex-direction: column; } }

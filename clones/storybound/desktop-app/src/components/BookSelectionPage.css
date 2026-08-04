@@ -1046,6 +1046,309 @@
   }
 }
 
+/* v1.17 主题选品入口与真实依赖降级 */
+.book-quest {
+  max-width: 1180px;
+  padding: 16px;
+  margin: 0 auto 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.book-quest__heading,
+.book-quest__heading > div {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.book-quest__heading {
+  justify-content: space-between;
+}
+
+.book-quest__heading strong {
+  font-size: 14px;
+}
+
+.book-quest__heading span,
+.book-quest__heading em {
+  color: var(--text-faint);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.book-quest__heading em {
+  padding: 4px 8px;
+  color: var(--warning);
+  background: color-mix(in oklch, var(--warning) 8%, transparent);
+  border: 1px solid color-mix(in oklch, var(--warning) 24%, var(--border));
+  border-radius: 999px;
+}
+
+.book-quest__input {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.book-quest__input > span {
+  color: var(--brand);
+  font-size: 18px;
+}
+
+.book-quest__input input,
+.book-precise-entry input {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 11px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: 0;
+}
+
+.book-quest__input input:focus,
+.book-precise-entry input:focus {
+  border-color: var(--brand);
+}
+
+.book-quest__hint {
+  margin: 9px 0 0 27px;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.book-quest__hint strong {
+  color: color-mix(in oklch, var(--warning) 70%, white);
+}
+
+.book-advanced-toggle {
+  padding: 5px 0;
+  margin-top: 8px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.book-advanced-toggle span {
+  display: inline-block;
+  transition: transform .15s ease;
+}
+
+.book-advanced-toggle.is-open span {
+  transform: rotate(180deg);
+}
+
+.book-advanced-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 11px;
+  margin-top: 5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.book-private-option {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.book-private-option > span {
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.book-private-option button {
+  padding: 4px 6px;
+  color: var(--text-faint);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 9px;
+}
+
+.book-private-option small {
+  color: var(--warning);
+  font-size: 8px;
+}
+
+.book-precise-entry {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: end;
+  gap: 8px;
+}
+
+.book-precise-entry label {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+.book-toolbar {
+  grid-template-columns: minmax(220px, 1fr) repeat(6, minmax(82px, auto));
+}
+
+.book-favorite-filter {
+  min-height: 48px;
+  padding: 0 10px;
+  align-self: end;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 9px;
+}
+
+.book-favorite-filter.is-selected {
+  color: var(--warning);
+  border-color: color-mix(in oklch, var(--warning) 55%, var(--border));
+}
+
+.book-editor-check {
+  display: flex !important;
+  align-items: center;
+  grid-column: span 2;
+  gap: 7px !important;
+  min-height: 36px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.book-editor-check input {
+  width: 14px !important;
+  min-height: 14px !important;
+}
+
+.book-table {
+  min-width: 1320px;
+}
+
+.book-sales-value,
+.book-douban-score {
+  display: block;
+  white-space: nowrap;
+}
+
+.book-douban-score {
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.book-potential {
+  color: var(--warning);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+.book-fit {
+  display: inline-flex;
+  padding: 3px 6px;
+  color: var(--brand);
+  background: color-mix(in oklch, var(--brand) 8%, transparent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.book-keyword,
+.book-created {
+  padding: 4px 6px;
+  color: var(--brand);
+  background: transparent;
+  border: 1px solid color-mix(in oklch, var(--brand) 24%, var(--border));
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 8px;
+}
+
+.book-keyword {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.book-created {
+  color: var(--text-faint);
+  border-color: var(--border);
+  white-space: nowrap;
+}
+
+.book-created.is-selected {
+  color: var(--brand);
+  border-color: color-mix(in oklch, var(--brand) 38%, var(--border));
+}
+
+.book-card-source {
+  margin: 7px 0 0;
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+@media (max-width: 1180px) {
+  .book-toolbar {
+    grid-template-columns: repeat(4, minmax(100px, 1fr));
+  }
+
+  .book-search {
+    grid-column: span 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .book-quest__heading,
+  .book-quest__heading > div,
+  .book-quest__input,
+  .book-precise-entry {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .book-quest__input {
+    display: flex;
+  }
+
+  .book-quest__input > span {
+    display: none;
+  }
+
+  .book-quest__hint {
+    margin-left: 0;
+  }
+
+  .book-private-option {
+    flex-wrap: wrap;
+  }
+
+  .book-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .book-editor-check {
+    grid-column: span 1;
+  }
+}
+
 @media (max-width: 480px) {
   .book-selection-stats {
     width: 100%;

@@ -199,6 +199,19 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
 
   useEffect(() => {
+    if (taskId || form.videoForm === "podcast" || form.ttsProvider === config.provider) return;
+    const selectedProviderReady = form.ttsProvider === "minimax"
+      ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
+      : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
+    const configuredProviderReady = config.provider === "minimax"
+      ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
+      : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
+    if (!selectedProviderReady && configuredProviderReady) {
+      setForm((current) => ({ ...current, ttsProvider: config.provider }));
+    }
+  }, [config.minimax.apiKey, config.provider, config.volcengine.accessToken, config.volcengine.appId, credentialStatus.minimax.available, credentialStatus.volcengine.available, form.ttsProvider, form.videoForm, taskId]);
+
+  useEffect(() => {
     if (taskId) return;
     const handoff = takeTaskHandoff();
     if (!handoff) return;

@@ -34,9 +34,14 @@ function TextLayerEditor({ label, layer, onChange }: { label: string; layer: Dra
         <label><span className="field-label field-label--standalone">X（-1 到 1）</span><input className="text-input" type="number" min="-1" max="1" step="0.01" value={layer.x} onChange={(event) => onChange({ x: Number(event.target.value) })} /></label>
         <label><span className="field-label field-label--standalone">Y（-1 到 1）</span><input className="text-input" type="number" min="-1" max="1" step="0.01" value={layer.y} onChange={(event) => onChange({ y: Number(event.target.value) })} /></label>
         <label><span className="field-label field-label--standalone">透明度</span><input className="text-input" type="number" min="0" max="1" step="0.05" value={layer.alpha} onChange={(event) => onChange({ alpha: Number(event.target.value) })} /></label>
+        <label><span className="field-label field-label--standalone">对齐方式</span><select className="text-input" value={layer.align} onChange={(event) => onChange({ align: Number(event.target.value) })}><option value={0}>左对齐</option><option value={1}>居中</option><option value={2}>右对齐</option></select></label>
+        <label><span className="field-label field-label--standalone">字间距</span><input className="text-input" type="number" min="-20" max="100" step="1" value={layer.letterSpacing} onChange={(event) => onChange({ letterSpacing: Number(event.target.value) })} /></label>
+        <label><span className="field-label field-label--standalone">行间距</span><input className="text-input" type="number" min="-20" max="100" step="1" value={layer.lineSpacing} onChange={(event) => onChange({ lineSpacing: Number(event.target.value) })} /></label>
         <label className="toggle-row"><input type="checkbox" checked={layer.bold} onChange={(event) => onChange({ bold: event.target.checked })} />粗体</label>
         <label className="toggle-row"><input type="checkbox" checked={layer.underline} onChange={(event) => onChange({ underline: event.target.checked })} />下划线</label>
+        <label><span className="field-label field-label--standalone">描边颜色</span><input className="text-input" type="color" value={layer.border.color} onChange={(event) => onChange({ border: { ...layer.border, color: event.target.value.toUpperCase() } })} /></label>
         <label><span className="field-label field-label--standalone">描边宽度</span><input className="text-input" type="number" min="0" max="100" value={layer.border.width} onChange={(event) => onChange({ border: { ...layer.border, width: Number(event.target.value) || 0 } })} /></label>
+        <label><span className="field-label field-label--standalone">描边透明度</span><input className="text-input" type="number" min="0" max="1" step="0.05" value={layer.border.alpha} onChange={(event) => onChange({ border: { ...layer.border, alpha: Number(event.target.value) } })} /></label>
       </div>
     </details>
   );

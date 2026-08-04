@@ -106,7 +106,7 @@ export function AppShell({ currentPage, onNavigate, children }: AppShellProps) {
             <StoryboundMark />
             <div className="app-shell-sidebar-brand-copy">
               <span>Storybound</span>
-              <small>v1.16.1 · beta</small>
+              <small>v1.17.0 · beta</small>
             </div>
           </div>
 

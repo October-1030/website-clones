@@ -111,6 +111,10 @@ function numberedFileValue(file: File): number {
 }
 
 export function MusicMvPage({ ttsConfig = defaultTtsConfig }: MusicMvPageProps) {
+  const [sourceMode, setSourceMode] = useState<"ai" | "local">("local");
+  const [aiTheme, setAiTheme] = useState("");
+  const [aiBrief, setAiBrief] = useState("");
+  const [aiDuration, setAiDuration] = useState<60 | 120>(60);
   const [title, setTitle] = useState("");
   const [lyrics, setLyrics] = useState("");
   const [style, setStyle] = useState<MusicMvStyle>("nostalgic");
@@ -463,15 +467,29 @@ export function MusicMvPage({ ttsConfig = defaultTtsConfig }: MusicMvPageProps) 
         {groups.length === 0 ? (
           <div className="mv-config">
             <section className="mv-card">
-              <div className="mv-card-title"><span>01</span><div><h2>本地歌曲与歌词</h2><p>MP3 / WAV / FLAC 必须真实可读；歌词由你提供。</p></div></div>
+              <div className="mv-card-title"><span>01</span><div><h2>歌曲来源</h2><p>保留原版的 AI 歌词/作曲与本地歌曲两条入口。</p></div></div>
+              <div className="mv-source-tabs" role="tablist" aria-label="歌曲来源">
+                <button className={sourceMode === "ai" ? "selected" : ""} onClick={() => { setSourceMode("ai"); setError(""); }} role="tab" aria-selected={sourceMode === "ai"} type="button"><strong>AI 歌词与作曲</strong><span>主题 → 歌词 → 歌曲</span></button>
+                <button className={sourceMode === "local" ? "selected" : ""} onClick={() => { setSourceMode("local"); setError(""); }} role="tab" aria-selected={sourceMode === "local"} type="button"><strong>上传本地音乐</strong><span>真实音频 → 歌词分组</span></button>
+              </div>
+            </section>
+
+            {sourceMode === "local" ? <section className="mv-card">
+              <div className="mv-card-title"><span>02</span><div><h2>本地歌曲与歌词</h2><p>MP3 / WAV / FLAC 必须真实可读；歌词由你提供。</p></div></div>
               <div className="mv-title-row"><label>MV 标题<input onChange={(event) => setTitle(event.target.value)} placeholder="可选，留空从歌词提取" value={title} /></label><button onClick={() => musicInputRef.current?.click()} type="button">{musicFile ? "更换本地音乐" : "选择本地音乐"}</button></div>
               <input accept=".mp3,.wav,.flac,audio/mpeg,audio/wav,audio/flac" hidden onChange={(event) => setMusicFile(event.target.files?.[0] || null)} ref={musicInputRef} type="file" />
               {musicFile && <div className="mv-file-chip"><strong>{musicFile.name}</strong><span>{(musicFile.size / 1024 / 1024).toFixed(2)} MB · 上传后由 ffprobe 读取真实时长</span></div>}
               <textarea onChange={(event) => setLyrics(event.target.value)} placeholder="粘贴完整歌词。建议一行一句，后续仍可合并、删除和新增分组。" value={lyrics} />
-            </section>
+            </section> : <section className="mv-card">
+              <div className="mv-card-title"><span>02</span><div><h2>AI 创作歌曲</h2><p>原版流程：输入主题与要求，生成歌词和歌曲后再进入分镜。</p></div></div>
+              <div className="mv-title-row"><label>歌曲主题<input onChange={(event) => setAiTheme(event.target.value)} placeholder="例如：写给母亲的怀旧民谣" value={aiTheme} /></label><label>MV 标题<input onChange={(event) => setTitle(event.target.value)} placeholder="可选" value={title} /></label></div>
+              <label>歌词与情绪要求<textarea onChange={(event) => setAiBrief(event.target.value)} placeholder="描述故事、情绪、关键词、是否需要副歌等。" value={aiBrief} /></label>
+              <label>目标时长</label><div className="mv-chip-grid"><button className={aiDuration === 60 ? "selected" : ""} onClick={() => setAiDuration(60)} type="button">约 60 秒</button><button className={aiDuration === 120 ? "selected" : ""} onClick={() => setAiDuration(120)} type="button">约 120 秒</button></div>
+              <div className="mv-private-boundary"><strong>原版 AI 作曲服务未连接</strong><span>当前 MiniMax 凭据可用于 M3 文案、image-01 出图和 TTS，但没有证据表明它包含原作者使用的歌曲生成接口；因此这里不伪造音频成功。今晚可直接切换“上传本地音乐”完成真实 MV。</span></div>
+            </section>}
 
             <section className="mv-card">
-              <div className="mv-card-title"><span>02</span><div><h2>音乐风格与演唱</h2><p>用于歌词分组的视觉 prompt，不会伪造 AI 作曲。</p></div></div>
+              <div className="mv-card-title"><span>03</span><div><h2>音乐风格与演唱</h2><p>用于歌曲创作参数和歌词分组的视觉 prompt。</p></div></div>
               <label>风格</label><div className="mv-chip-grid">{Object.entries(musicStyleLabels).map(([value, label]) => <button className={style === value ? "selected" : ""} key={value} onClick={() => setStyle(value as MusicMvStyle)} type="button">{label}</button>)}</div>
               {style === "custom" && <input className="mv-custom-style" onChange={(event) => setCustomStyle(event.target.value)} placeholder="例如：城市民谣，克制温暖，夜晚霓虹" value={customStyle} />}
               <label>演唱选择</label><div className="mv-chip-grid">{Object.entries(musicSingerLabels).map(([value, label]) => <button className={singer === value ? "selected" : ""} key={value} onClick={() => setSinger(value as MusicMvSinger)} type="button">{label}</button>)}</div>
@@ -479,8 +497,8 @@ export function MusicMvPage({ ttsConfig = defaultTtsConfig }: MusicMvPageProps) 
             </section>
 
             <div className="mv-start-row">
-              <div><strong>本地音频路线完整可用</strong><span>不会因为没有 AI 作曲供应商而禁用。</span></div>
-              <button disabled={busy || !musicFile || lyrics.trim().length < 2} onClick={() => void prepareTask()} type="button">{busy ? "读取真实音频…" : "保存音乐并拆分歌词"}</button>
+              <div><strong>{sourceMode === "local" ? "本地音频路线完整可用" : "AI 创作入口已按原版保留"}</strong><span>{sourceMode === "local" ? "不会因为没有 AI 作曲供应商而禁用。" : "缺少原作者私有作曲服务时明确停在生成闸门。"}</span></div>
+              {sourceMode === "local" ? <button disabled={busy || !musicFile || lyrics.trim().length < 2} onClick={() => void prepareTask()} type="button">{busy ? "读取真实音频…" : "保存音乐并拆分歌词"}</button> : <button disabled={!aiTheme.trim()} onClick={() => setError("原版 AI 作曲接口依赖未连接，不能生成真实歌曲。请切换“上传本地音乐”，或后续配置有授权的歌曲生成供应商。")} type="button">生成歌词与歌曲</button>}
             </div>
           </div>
         ) : (

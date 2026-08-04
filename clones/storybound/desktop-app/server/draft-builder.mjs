@@ -821,7 +821,10 @@ export async function buildJianyingDraft(taskStore, task) {
   const videoDir = join(projectDir, "assets", "video");
   await Promise.all([mkdir(imageDir, { recursive: true }), mkdir(audioDir, { recursive: true }), mkdir(videoDir, { recursive: true })]);
   let draftCover = "";
-  const explicitCoverSource = task.media?.coverImages?.find((image) => image.status === "ready" && image.path)?.path;
+  const coverEnabled = task.options?.coverMode !== "off";
+  const explicitCoverSource = coverEnabled
+    ? task.media?.coverImages?.find((image) => image.status === "ready" && image.path)?.path
+    : "";
   const coverSource = explicitCoverSource || (tutorialMode ? firstImage?.path : null);
   if (coverSource) {
     const extension = extname(coverSource) || ".jpg";
@@ -1004,7 +1007,7 @@ export async function buildJianyingDraft(taskStore, task) {
   const titleText = task.artifacts?.rewrite?.title || task.title;
   const coverTextDuration = tutorialMode ? 33_334 : totalDuration;
   const coverTextAlpha = explicitCoverSource ? 0 : undefined;
-  if (template.title.visible && titleText) {
+  if (coverEnabled && template.title.visible && titleText) {
     const material = textMaterial(titleText, textLayerOptions(template.title, {
       fontSize: fittedFontSize(template.title.fontSize, titleText, 200, 14),
     }));
@@ -1023,7 +1026,7 @@ export async function buildJianyingDraft(taskStore, task) {
   const subtitleText = Array.isArray(task.artifacts?.rewrite?.subtitle)
     ? task.artifacts.rewrite.subtitle.filter(Boolean).slice(0, 2).join("\n")
     : "";
-  if (template.subtitle.visible && subtitleText) {
+  if (coverEnabled && template.subtitle.visible && subtitleText) {
     const material = textMaterial(subtitleText, textLayerOptions(template.subtitle, {
       fontSize: fittedFontSize(template.subtitle.fontSize, subtitleText, 168, 8),
     }));
@@ -1227,7 +1230,7 @@ export async function buildJianyingDraft(taskStore, task) {
       dynamicVideoShots: [...readyVideos.keys()],
       animationPool,
       motionPool,
-      sourceVersion: "Storybound 1.16.1 compatible",
+      sourceVersion: "Storybound 1.17.0 compatible",
     }, null, 2)}\n`, "utf8"),
   ]);
   const zipPath = join(base, "draft.zip");

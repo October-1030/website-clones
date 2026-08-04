@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { AppShell } from "./components/AppShell";
 import { BenchmarkPage, type BenchmarkAiPayload, type BenchmarkTaskPayload } from "./components/BenchmarkPage";
+import { BatchSummaryPage, type LocalBatchRecord } from "./components/BatchSummaryPage";
 import { BookSelectionPage, type CommerceTaskPayload } from "./components/BookSelectionPage";
 import { CreatePage } from "./components/CreatePage";
 import { DraftTemplatesPage } from "./components/DraftTemplatesPage";
@@ -41,11 +42,12 @@ const emptyLlmCredentialStatus: LlmCredentialStatus = {
   model: null,
 };
 
-const appPages: AppPage[] = ["create", "image-task", "html-video", "music-mv", "queue", "history", "playground", "voice-lab", "person-assets", "prompt-templates", "draft-templates", "book-selection", "benchmark", "market", "settings", "account", "activation"];
+const appPages: AppPage[] = ["create", "image-task", "html-video", "music-mv", "queue", "batch-summary", "history", "playground", "voice-lab", "person-assets", "prompt-templates", "draft-templates", "book-selection", "benchmark", "market", "settings", "account", "activation"];
 
-function readRoute(): { page: AppPage; taskId: string | null } {
+function readRoute(): { page: AppPage; taskId: string | null; batchId: string | null } {
   const segments = window.location.pathname.split("/").filter(Boolean).map(decodeURIComponent);
-  if (segments[0] === "task" && segments[1]) return { page: "image-task", taskId: segments[1] };
+  if (segments[0] === "task" && segments[1]) return { page: "image-task", taskId: segments[1], batchId: null };
+  if (segments[0] === "batch-summary" && segments[1]) return { page: "batch-summary", taskId: null, batchId: segments[1] };
   const pathPages: Record<string, AppPage> = {
     create: "create",
     home: "image-task",
@@ -64,23 +66,24 @@ function readRoute(): { page: AppPage; taskId: string | null } {
     settings: "settings",
     account: "account",
     activation: "activation",
-    "batch-summary": "queue",
+    "batch-summary": "batch-summary",
   };
-  if (segments[0] && pathPages[segments[0]]) return { page: pathPages[segments[0]], taskId: null };
+  if (segments[0] && pathPages[segments[0]]) return { page: pathPages[segments[0]], taskId: null, batchId: null };
   const params = new URLSearchParams(window.location.search);
   const taskId = params.get("task");
   const pageValue = params.get("page");
   const page = appPages.includes(pageValue as AppPage) ? pageValue as AppPage : taskId ? "image-task" : "create";
-  return { page, taskId: page === "image-task" ? taskId : null };
+  return { page, taskId: page === "image-task" ? taskId : null, batchId: null };
 }
 
-function writeRoute(page: AppPage, taskId: string | null): void {
+function writeRoute(page: AppPage, taskId: string | null, batchId: string | null = null): void {
   const pagePaths: Record<AppPage, string> = {
     create: "/create",
     "image-task": taskId ? `/task/${encodeURIComponent(taskId)}` : "/home",
     "html-video": "/html-video",
     "music-mv": "/music-mv",
     queue: "/queue",
+    "batch-summary": `/batch-summary/${encodeURIComponent(batchId || "latest")}`,
     history: "/history",
     playground: "/playground",
     "voice-lab": "/voice-lab",
@@ -97,9 +100,9 @@ function writeRoute(page: AppPage, taskId: string | null): void {
   window.history.replaceState(null, "", pagePaths[page]);
 }
 
-function pushRoute(page: AppPage, taskId: string | null): void {
+function pushRoute(page: AppPage, taskId: string | null, batchId: string | null = null): void {
   const previousUrl = window.location.href;
-  writeRoute(page, taskId);
+  writeRoute(page, taskId, batchId);
   const nextUrl = window.location.href;
   window.history.replaceState(null, "", previousUrl);
   window.history.pushState(null, "", nextUrl);
@@ -137,6 +140,7 @@ function App() {
   const initialRoute = useRef(readRoute());
   const [currentPage, setCurrentPage] = useState<AppPage>(initialRoute.current.page);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(initialRoute.current.taskId);
+  const [currentBatchId, setCurrentBatchId] = useState<string | null>(initialRoute.current.batchId);
   const [activeQueue, setActiveQueue] = useState<string[]>(readQueue);
   const activeQueueRef = useRef(activeQueue);
   const [ttsConfig, setTtsConfig] = useState<TtsConfig>(defaultTtsConfig);
@@ -165,6 +169,9 @@ function App() {
   }, []);
   const handleRunQueue = useCallback((taskIds: string[]) => {
     const queue = [...new Set(taskIds)];
+    const batch: LocalBatchRecord = { id: crypto.randomUUID(), taskIds: queue, outcomes: {}, startedAt: new Date().toISOString() };
+    window.localStorage.setItem("storybound-last-batch", JSON.stringify(batch));
+    setCurrentBatchId(batch.id);
     activeQueueRef.current = queue;
     setActiveQueue(queue);
     if (queue[0]) {
@@ -173,7 +180,12 @@ function App() {
       setCurrentPage("image-task");
     }
   }, []);
-  const handleQueueAdvance = useCallback((taskId: string) => {
+  const handleQueueAdvance = useCallback((taskId: string, outcome: "completed" | "failed" | "cancelled") => {
+    const currentBatch = (() => { try { return JSON.parse(window.localStorage.getItem("storybound-last-batch") || "null") as LocalBatchRecord | null; } catch { return null; } })();
+    if (currentBatch) {
+      currentBatch.outcomes[taskId] = outcome;
+      window.localStorage.setItem("storybound-last-batch", JSON.stringify(currentBatch));
+    }
     const remaining = activeQueueRef.current.filter((id) => id !== taskId);
     activeQueueRef.current = remaining;
     setActiveQueue(remaining);
@@ -182,7 +194,13 @@ function App() {
       setCurrentPage("image-task");
     } else {
       setCurrentTaskId(null);
-      setCurrentPage("queue");
+      if (currentBatch) {
+        currentBatch.endedAt = new Date().toISOString();
+        window.localStorage.setItem("storybound-last-batch", JSON.stringify(currentBatch));
+        setCurrentBatchId(currentBatch.id);
+        pushRoute("batch-summary", null, currentBatch.id);
+        setCurrentPage("batch-summary");
+      } else setCurrentPage("queue");
     }
   }, []);
   const handleBenchmarkCreateTask = useCallback((payload: BenchmarkTaskPayload) => {
@@ -247,8 +265,8 @@ function App() {
   }, [llmConfig]);
 
   useEffect(() => {
-    writeRoute(currentPage, currentTaskId);
-  }, [currentPage, currentTaskId]);
+    writeRoute(currentPage, currentTaskId, currentBatchId);
+  }, [currentBatchId, currentPage, currentTaskId]);
 
   useEffect(() => {
     activeQueueRef.current = activeQueue;
@@ -260,6 +278,7 @@ function App() {
       const route = readRoute();
       setCurrentPage(route.page);
       setCurrentTaskId(route.taskId);
+      setCurrentBatchId(route.batchId);
     };
     window.addEventListener("popstate", restoreRoute);
     return () => window.removeEventListener("popstate", restoreRoute);
@@ -347,6 +366,7 @@ function App() {
         />
       ) : null}
       {currentPage === "market" ? <MarketPage /> : null}
+      {currentPage === "batch-summary" ? <BatchSummaryPage batchId={currentBatchId} onBack={() => handleNavigate("queue")} onOpenTask={(taskId) => handleOpenTask(taskId)} onRunQueue={handleRunQueue} /> : null}
       {currentPage === "account" || currentPage === "activation" ? (
         <LocalAccountPage
           kind={currentPage}
@@ -368,6 +388,7 @@ function App() {
       currentPage !== "book-selection" &&
       currentPage !== "settings" &&
       currentPage !== "market" &&
+      currentPage !== "batch-summary" &&
       currentPage !== "account" &&
       currentPage !== "activation" ? (
         <SupportPage page={currentPage} onOpenTask={handleOpenTask} onRunQueue={handleRunQueue} activeQueue={activeQueue} />

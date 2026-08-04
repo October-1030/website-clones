@@ -533,7 +533,11 @@ function composeOriginalImagePrompt(corePrompt, style, negativePrompt = "") {
 async function generateMinimaxImages(body) {
   const prompts = Array.isArray(body.prompts) ? body.prompts : [];
   if (prompts.length === 0) throw new Error("缺少绘图 prompt");
-  const maxImages = Math.max(1, Math.min(18, Number(body.maxImages || prompts.length)));
+  // A full Storybound task can legitimately contain far more than 18 shots.
+  // The old hard cap silently returned only the first 18 results, which made
+  // the client mark every later shot as failed. Keep a defensive ceiling, but
+  // allow the whole task to be processed in the same resumable request.
+  const maxImages = Math.max(1, Math.min(120, Number(body.maxImages || prompts.length)));
   const aspectRatio = ["16:9", "9:16", "1:1", "4:3", "3:4"].includes(body.aspectRatio)
     ? body.aspectRatio
     : "9:16";
@@ -578,6 +582,26 @@ async function generateMinimaxImages(body) {
     const shotId = Number(item.shotId || index + 1);
     const prompt = coverBackgroundPrompt(String(item.prompt || "").trim(), shotId).slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
+    // A failed/aborted browser run may already have written some images before
+    // task.json was updated. Reuse those files so retrying is a true checkpoint
+    // resume and never spends API credits on the same shot twice.
+    if (body.taskId) {
+      const existingPath = taskStore.resolveTaskFile(body.taskId, "images", `${shotId}.jpg`);
+      if (existingPath && existsSync(existingPath)) {
+        const existingStat = await stat(existingPath);
+        return {
+          id: `existing-image-${shotId}`,
+          shotId,
+          prompt,
+          retryLevel: 0,
+          url: `/api/tasks/${encodeURIComponent(body.taskId)}/files/images/${encodeURIComponent(`${shotId}.jpg`)}`,
+          path: existingPath,
+          bytes: existingStat.size,
+          status: "ready",
+          resumed: true,
+        };
+      }
+    }
     const retryPrompts = [
       prompt,
       composeOriginalImagePrompt(track?.fallbackScenes?.l2, style, style?.negativePrompt),
@@ -745,27 +769,125 @@ async function generateCompatibleImages(body) {
 }
 
 function parseJsonObject(text) {
+  if (text && typeof text === "object" && !Array.isArray(text)) return text;
   const raw = String(text || "").trim();
   const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
   const source = fenced || raw;
-  const start = source.indexOf("{");
-  const end = source.lastIndexOf("}");
-  if (start < 0 || end <= start) throw new Error("LLM 未返回 JSON");
-  const candidate = source.slice(start, end + 1);
-  const repaired = candidate
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3')
-    .replace(/,\s*([}\]])/g, "$1");
+  const candidates = extractBalancedJsonObjects(source);
+  if (!candidates.length) throw new Error("LLM 未返回 JSON");
+  const parsed = [];
   let lastError;
-  for (const value of [raw, candidate, repaired]) {
-    try {
-      return JSON.parse(value);
-    } catch (error) {
-      lastError = error;
+  for (const candidate of [...new Set([raw, ...candidates])]) {
+    const repaired = candidate
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      .replace(/([{,]\s*)([A-Za-z_$][\w$]*)(\s*:)/g, '$1"$2"$3')
+      .replace(/\bNone\b/g, "null")
+      .replace(/\bTrue\b/g, "true")
+      .replace(/\bFalse\b/g, "false")
+      .replace(/,\s*([}\]])/g, "$1");
+    for (const value of [candidate, repaired, repairJsonLikeStrings(repaired)]) {
+      try {
+        const result = JSON.parse(value);
+        if (result && typeof result === "object" && !Array.isArray(result)) parsed.push(result);
+      } catch (error) {
+        lastError = error;
+      }
     }
   }
+  if (parsed.length) {
+    parsed.sort((left, right) => JSON.stringify(right).length - JSON.stringify(left).length);
+    return parsed[0];
+  }
   throw lastError || new Error("LLM 未返回合法 JSON");
+}
+
+function extractBalancedJsonObjects(value) {
+  const candidates = [];
+  let start = -1;
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (character === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        candidates.push(value.slice(start, index + 1));
+        start = -1;
+      }
+    }
+  }
+  if (!candidates.length) {
+    const first = value.indexOf("{");
+    const last = value.lastIndexOf("}");
+    if (first >= 0 && last > first) candidates.push(value.slice(first, last + 1));
+  }
+  return candidates;
+}
+
+function repairJsonLikeStrings(value) {
+  let output = "";
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (!quote) {
+      if (character === '"' || character === "'") {
+        quote = character;
+        output += '"';
+      } else {
+        output += character;
+      }
+      continue;
+    }
+    if (escaped) {
+      if (quote === "'" && character === "'") output += "'";
+      else output += `\\${character}`;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (character === quote) {
+      let cursor = index + 1;
+      while (cursor < value.length && /\s/.test(value[cursor])) cursor += 1;
+      const next = value[cursor];
+      if (!next || next === ":" || next === "," || next === "}" || next === "]") {
+        quote = null;
+        output += '"';
+      } else {
+        // MiniMax M3 occasionally emits literal quotation marks inside a JSON
+        // string (for example a quoted title or name). Keep those marks as
+        // content instead of treating them as the end of the string.
+        output += '\\"';
+      }
+      continue;
+    }
+    if (character === '"') output += '\\"';
+    else if (character === "\n") output += "\\n";
+    else if (character === "\r") output += "\\r";
+    else if (character === "\t") output += "\\t";
+    else output += character;
+  }
+  if (escaped) output += "\\\\";
+  if (quote) output += '"';
+  return output;
 }
 
 function clampString(value, fallback = "") {
@@ -1034,9 +1156,11 @@ function pipelineMessages(parts, contract, userPayload) {
   ];
 }
 
-async function callLlmJson(config, messages, temperature, label) {
+async function callLlmJson(config, messages, temperature, label, options = {}) {
+  const attemptLimit = Math.max(1, Math.min(3, Number(options.attempts) || 3));
+  const timeoutMs = Math.max(30000, Math.min(180000, Number(options.timeoutMs) || 180000));
   let lastError;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
     const requestBody = {
       model: config.model,
       messages: attempt === 0 ? messages : [
@@ -1054,7 +1178,7 @@ async function callLlmJson(config, messages, temperature, label) {
           headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
         },
-        180000,
+        timeoutMs,
       );
       const text = await response.text();
       if (!response.ok) {
@@ -1071,7 +1195,7 @@ async function callLlmJson(config, messages, temperature, label) {
       lastError = error;
     }
   }
-  throw new Error(`${label}连续三次调用失败：${providerMessage(lastError, "解析失败")}`);
+  throw new Error(`${label}连续${attemptLimit}次调用失败：${providerMessage(lastError, "解析失败")}`);
 }
 
 function splitShotsFromAnchors(sourceText, anchors, track) {
@@ -1165,11 +1289,16 @@ async function runLlmPipeline(body) {
 
   if (step === "storyboard") {
     const source = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
-    const splitPayload = await callLlmJson(config, pipelineMessages(
-      [originalPromptLibrary.storyboardAgentPrompt, promptOverride.segmentationPrompt || originalPromptLibrary.sentenceSplitPrompt, context.ttsMode === "continuous" ? tutorialStoryboardPrompt : ""],
-      `当前只执行 StoryboardAgent 第一阶段。按原版尾部锚点法，严格返回 JSON：${JSON.stringify({ anchors: ["每个分镜在原文中的最后10-20个字符，最后一项覆盖全文末尾"] })}`,
-      { ...base, sourceText: source },
-    ), 0.2, "影视分镜锚点拆分");
+    let splitPayload = {};
+    try {
+      splitPayload = await callLlmJson(config, pipelineMessages(
+        [originalPromptLibrary.storyboardAgentPrompt, promptOverride.segmentationPrompt || originalPromptLibrary.sentenceSplitPrompt, context.ttsMode === "continuous" ? tutorialStoryboardPrompt : ""],
+        `当前只执行 StoryboardAgent 第一阶段。按原版尾部锚点法，严格返回 JSON：${JSON.stringify({ anchors: ["每个分镜在原文中的最后10-20个字符，最后一项覆盖全文末尾"] })}`,
+        { ...base, sourceText: source },
+      ), 0.2, "影视分镜锚点拆分", { attempts: 1, timeoutMs: 90000 });
+    } catch (error) {
+      console.warn(`影视分镜锚点拆分失败，改用本地标点分镜：${providerMessage(error, "未知错误")}`);
+    }
     let shots = splitShotsFromAnchors(source, splitPayload.anchors || splitPayload.endAnchors || splitPayload.boundaries, track);
     if (!shots.length) {
       shots = splitText(String(source).replace(/[“”]/g, ""), context.ttsMode === "continuous" ? 28 : 45).slice(0, 60).map((text, index) => ({
@@ -1182,21 +1311,30 @@ async function runLlmPipeline(body) {
     }
     let characterCard;
     if (track?.needsCharacterCard) {
-      const cardPayload = await callLlmJson(config, pipelineMessages(
-        [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt],
-        `当前只提取跨分镜人物一致性卡，严格返回 JSON：${JSON.stringify({ characterCard: { name: "", identity: "", age: "", gender: "", appearance: "", clothing: "" } })}`,
-        { ...base, shots },
-      ), 0.3, "人物一致性卡");
-      characterCard = cardPayload.characterCard || cardPayload.character_card;
+      try {
+        const cardPayload = await callLlmJson(config, pipelineMessages(
+          [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt],
+          `当前只提取跨分镜人物一致性卡，严格返回 JSON：${JSON.stringify({ characterCard: { name: "", identity: "", age: "", gender: "", appearance: "", clothing: "" } })}`,
+          { ...base, shots },
+        ), 0.3, "人物一致性卡", { attempts: 1, timeoutMs: 90000 });
+        characterCard = cardPayload.characterCard || cardPayload.character_card;
+      } catch (error) {
+        console.warn(`人物一致性卡生成失败，继续使用逐镜语义提示：${providerMessage(error, "未知错误")}`);
+      }
     }
     return normalizePipelineResult(step, { shots, characterCard }, context, artifacts);
   }
 
-  const promptPayload = await callLlmJson(config, pipelineMessages(
-    [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt, context.ttsMode === "continuous" ? tutorialImagePrompt : "", originalPromptLibrary.producerAgentPrompt],
-    `执行 StoryboardAgent 第二阶段并交接 ProducerAgent。严格返回 JSON：${JSON.stringify({ prompts: [{ shotId: 1, prompt: "只写画面主体、环境、动作、光影和构图", negativePrompt: "" }] })}。不得修改 shotId 与字幕；prompt 不要重复画风前后缀，系统会按原版逻辑统一拼接。`,
-    base,
-  ), 0.72, "原版绘图提示词");
+  let promptPayload = { prompts: [] };
+  try {
+    promptPayload = await callLlmJson(config, pipelineMessages(
+      [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt, context.ttsMode === "continuous" ? tutorialImagePrompt : "", originalPromptLibrary.producerAgentPrompt],
+      `执行 StoryboardAgent 第二阶段并交接 ProducerAgent。严格返回 JSON：${JSON.stringify({ prompts: [{ shotId: 1, prompt: "只写画面主体、环境、动作、光影和构图", negativePrompt: "" }] })}。不得修改 shotId 与字幕；prompt 不要重复画风前后缀，系统会按原版逻辑统一拼接。`,
+      base,
+    ), 0.72, "原版绘图提示词", { attempts: 1, timeoutMs: 90000 });
+  } catch (error) {
+    console.warn(`绘图提示词生成失败，改用原版画风模板与逐镜语义：${providerMessage(error, "未知错误")}`);
+  }
   return normalizePipelineResult(step, promptPayload, context, artifacts);
 }
 
@@ -1349,14 +1487,14 @@ function safeUploadName(value, fallback = "media.bin") {
 
 function benchmarkSourceUrl(value) {
   const raw = String(value || "").trim();
-  if (!raw || raw.length > 4096) throw new Error("请粘贴有效的公开视频分享链接");
+  if (!raw || raw.length > 4096) throw new Error("请粘贴有效的视频号视频分享链接");
   let url;
   try {
     url = new URL(raw);
   } catch {
-    throw new Error("视频分享链接格式不正确");
+    throw new Error("视频号视频分享链接格式不正确");
   }
-  if (!["http:", "https:"].includes(url.protocol)) throw new Error("视频分享链接必须使用 HTTP 或 HTTPS");
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("视频号视频分享链接必须使用 HTTP 或 HTTPS");
   return url.toString();
 }
 
@@ -1409,6 +1547,7 @@ async function parseBenchmarkVideo(input) {
     ? data.extra.statistics
     : {};
   const mediaUrl = benchmarkText(preferred.url || data.url);
+  if (!mediaUrl) throw new Error("未解析到视频直链（可能不是视频号视频链接）");
   return {
     sourceUrl,
     title: benchmarkText(data.title, "未命名视频"),
@@ -1435,7 +1574,7 @@ async function parseBenchmarkVideo(input) {
 async function benchmarkAccountRequest(pathname, body) {
   if (!benchmarkAccountEmail || !benchmarkAccountFingerprint) {
     const error = new Error(
-      "账号自动刷新未配置。原版接口要求绑定邮箱、设备指纹并可能扣除积分；请设置 STORYBOUND_BENCHMARK_EMAIL 和 STORYBOUND_BENCHMARK_FINGERPRINT。",
+      "请先到「账号管理」绑定邮箱账户后再使用对标监控",
     );
     error.statusCode = 503;
     throw error;
@@ -1461,6 +1600,20 @@ async function benchmarkAccountRequest(pathname, body) {
   } catch {
     throw new Error(`账号数据源返回异常（HTTP ${providerResponse.status}）`);
   }
+  const providerErrorCode = benchmarkText(payload?.error?.code).toUpperCase();
+  if (providerResponse.status === 402 || providerErrorCode === "INSUFFICIENT_CREDITS") {
+    const providerError = new Error("积分余额不足，请充值后重试");
+    providerError.statusCode = 402;
+    throw providerError;
+  }
+  if (
+    providerResponse.status === 401
+    || ["NO_EMAIL", "MISSING_AUTH", "AUTH_FAILED"].includes(providerErrorCode)
+  ) {
+    const providerError = new Error("请先到「账号管理」绑定邮箱账户后再使用对标监控");
+    providerError.statusCode = 401;
+    throw providerError;
+  }
   if (!providerResponse.ok || payload?.ok === false || (Number.isFinite(Number(payload?.code)) && Number(payload.code) !== 0)) {
     const providerError = new Error(
       benchmarkText(payload?.error?.message || payload?.msg, `账号数据源请求失败（HTTP ${providerResponse.status}）`),
@@ -1476,9 +1629,11 @@ async function benchmarkAccountRequest(pathname, body) {
 async function resolveBenchmarkAccount(input) {
   const sourceUrl = benchmarkSourceUrl(input?.url);
   const payload = await benchmarkAccountRequest("/v1/dajiala/feed-info", { feed_info: sourceUrl });
+  const remoteId = benchmarkText(payload?.data?.v2_name);
+  if (!remoteId) throw new Error("没解析出账号，确认链接是该账号的视频分享链接");
   return {
     sourceUrl,
-    remoteId: benchmarkText(payload?.data?.v2_name),
+    remoteId,
     name: benchmarkText(payload?.data?.nickname, "未知账号"),
     objectId: benchmarkText(payload?.data?.object_id),
   };

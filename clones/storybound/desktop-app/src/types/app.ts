@@ -4,6 +4,7 @@ export type AppPage =
   | "html-video"
   | "music-mv"
   | "queue"
+  | "batch-summary"
   | "history"
   | "playground"
   | "voice-lab"

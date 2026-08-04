@@ -7,6 +7,7 @@ const execFileAsync = promisify(execFile);
 const ffmpeg = process.env.FFMPEG_PATH
   || "ffmpeg";
 const appRoot = resolve(import.meta.dirname, "..");
+const draftTemplates = JSON.parse(await readFile(join(appRoot, "original-draft-templates.json"), "utf8"));
 const taskId = process.argv[2];
 const round = process.argv[3] || "round-1";
 
@@ -44,7 +45,36 @@ function parseSrt(value) {
     .filter(Boolean);
 }
 
-function buildAss(cues, durationSec) {
+function deepMerge(target, patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return patch ?? target;
+  const output = { ...target };
+  for (const [key, value] of Object.entries(patch)) {
+    output[key] = value && typeof value === "object" && !Array.isArray(value)
+      ? deepMerge(target?.[key] || {}, value)
+      : value;
+  }
+  return output;
+}
+
+function resolveCaptionStyle(task) {
+  const templateId = task.options?.draftTemplateId || "default-portrait-9-16";
+  const definition = draftTemplates.find((template) => template.id === templateId) || draftTemplates[0];
+  const config = task.options?.draftTemplateConfig
+    ? deepMerge(definition.config, task.options.draftTemplateConfig)
+    : definition.config;
+  const caption = config.caption;
+  const fontSize = Math.max(48, Math.round(Number(caption.fontSize || 12) * 4.67));
+  const normalizedCenterY = 0.5 - Math.max(-1, Math.min(1, Number(caption.y || 0))) / 2;
+  const marginV = Math.max(80, Math.round(1920 * (1 - normalizedCenterY) - fontSize * 0.55));
+  return {
+    fontSize,
+    marginV,
+    bold: caption.bold ? -1 : 0,
+    spacing: Math.max(0, Math.round(Number(caption.letterSpacing || 0))),
+  };
+}
+
+function buildAss(cues, durationSec, captionStyle) {
   const events = cues.map((cue) => `Dialogue: 1,${assTime(cue.startSec)},${assTime(cue.endSec)},Caption,,0,0,0,,${cue.text}`);
   events.push(`Dialogue: 0,0:00:00.00,${assTime(durationSec)},Disclaimer,,0,0,0,,图片由 AI 生成 · 故事演绎`);
   return `[Script Info]
@@ -56,7 +86,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding
-Style: Caption,Microsoft YaHei,56,&H0000DEFF,&H0000DEFF,&H00101010,&H70000000,-1,0,0,0,100,100,1,0,1,5,2,2,100,100,250,1
+Style: Caption,Microsoft YaHei,${captionStyle.fontSize},&H0000DEFF,&H0000DEFF,&H00101010,&H70000000,${captionStyle.bold},0,0,0,100,100,${captionStyle.spacing},0,1,5,2,2,100,100,${captionStyle.marginV},1
 Style: Disclaimer,Microsoft YaHei,26,&H99FFFFFF,&H99FFFFFF,&H99000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,80,80,52,1
 
 [Events]
@@ -65,25 +95,9 @@ ${events.join("\n")}
 `;
 }
 
-function imageFilter(index, durationSec, frameCount) {
-  const mode = index % 4;
-  const lastFrame = Math.max(1, frameCount - 1);
-  const zoom = mode === 0
-    ? `1+0.08*on/${lastFrame}`
-    : mode === 1
-      ? `1.08-0.08*on/${lastFrame}`
-      : "1.08";
-  const x = mode === 2
-    ? `(iw-iw/zoom)*on/${lastFrame}`
-    : mode === 3
-      ? `(iw-iw/zoom)*(1-on/${lastFrame})`
-      : "iw/2-(iw/zoom/2)";
-  const y = "ih/2-(ih/zoom/2)";
-  return `[${index}:v]scale=1200:2134:force_original_aspect_ratio=increase,crop=1200:2134,zoompan=z='${zoom}':x='${x}':y='${y}':d=${frameCount}:s=1080x1920:fps=30,trim=end_frame=${frameCount},setpts=PTS-STARTPTS,setsar=1,format=yuv420p[v${index}]`;
-}
-
 const taskPath = join(appRoot, ".storybound-data", "tasks", taskId, "task.json");
 const task = JSON.parse(await readFile(taskPath, "utf8"));
+const captionStyle = resolveCaptionStyle(task);
 if (!task.draft?.projectDir) throw new Error("任务尚未生成剪映草稿");
 const outputDir = join(dirname(taskPath), "review", round);
 await mkdir(outputDir, { recursive: true });
@@ -129,40 +143,46 @@ const srt = await readFile(srtPath, "utf8");
 const cues = parseSrt(srt);
 const assPath = join(outputDir, "subtitles.ass");
 const outputPath = join(outputDir, `pocket-watch-${round}.mp4`);
-await writeFile(assPath, buildAss(cues, totalDurationSec), "utf8");
+await writeFile(assPath, buildAss(cues, totalDurationSec, captionStyle), "utf8");
 
-const inputs = [];
+function concatPath(filePath) {
+  return filePath.replaceAll("\\", "/").replaceAll("'", "'\\''");
+}
+
+// Windows has a short process command-line limit. Passing every image, audio
+// file and per-shot filter as a separate argument breaks on normal long-form
+// jobs (for example 57 shots). Feed FFmpeg compact concat manifests instead.
+const visualConcatPath = join(outputDir, "visual-input.ffconcat");
+const visualManifest = ["ffconcat version 1.0"];
 for (const segment of visualSegments) {
-  inputs.push("-i", segment.path);
+  visualManifest.push(`file '${concatPath(segment.path)}'`);
+  visualManifest.push(`duration ${segment.durationSec.toFixed(6)}`);
 }
+visualManifest.push(`file '${concatPath(visualSegments.at(-1).path)}'`);
+await writeFile(visualConcatPath, `${visualManifest.join("\n")}\n`, "utf8");
+
+let audioInput;
 if (continuousAudioPath) {
-  inputs.push("-i", continuousAudioPath);
+  audioInput = ["-i", continuousAudioPath];
 } else {
-  for (const segment of audioSegments) inputs.push("-i", segment.path);
+  const audioConcatPath = join(outputDir, "audio-input.ffconcat");
+  const audioManifest = [
+    "ffconcat version 1.0",
+    ...audioSegments.map((segment) => `file '${concatPath(segment.path)}'`),
+  ];
+  await writeFile(audioConcatPath, `${audioManifest.join("\n")}\n`, "utf8");
+  audioInput = ["-f", "concat", "-safe", "0", "-i", audioConcatPath];
 }
 
-const filters = [];
-for (const [index, segment] of visualSegments.entries()) {
-  filters.push(imageFilter(index, segment.durationSec, Math.max(1, Math.round(segment.durationSec * 30))));
-}
-filters.push(`${visualSegments.map((_segment, index) => `[v${index}]`).join("")}concat=n=${visualSegments.length}:v=1:a=0[vcat]`);
-
-const audioStartIndex = visualSegments.length;
-if (continuousAudioPath) {
-  filters.push(`[${audioStartIndex}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${totalDurationSec.toFixed(6)},asetpts=PTS-STARTPTS[acat]`);
-} else {
-  for (const [index] of audioSegments.entries()) {
-    const durationSec = timeline[index].durationSec;
-    filters.push(`[${audioStartIndex + index}:a]aresample=48000,aformat=channel_layouts=stereo,apad,atrim=0:${durationSec.toFixed(6)},asetpts=PTS-STARTPTS[a${index}]`);
-  }
-  filters.push(`${audioSegments.map((_segment, index) => `[a${index}]`).join("")}concat=n=${audioSegments.length}:v=0:a=1[acat]`);
-}
-filters.push(`[vcat]ass='${assPath.replaceAll("\\", "/").replace(":", "\\:")}',setsar=1,setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=yuv420p,fade=t=out:st=${Math.max(0, totalDurationSec - 0.5).toFixed(3)}:d=0.5[vout]`);
-filters.push(`[acat]afade=t=in:st=0:d=0.05,afade=t=out:st=${Math.max(0, totalDurationSec - 0.45).toFixed(3)}:d=0.45,loudnorm=I=-14:TP=-1.5:LRA=7[aout]`);
+const filters = [
+  `[0:v]fps=30,scale=1200:2134:force_original_aspect_ratio=increase,crop=1200:2134,scale=1080:1920,trim=duration=${totalDurationSec.toFixed(6)},setpts=PTS-STARTPTS,ass='${assPath.replaceAll("\\", "/").replace(":", "\\:")}',setsar=1,setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709,format=yuv420p,fade=t=out:st=${Math.max(0, totalDurationSec - 0.5).toFixed(3)}:d=0.5[vout]`,
+  `[1:a]aresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,apad,atrim=0:${totalDurationSec.toFixed(6)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=0.05,afade=t=out:st=${Math.max(0, totalDurationSec - 0.45).toFixed(3)}:d=0.45,loudnorm=I=-14:TP=-1.5:LRA=7[aout]`,
+];
 
 await execFileAsync(ffmpeg, [
   "-y",
-  ...inputs,
+  "-f", "concat", "-safe", "0", "-i", visualConcatPath,
+  ...audioInput,
   "-filter_complex", filters.join(";"),
   "-map", "[vout]",
   "-map", "[aout]",
@@ -203,6 +223,6 @@ const sceneMap = shots.map((shot, index) => ({
   speechEndSec: timeline[index].speechEndSec ?? timeline[index].endSec,
 }));
 await writeFile(join(outputDir, "scene-voice-map.json"), `${JSON.stringify(sceneMap, null, 2)}\n`, "utf8");
-await writeFile(join(outputDir, "video-spec.md"), `# 怀表测试成片 ${round}\n\n- 画布：1080 × 1920\n- 帧率：30 fps\n- 目标时长：${totalDurationSec.toFixed(3)} 秒\n- 视频：H.264 / yuv420p\n- 音频：AAC / 48 kHz / 192 kbps / -14 LUFS 目标\n- 分镜：${shots.length}\n- 字幕：${cues.length} 条，手机底部安全区 250 px\n- 封面首屏：${cover ? `${coverHoldSec.toFixed(2)} 秒` : "无独立封面"}\n- 配音模式：${continuousAudioPath ? "单条连续旁白，字幕与镜头依据 MiniMax 词级时间戳重建" : "逐镜头音频拼接"}\n- BGM：本轮未加入，只检查配音连续性、字幕与镜头节奏\n`, "utf8");
+await writeFile(join(outputDir, "video-spec.md"), `# Storybound 测试成片 ${round}\n\n- 画布：1080 × 1920\n- 帧率：30 fps\n- 目标时长：${totalDurationSec.toFixed(3)} 秒\n- 视频：H.264 / yuv420p\n- 音频：AAC / 48 kHz / 192 kbps / -14 LUFS 目标\n- 分镜：${shots.length}\n- 字幕：${cues.length} 条，字号 ${captionStyle.fontSize}px，距底部 ${captionStyle.marginV}px（读取剪映草稿模板）\n- 封面首屏：${cover ? `${coverHoldSec.toFixed(2)} 秒` : "使用第一张分镜图"}\n- 配音模式：${continuousAudioPath ? "单条连续旁白，字幕与镜头依据 MiniMax 词级时间戳重建" : "原版逐镜音频结构"}\n- BGM：本轮未加入，只检查配音连续性、字幕与镜头节奏\n`, "utf8");
 
 process.stdout.write(`${JSON.stringify({ outputPath, outputDir, durationSec: totalDurationSec, shots: shots.length, subtitles: cues.length, audioMode: continuousAudioPath ? "continuous" : "segmented" })}\n`);
