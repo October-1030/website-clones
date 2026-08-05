@@ -79,6 +79,27 @@
 .artifact-editor .form-grid { margin-top:12px; }
 .artifact-tags { display:flex;flex-wrap:wrap;gap:7px;margin-top:10px; }
 .artifact-tags span { padding:4px 8px;color:#aabfff;background:rgba(85,133,255,.08);border:1px solid rgba(85,133,255,.2);border-radius:999px;font-size:11px; }
+.rewrite-artifact--blocked { border-color:rgba(255,111,111,.42);box-shadow:inset 3px 0 0 rgba(255,111,111,.72); }
+.rewrite-artifact--blocked .primary-button:disabled { opacity:.42;cursor:not-allowed;filter:saturate(.45); }
+.pipeline-panel button:disabled { opacity:.42;cursor:not-allowed;filter:saturate(.45); }
+.rewrite-provenance { display:grid;gap:10px;padding:12px;margin-top:14px;background:rgba(18,214,160,.04);border:1px solid rgba(18,214,160,.18);border-radius:9px; }
+.rewrite-provenance header { display:flex;align-items:baseline;justify-content:space-between;gap:12px; }
+.rewrite-provenance header strong { color:var(--builder-brand);font-size:12px; }
+.rewrite-provenance header span { color:var(--builder-muted);font-size:11px; }
+.rewrite-provenance>div { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px; }
+.rewrite-provenance article { display:grid;gap:3px;padding:9px 10px;background:rgba(0,0,0,.16);border:1px solid var(--builder-border-soft);border-radius:7px; }
+.rewrite-provenance article span { color:var(--builder-muted);font-size:10px; }
+.rewrite-provenance article strong { overflow:hidden;color:var(--builder-text);font-size:11px;text-overflow:ellipsis;white-space:nowrap; }
+.rewrite-integrity { display:grid;gap:7px;padding:11px 12px;margin-top:10px;background:rgba(255,111,111,.045);border:1px solid rgba(255,111,111,.24);border-radius:9px; }
+.rewrite-integrity p { display:grid;grid-template-columns:20px minmax(0,1fr);align-items:start;gap:8px;margin:0;color:#ffaaa4;font-size:11px;line-height:1.55; }
+.rewrite-integrity p b { display:grid;width:18px;height:18px;place-items:center;color:#2d1010;background:#ff8585;border-radius:50%;font-size:10px; }
+.rewrite-integrity p.is-warning { color:#f3cb6d; }
+.rewrite-integrity p.is-warning b { color:#251c08;background:#f3cb6d; }
+.rewrite-integrity__actions { display:flex;flex-wrap:wrap;gap:8px;padding-top:3px; }
+.rewrite-integrity__actions button { padding:7px 10px;color:#ffb4af;background:rgba(255,255,255,.025);border:1px solid rgba(255,133,126,.3);border-radius:7px;font-size:11px; }
+.rewrite-artifact label>span { display:flex;align-items:baseline;justify-content:space-between;gap:8px; }
+.rewrite-artifact label>span small { color:var(--builder-muted);font-size:10px;font-weight:400; }
+.draft-result__blocked { max-width:240px;color:#ff918a!important;line-height:1.45; }
 .shot-editor-list,.prompt-editor-list { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:12px; }
 .shot-editor-list article,.prompt-editor-list article { padding:12px;background:#0c1115;border:1px solid var(--builder-border-soft);border-radius:8px; }
 .shot-editor-list header { display:flex;align-items:center;justify-content:space-between; }
@@ -113,8 +134,8 @@
 .draft-result .primary-button,.draft-result a.primary-button { display:inline-flex;align-items:center;text-decoration:none; }
 .draft-result--pending { background:rgba(241,185,20,.055);border-color:rgba(241,185,20,.24); }
 
-@media(max-width:920px){.form-grid--three,.choice-grid--four,.audio-workbench article{grid-template-columns:repeat(2,minmax(0,1fr))}.shot-editor-list,.prompt-editor-list{grid-template-columns:1fr}}
-@media(max-width:680px){.form-grid--two,.form-grid--three,.audio-workbench article{grid-template-columns:1fr}.artifact-editor__head,.draft-result{align-items:stretch;flex-direction:column}}
+@media(max-width:920px){.form-grid--three,.choice-grid--four,.audio-workbench article{grid-template-columns:repeat(2,minmax(0,1fr))}.shot-editor-list,.prompt-editor-list{grid-template-columns:1fr}.rewrite-provenance>div{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.form-grid--two,.form-grid--three,.audio-workbench article{grid-template-columns:1fr}.artifact-editor__head,.draft-result,.rewrite-provenance header{align-items:stretch;flex-direction:column}.rewrite-provenance>div{grid-template-columns:1fr}}
 @media(max-width:680px){.template-summary{grid-template-columns:1fr}}
 
 .task-builder__header {
@@ -1105,7 +1126,8 @@
   border-color: rgba(241, 185, 20, 0.28);
 }
 
-.pipeline-state--cancelled {
+.pipeline-state--cancelled,
+.pipeline-state--invalid {
   color: #ff8178;
   background: rgba(255, 91, 81, 0.08);
   border-color: rgba(255, 91, 81, 0.25);

@@ -1,5 +1,6 @@
 import { pipelineSteps } from "../data/app-data";
 import { draftTemplateById } from "../data/draft-templates";
+import { blockingRewriteIssues, systemTemplateTrack, taskRewriteIntegrityIssues } from "../lib/rewrite-integrity";
 import type { PipelineStatus } from "../types/app";
 import type { ImagePrompt, StoryboardShot } from "../types/llm";
 import type { StoredImage, StoryboundTask, TaskTimelineEntry } from "../types/task";
@@ -13,6 +14,7 @@ interface TaskWorkbenchProps {
   onCancel: () => void;
   onRunFromStep: (step: number) => void;
   onSaveArtifact: (step: number) => void;
+  onRepairPromptAlignment: (track: string) => void;
   onRegenerateImage: (shotId: number) => void;
   onUploadImage: (shotId: number, file: File) => void;
   onUploadDynamicVideo: (shotId: number, file: File) => void;
@@ -82,6 +84,11 @@ function sopQualityChecks(task: StoryboundTask): SopCheck[] {
   const narrationVolume = task.options.narrationVolume ?? template.audio.narrationVolume;
   const bgmVolume = task.options.bgmVolume ?? template.audio.bgmVolume;
   const checks: SopCheck[] = [];
+  const rewriteBlockers = blockingRewriteIssues(task);
+
+  checks.push(rewriteBlockers.length
+    ? { level: "attention", label: "Step 2 文案完整性", detail: rewriteBlockers.map((issue) => issue.message).join("；") }
+    : { level: "pass", label: "Step 2 文案完整性", detail: "赛道、提示词模板、改写正文和封面发布字段均已通过结构校验。" });
 
   checks.push(template.canvas.width === 1080 && template.canvas.height === 1920
     ? { level: "pass", label: "导出画布", detail: "1080 × 1920；草稿固定为 30 fps。" }
@@ -147,10 +154,20 @@ function sopQualityChecks(task: StoryboundTask): SopCheck[] {
   return checks;
 }
 
-export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, onCancel, onRunFromStep, onSaveArtifact, onRegenerateImage, onUploadImage, onUploadDynamicVideo, onBorrowImage, onRepairFailedImages, onRegenerateAudio, onUpdateImageCrop, onUpdateTimeline, onRepackDraft }: TaskWorkbenchProps) {
-  const finishedCount = task.stepStatuses.filter((status) => status === "done" || status === "skipped").length;
+export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, onCancel, onRunFromStep, onSaveArtifact, onRepairPromptAlignment, onRegenerateImage, onUploadImage, onUploadDynamicVideo, onBorrowImage, onRepairFailedImages, onRegenerateAudio, onUpdateImageCrop, onUpdateTimeline, onRepackDraft }: TaskWorkbenchProps) {
   const failedImages = task.media.images.filter((image) => image.status === "failed");
   const qualityChecks = sopQualityChecks(task);
+  const rewriteIssues = taskRewriteIntegrityIssues(task);
+  const rewriteBlockers = blockingRewriteIssues(task);
+  const effectiveStepStatuses = task.stepStatuses.map((status, index): PipelineStatus => {
+    if (!rewriteBlockers.length) return status;
+    if (index === 1) return "failed";
+    if (index > 1 && status === "done") return "paused";
+    return status;
+  });
+  const finishedCount = effectiveStepStatuses.filter((status) => status === "done" || status === "skipped").length;
+  const templateTrack = systemTemplateTrack(task.options.promptTemplateId);
+  const templateLabel = task.options.promptTemplateOverride?.name || templateTrack || task.track;
   const activeTemplate = task.options.draftTemplateConfig
     ?? draftTemplateById(task.options.draftTemplateId || "default-portrait-9-16").config;
   const updatePrecheck = (cleanText: string) => {
@@ -203,20 +220,67 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
   return (
     <section className="pipeline-panel" aria-live="polite">
       <div className="pipeline-panel__header">
-        <div><span className={`pipeline-state pipeline-state--${task.runState}`}>{task.runState === "running" ? "流水线执行中" : task.runState === "paused" ? task.error ? "步骤失败，等待处理" : "已暂停，等待确认" : task.runState === "cancelled" ? "任务已取消" : task.runState === "completed" ? "全部完成" : "任务草稿"}</span><h2>{task.title}</h2><p>{finishedCount} / {pipelineSteps.length} 步已处理 · {task.mode === "auto" ? "全自动" : task.mode === "semi_auto" ? "半自动" : "直接出片"} · 已持久化</p></div>
+        <div><span className={`pipeline-state pipeline-state--${rewriteBlockers.length ? "invalid" : task.runState}`}>{rewriteBlockers.length ? "Step 2 异常，旧产物已冻结" : task.runState === "running" ? "流水线执行中" : task.runState === "paused" ? task.error ? "步骤失败，等待处理" : "已暂停，等待确认" : task.runState === "cancelled" ? "任务已取消" : task.runState === "completed" ? "全部完成" : "任务草稿"}</span><h2>{task.title}</h2><p>{finishedCount} / {pipelineSteps.length} 步有效 · {task.mode === "auto" ? "全自动" : task.mode === "semi_auto" ? "半自动" : "直接出片"} · 已持久化</p></div>
         <div className="pipeline-actions">{task.runState === "running" ? <button type="button" className="secondary-button" onClick={onPause}>本步完成后暂停</button> : null}{task.runState === "paused" || task.runState === "cancelled" ? <button type="button" className="primary-button" disabled={busy} onClick={onContinue}>继续执行</button> : null}{task.runState === "running" || task.runState === "paused" ? <button type="button" className="danger-button" onClick={onCancel}>取消并保留断点</button> : null}</div>
       </div>
       {task.error ? <div className="pipeline-error"><span>步骤失败：{task.error}</span><div><button type="button" disabled={busy} onClick={onContinue}>重试本步骤</button></div></div> : null}
       <progress value={finishedCount} max={pipelineSteps.length}>{finishedCount} / {pipelineSteps.length}</progress>
-      <ol className="pipeline-steps">{pipelineSteps.map((step, index) => { const status = task.stepStatuses[index] ?? "pending"; return <li key={step.id} className={`pipeline-step pipeline-step--${status}`}><span className="pipeline-step__number">{status === "done" ? "✓" : status === "skipped" ? "–" : step.id + 1}</span><div className="pipeline-step__copy"><div><strong>{step.title}</strong>{task.mode === "direct" && step.id === 2 ? <em>机械切分</em> : null}</div><span>{task.mode === "direct" && step.id === 2 ? "按空行和标点切分，不调用 AI" : step.description}</span></div><span className="pipeline-step__status">{statusLabels[status]}</span>{status === "done" || status === "failed" ? <button type="button" disabled={busy} onClick={() => onRunFromStep(step.id)}>从此重跑</button> : null}</li>; })}</ol>
+      <ol className="pipeline-steps">{pipelineSteps.map((step, index) => { const status = effectiveStepStatuses[index] ?? "pending"; return <li key={step.id} className={`pipeline-step pipeline-step--${status}`}><span className="pipeline-step__number">{status === "done" ? "✓" : status === "skipped" ? "—" : step.id + 1}</span><div className="pipeline-step__copy"><div><strong>{step.title}</strong>{task.mode === "direct" && step.id === 2 ? <em>机械切分</em> : null}</div><span>{task.mode === "direct" && step.id === 2 ? "按空行和标点切分，不调用 AI" : step.description}</span></div><span className="pipeline-step__status">{statusLabels[status]}</span>{status === "done" || status === "failed" ? <button type="button" disabled={busy} onClick={() => onRunFromStep(step.id)}>从此重跑</button> : null}</li>; })}</ol>
 
       {task.artifacts.precheck ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 1 · 文案预审</strong><span>{task.artifacts.precheck.warnings.length} 条提醒 · {task.artifacts.precheck.sensitiveTerms.length} 个敏感词</span></div><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(0)}>保存并从改写继续</button></div><textarea className="artifact-textarea" value={task.artifacts.precheck.cleanText} onChange={(event) => updatePrecheck(event.target.value)} />{task.artifacts.precheck.warnings.length ? <div className="artifact-tags">{task.artifacts.precheck.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}</div> : null}
 
-      {task.artifacts.rewrite ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 2 · 改写、封面与发布素材</strong><span>原版 WriterAgent 的正文、封面五字段和自评均已保存</span></div><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(1)}>保存并从分镜继续</button></div><div className="form-grid form-grid--two"><label><span>封面主标题</span><input className="text-input" value={task.artifacts.rewrite.title} onChange={(event) => updateRewrite("title", event.target.value)} /></label><label><span>置顶评论</span><input className="text-input" value={task.artifacts.rewrite.pinnedComment} onChange={(event) => updateRewrite("pinnedComment", event.target.value)} /></label></div><div className="form-grid form-grid--two"><label><span>封面副标题（每行一条）</span><textarea className="artifact-textarea artifact-textarea--short" value={(task.artifacts.rewrite.subtitle || []).join("\n")} onChange={(event) => updateRewriteList("subtitle", event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label><label><span>标签（逗号分隔）</span><textarea className="artifact-textarea artifact-textarea--short" value={task.artifacts.rewrite.tags.join("，")} onChange={(event) => updateRewriteList("tags", event.target.value.split(/[,，]/).map((item) => item.trim().replace(/^#/, "")).filter(Boolean))} /></label></div><label><span>改写正文</span><textarea className="artifact-textarea" value={task.artifacts.rewrite.narration} onChange={(event) => updateRewrite("narration", event.target.value)} /></label><div className="form-grid form-grid--two"><label><span>发布简介</span><textarea className="artifact-textarea artifact-textarea--short" value={task.artifacts.rewrite.summary || task.artifacts.rewrite.publishCopy} onChange={(event) => { updateRewrite("summary", event.target.value); }} /></label><label><span>5 条种子评论（每行一条）</span><textarea className="artifact-textarea artifact-textarea--short" value={(task.artifacts.rewrite.comments || []).join("\n")} onChange={(event) => updateRewriteList("comments", event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label></div>{typeof task.artifacts.rewrite.totalScore === "number" ? <div className="artifact-tags"><span>WriterAgent 自评 {task.artifacts.rewrite.totalScore}/100</span></div> : null}</div> : null}
+      {task.artifacts.rewrite ? (
+        <div className={`artifact-editor rewrite-artifact${rewriteBlockers.length ? " rewrite-artifact--blocked" : ""}`}>
+          <div className="artifact-editor__head">
+            <div>
+              <strong>Step 2 · 改写、封面与发布素材</strong>
+              <span>{rewriteBlockers.length ? `检测到 ${rewriteBlockers.length} 个阻断问题，下游生成已暂停` : "正文与元数据已通过完整性校验"}</span>
+            </div>
+            <button type="button" className="primary-button" disabled={busy || rewriteBlockers.length > 0} title={rewriteBlockers[0]?.message} onClick={() => onSaveArtifact(1)}>保存并从分镜继续</button>
+          </div>
 
-      {task.artifacts.storyboard ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 3 · 分镜工作台</strong><span>{task.artifacts.storyboard.shots.length} 镜 · 可增删、排序、改字幕和画面描述</span></div><div><button type="button" className="secondary-button" onClick={addShot}>新增分镜</button><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(2)}>保存并生成提示词</button></div></div><div className="shot-editor-list">{task.artifacts.storyboard.shots.map((shot, index) => <article key={shot.id}><header><strong>第 {shot.id} 镜</strong><div><button type="button" disabled={index === 0} onClick={() => moveShot(index, -1)}>上移</button><button type="button" disabled={index === task.artifacts.storyboard!.shots.length - 1} onClick={() => moveShot(index, 1)}>下移</button><button type="button" onClick={() => removeShot(index)}>删除</button></div></header><textarea aria-label={`第 ${shot.id} 镜字幕`} value={shot.text} onChange={(event) => updateShot(index, { text: event.target.value })} /><CaptionLineLimit value={shot.text} maxCharsPerLine={activeTemplate.caption.maxCharsPerLine} /><textarea aria-label={`第 ${shot.id} 镜画面描述`} value={shot.visual} onChange={(event) => updateShot(index, { visual: event.target.value })} /><div className="form-grid form-grid--two"><input aria-label={`第 ${shot.id} 镜情绪`} className="text-input" value={shot.emotion} onChange={(event) => updateShot(index, { emotion: event.target.value })} /><input aria-label={`第 ${shot.id} 镜时长`} className="text-input" type="number" min="0.3" step="0.1" value={shot.durationSec} onChange={(event) => updateShot(index, { durationSec: Number(event.target.value) || 5 })} /></div></article>)}</div></div> : null}
+          <section className="rewrite-provenance" aria-label="Step 2 字段来源">
+            <header><strong>这些文字从哪里来</strong><span>不是音频转写；先生成文字，后续 TTS 再朗读分镜字幕。</span></header>
+            <div>
+              <article><span>输入原稿</span><strong>{task.sourceMode === "ai" ? "AI 创作原稿" : "粘贴文案"}</strong></article>
+              <article><span>改写正文</span><strong>WriterAgent + {task.track}规则</strong></article>
+              <article><span>封面 / 发布字段</span><strong>{task.track}元数据规则（实际）</strong></article>
+              <article><span>任务保存的模板</span><strong>{templateLabel}</strong></article>
+            </div>
+          </section>
 
-      {task.artifacts.prompts ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 4 · 原版绘图提示词</strong><span>{task.artifacts.prompts.templateVersion} · {task.artifacts.prompts.prompts.length} 条</span></div><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(3)}>保存并开始出图</button></div><div className="prompt-editor-list">{task.artifacts.prompts.prompts.map((prompt, index) => <article key={prompt.shotId}><div className="prompt-editor-list__heading"><strong>第 {prompt.shotId} 镜</strong><button type="button" className={prompt.useReference ? "is-reference" : "is-environment"} onClick={() => updatePrompt(index, { useReference: !prompt.useReference })}>{prompt.useReference ? "主角参考图" : "纯场景 / 物件"}</button></div><textarea value={prompt.prompt} onChange={(event) => updatePrompt(index, { prompt: event.target.value })} /><input className="text-input" value={prompt.negativePrompt} onChange={(event) => updatePrompt(index, { negativePrompt: event.target.value })} /></article>)}</div></div> : null}
+          {rewriteIssues.length ? (
+            <section className="rewrite-integrity" aria-label="Step 2 完整性问题">
+              {rewriteIssues.map((issue) => <p className={`is-${issue.level}`} key={issue.code}><b>{issue.level === "blocking" ? "!" : "i"}</b><span>{issue.message}</span></p>)}
+              {templateTrack && templateTrack !== task.track ? (
+                <div className="rewrite-integrity__actions">
+                  <button type="button" disabled={busy} onClick={() => onRepairPromptAlignment(templateTrack)}>按“{templateTrack}”模板修正</button>
+                  <button type="button" disabled={busy} onClick={() => onRepairPromptAlignment(task.track)}>按“{task.track}”赛道修正</button>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
+          <div className="form-grid form-grid--two">
+            <label><span>封面主标题 <small>{countCaptionCharacters(task.artifacts.rewrite.title)} 字</small></span><input className="text-input" value={task.artifacts.rewrite.title} onChange={(event) => updateRewrite("title", event.target.value)} /></label>
+            <label><span>置顶评论 <small>默认取第 1 条种子评论 · 可单独修改</small></span><input className="text-input" value={task.artifacts.rewrite.pinnedComment} onChange={(event) => updateRewrite("pinnedComment", event.target.value)} /></label>
+          </div>
+          <div className="form-grid form-grid--two">
+            <label><span>封面副标题（每行一条） <small>{(task.artifacts.rewrite.subtitle || []).length} 条</small></span><textarea className="artifact-textarea artifact-textarea--short" value={(task.artifacts.rewrite.subtitle || []).join("\n")} onChange={(event) => updateRewriteList("subtitle", event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>
+            <label><span>标签（逗号分隔） <small>{task.artifacts.rewrite.tags.length} 个</small></span><textarea className="artifact-textarea artifact-textarea--short" value={task.artifacts.rewrite.tags.join("，")} onChange={(event) => updateRewriteList("tags", event.target.value.split(/[,，]/).map((item) => item.trim().replace(/^#/, "")).filter(Boolean))} /></label>
+          </div>
+          <label><span>改写正文 <small>{countCaptionCharacters(task.artifacts.rewrite.narration)} 字 · 后续分镜与 TTS 的唯一正文来源</small></span><textarea className="artifact-textarea" value={task.artifacts.rewrite.narration} onChange={(event) => updateRewrite("narration", event.target.value)} /></label>
+          <div className="form-grid form-grid--two">
+            <label><span>发布简介 <small>{countCaptionCharacters(task.artifacts.rewrite.summary || task.artifacts.rewrite.publishCopy)} 字</small></span><textarea className="artifact-textarea artifact-textarea--short" value={task.artifacts.rewrite.summary || task.artifacts.rewrite.publishCopy} onChange={(event) => updateRewrite("summary", event.target.value)} /></label>
+            <label><span>5 条种子评论（每行一条） <small>{(task.artifacts.rewrite.comments || []).length}/5</small></span><textarea className="artifact-textarea artifact-textarea--short" value={(task.artifacts.rewrite.comments || []).join("\n")} onChange={(event) => updateRewriteList("comments", event.target.value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean))} /></label>
+          </div>
+          {typeof task.artifacts.rewrite.totalScore === "number" ? <div className="artifact-tags"><span>WriterAgent 自评 {task.artifacts.rewrite.totalScore}/100</span></div> : null}
+        </div>
+      ) : null}
+
+      {task.artifacts.storyboard ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 3 · 分镜工作台</strong><span>{task.artifacts.storyboard.shots.length} 镜 · 可增删、排序、改字幕和画面描述</span></div><div><button type="button" className="secondary-button" onClick={addShot}>新增分镜</button><button type="button" className="primary-button" disabled={busy || rewriteBlockers.length > 0} onClick={() => onSaveArtifact(2)}>保存并生成提示词</button></div></div><div className="shot-editor-list">{task.artifacts.storyboard.shots.map((shot, index) => <article key={shot.id}><header><strong>第 {shot.id} 镜</strong><div><button type="button" disabled={index === 0} onClick={() => moveShot(index, -1)}>上移</button><button type="button" disabled={index === task.artifacts.storyboard!.shots.length - 1} onClick={() => moveShot(index, 1)}>下移</button><button type="button" onClick={() => removeShot(index)}>删除</button></div></header><textarea aria-label={`第 ${shot.id} 镜字幕`} value={shot.text} onChange={(event) => updateShot(index, { text: event.target.value })} /><CaptionLineLimit value={shot.text} maxCharsPerLine={activeTemplate.caption.maxCharsPerLine} /><textarea aria-label={`第 ${shot.id} 镜画面描述`} value={shot.visual} onChange={(event) => updateShot(index, { visual: event.target.value })} /><div className="form-grid form-grid--two"><input aria-label={`第 ${shot.id} 镜情绪`} className="text-input" value={shot.emotion} onChange={(event) => updateShot(index, { emotion: event.target.value })} /><input aria-label={`第 ${shot.id} 镜时长`} className="text-input" type="number" min="0.3" step="0.1" value={shot.durationSec} onChange={(event) => updateShot(index, { durationSec: Number(event.target.value) || 5 })} /></div></article>)}</div></div> : null}
+
+      {task.artifacts.prompts ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 4 · 原版绘图提示词</strong><span>{task.artifacts.prompts.templateVersion} · {task.artifacts.prompts.prompts.length} 条</span></div><button type="button" className="primary-button" disabled={busy || rewriteBlockers.length > 0} onClick={() => onSaveArtifact(3)}>保存并开始出图</button></div><div className="prompt-editor-list">{task.artifacts.prompts.prompts.map((prompt, index) => <article key={prompt.shotId}><div className="prompt-editor-list__heading"><strong>第 {prompt.shotId} 镜</strong><button type="button" className={prompt.useReference ? "is-reference" : "is-environment"} onClick={() => updatePrompt(index, { useReference: !prompt.useReference })}>{prompt.useReference ? "主角参考图" : "纯场景 / 物件"}</button></div><textarea value={prompt.prompt} onChange={(event) => updatePrompt(index, { prompt: event.target.value })} /><input className="text-input" value={prompt.negativePrompt} onChange={(event) => updatePrompt(index, { negativePrompt: event.target.value })} /></article>)}</div></div> : null}
 
       {task.media.images.length ? <div className="pipeline-images"><div className="pipeline-images__head"><div><strong>Step 5 · 分镜图片工作台</strong><span>{task.media.images.filter((image) => image.status === "ready" || image.status === "borrowed").length}/{task.media.images.length} 张可用</span></div>{failedImages.length ? <button type="button" className="primary-button" disabled={busy} onClick={onRepairFailedImages}>只修复 {failedImages.length} 张失败图</button> : null}</div><div className="pipeline-image-grid">{task.media.images.map((image) => {
         const crop = image.crop || { x: 0, y: 0, scale: 1 };
@@ -236,7 +300,7 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
 
       {task.artifacts.storyboard || task.media.timeline?.length ? <section className="sop-quality-gate"><header><div><strong>教程成片检查</strong><span>依据《剪辑基础篇》与《剪辑进阶篇》；建议项不会阻止打包，客观错误会明确标红。</span></div><a href="https://aipoju.com/docx/63b1a44a-8060-4928-bf33-a9a4d9caf849/LKF4d2PoforF3ex2lZLcca2in7c?from=from_copylink" target="_blank" rel="noreferrer">查看参考 SOP ↗</a></header><div className="sop-quality-gate__checks">{qualityChecks.map((check) => <article key={`${check.label}-${check.detail}`} className={`sop-quality-gate__check sop-quality-gate__check--${check.level}`}><span>{check.level === "pass" ? "✓" : check.level === "attention" ? "!" : check.level === "advice" ? "△" : "i"}</span><div><strong>{check.label}</strong><p>{check.detail}</p></div></article>)}</div></section> : null}
 
-      {task.draft?.ready ? <div className="draft-result"><div><strong>真实剪映草稿已生成</strong><span>{task.draft.projectName} · {task.draft.durationSec.toFixed(1)} 秒 · {task.draft.trackCount} 条轨道 · {task.draft.fileCount} 个文件</span><small>{task.draft.projectDir}</small></div><button type="button" className="secondary-button" disabled={busy} onClick={onRepackDraft}>只重新打包</button><a className="primary-button" href={task.draft.zipUrl}>下载剪映草稿 ZIP</a></div> : task.stepStatuses[5] === "done" ? <div className="draft-result draft-result--pending"><div><strong>音频和图片已经齐备</strong><span>可以直接重新执行 Step 7，不会重复调用 AI、出图或 TTS。</span></div><button type="button" className="primary-button" disabled={busy} onClick={onRepackDraft}>生成剪映草稿</button></div> : null}
+      {task.draft?.ready ? <div className="draft-result"><div><strong>真实剪映草稿已生成</strong><span>{task.draft.projectName} · {task.draft.durationSec.toFixed(1)} 秒 · {task.draft.trackCount} 条轨道 · {task.draft.fileCount} 个文件</span><small>{task.draft.projectDir}</small></div><button type="button" className="secondary-button" disabled={busy || rewriteBlockers.length > 0} onClick={onRepackDraft}>只重新打包</button>{rewriteBlockers.length ? <span className="draft-result__blocked">先修复 Step 2，旧草稿不作为有效成品</span> : <a className="primary-button" href={task.draft.zipUrl}>下载剪映草稿 ZIP</a>}</div> : task.stepStatuses[5] === "done" ? <div className="draft-result draft-result--pending"><div><strong>音频和图片已经齐备</strong><span>可以直接重新执行 Step 7，不会重复调用 AI、出图或 TTS。</span></div><button type="button" className="primary-button" disabled={busy || rewriteBlockers.length > 0} onClick={onRepackDraft}>生成剪映草稿</button></div> : null}
     </section>
   );
 }

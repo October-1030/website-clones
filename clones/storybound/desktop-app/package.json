@@ -15,6 +15,7 @@
     "smoke:alignment": "node scripts/smoke-minimax-alignment.mjs",
     "smoke:media": "node scripts/smoke-media-workbench.mjs",
     "smoke:benchmark": "node scripts/smoke-benchmark-contract.mjs",
+    "smoke:integrity": "node scripts/smoke-pipeline-integrity.mjs",
     "rebuild:tutorial": "node scripts/rebuild-pocket-watch-tutorial.mjs",
     "smoke:pipeline": "node scripts/smoke-original-pipeline.mjs"
   },

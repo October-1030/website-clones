@@ -40,6 +40,7 @@ export interface PipelineContext {
   outroCtaEnabled?: boolean;
   outroCta?: string;
   ttsMode?: "original-segmented" | "continuous";
+  promptTemplateId?: string;
   promptTemplateOverride?: PromptTemplateOverride | null;
 }
 

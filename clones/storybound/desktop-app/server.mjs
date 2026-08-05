@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { buildJianyingDraft } from "./server/draft-builder.mjs";
 import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
+import { metadataIssue, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
 import { createTaskStore, resolveStoryboundDataRoot } from "./server/task-store.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -636,6 +637,8 @@ async function generateMinimaxImages(body) {
   let generationTask = null;
   if (body.taskId) {
     generationTask = await taskStore.readTask(body.taskId);
+    const integrityIssue = taskRewriteIntegrityIssue(generationTask);
+    if (integrityIssue) throw new Error(`Step 2 完整性校验未通过：${integrityIssue}`);
     const reference = generationTask?.options?.referenceImage;
     if (reference?.path && existsSync(reference.path)) {
       const extension = extname(reference.path).toLowerCase();
@@ -1068,7 +1071,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
         pinnedComment: clampString(payload.pinnedComment || payload.pinned_comment || payload.comment || comments[0], "你觉得这个故事最打动你的地方是什么？"),
         comments,
         ...(payload.scores && typeof payload.scores === "object" ? { scores: payload.scores } : {}),
-        ...(Number.isFinite(Number(payload.totalScore || payload.total_score)) ? { totalScore: Number(payload.totalScore || payload.total_score) } : {}),
+        ...(Number.isFinite(Number(payload.totalScore ?? payload.total_score)) ? { totalScore: Number(payload.totalScore ?? payload.total_score) } : {}),
       },
     };
   }
@@ -1265,7 +1268,7 @@ async function callLlmJson(config, messages, temperature, label, options = {}) {
       model: config.model,
       messages: attempt === 0 ? messages : [
         ...messages,
-        { role: "user", content: "上一次输出无法解析。请重新执行，只返回使用双引号、属性名完整加引号、无尾逗号的严格 JSON。" },
+        { role: "user", content: options.retryInstruction || "上一次输出无法解析或未通过完整性校验。请重新执行，填写实际内容，只返回使用双引号、属性名完整加引号、无尾逗号的严格 JSON。" },
       ],
       temperature: attempt === 0 ? temperature : 0.1,
       ...(config.provider === "minimax" ? { max_completion_tokens: 8192 } : { max_tokens: 8192, response_format: { type: "json_object" } }),
@@ -1290,7 +1293,10 @@ async function callLlmJson(config, messages, temperature, label, options = {}) {
       const payload = parseJsonObject(text);
       const content = payload.choices?.[0]?.message?.content;
       if (!content) throw new Error("LLM 响应缺少 message.content");
-      return parseJsonObject(content);
+      const parsed = parseJsonObject(content);
+      const validationError = typeof options.validate === "function" ? options.validate(parsed) : "";
+      if (validationError) throw new Error(validationError);
+      return parsed;
     } catch (error) {
       lastError = error;
     }
@@ -1373,18 +1379,24 @@ async function runLlmPipeline(body) {
     }
     const rewritePayload = await callLlmJson(config, pipelineMessages(
       [originalPromptLibrary.writerAgentPrompt, promptOverride.rewritePrompt || track?.rewritePrompt, copyOptionPrompt(rewriteContext)],
-      `只执行 WriterAgent 的改写与自评阶段，严格返回 JSON：${JSON.stringify({ narration: "完整改写正文", scores: { hook: 0, fluency: 0, empathy: 0, visual: 0, originality: 0, spoken: 0 }, totalScore: 0 })}`,
+      "只执行 WriterAgent 的改写与自评阶段，严格返回 JSON 对象。narration 必须直接填写可供 TTS 朗读的实际完整正文，禁止返回字段说明、占位词或示例；同时返回 scores 对象与 totalScore 数值。",
       rewriteBase,
-    ), 0.52, "WriterAgent 改写");
+    ), 0.52, "WriterAgent 改写", {
+      validate: (payload) => writerPayloadIssue(
+        payload,
+        rewriteBase.sourceText,
+        context.targetLength,
+      ),
+    });
     const rawNarration = clampString(rewritePayload.narration || rewritePayload.rewritten_text || rewritePayload.content, rewriteBase.sourceText).slice(0, 10000);
     const narrationForMetadata = composeConfiguredNarration(rawNarration, rewriteContext, context.title);
     const metadataPayload = await callLlmJson(config, pipelineMessages(
       [promptOverride.metadataPrompt || track?.metadataPrompt],
       `只执行原版封面标题与发布元数据阶段，严格返回 JSON：${JSON.stringify({ title: "", subtitle: ["", ""], summary: "", tags: [], comments: ["", "", "", "", ""] })}`,
       { ...base, rewrittenText: narrationForMetadata },
-    ), 0.48, "封面与发布元数据");
+    ), 0.48, "封面与发布元数据", { validate: metadataIssue });
     const narration = composeConfiguredNarration(rawNarration, rewriteContext, metadataPayload.title || context.title).slice(0, 10000);
-    return normalizePipelineResult(step, { ...metadataPayload, narration, scores: rewritePayload.scores, totalScore: rewritePayload.totalScore || rewritePayload.total_score }, context, artifacts);
+    return normalizePipelineResult(step, { ...metadataPayload, narration, scores: rewritePayload.scores, totalScore: rewritePayload.totalScore ?? rewritePayload.total_score }, context, artifacts);
   }
 
   if (step === "storyboard") {
@@ -1481,6 +1493,11 @@ async function handleTtsApi(request, response, pathname) {
     const body = await readJson(request);
     if (pathname === "/api/tts/synthesize" || pathname === "/api/tts/test") {
       if (pathname.endsWith("/test")) body.text = "测";
+      if (body.taskId && !pathname.endsWith("/test")) {
+        const generationTask = await taskStore.readTask(body.taskId);
+        const integrityIssue = taskRewriteIntegrityIssue(generationTask);
+        if (integrityIssue) throw new Error(`Step 2 完整性校验未通过：${integrityIssue}`);
+      }
       const result = await synthesize(body);
       const saved = body.taskId && !pathname.endsWith("/test")
         ? await taskStore.saveBuffer(
@@ -2120,6 +2137,8 @@ async function handleTaskApi(request, response, pathname) {
     if (parts[3] === "draft" && request.method === "POST") {
       const task = await taskStore.readTask(taskId);
       if (!task) throw new Error("任务不存在");
+      const integrityIssue = taskRewriteIntegrityIssue(task);
+      if (integrityIssue) throw new Error(`Step 2 完整性校验未通过：${integrityIssue}`);
       const draft = await buildJianyingDraft(taskStore, task);
       const updated = await taskStore.updateTask(taskId, {
         draft,

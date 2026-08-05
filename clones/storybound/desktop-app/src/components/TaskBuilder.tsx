@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { pipelineSteps } from "../data/app-data";
+import { originalDefaultStyleByTrack, pipelineSteps } from "../data/app-data";
 import { availableMinimaxVoices, volcengineVoices } from "../data/tts-data";
 import { buildCoverImagePrompt } from "../lib/cover-prompt";
 import { generateImages } from "../lib/image-api";
 import { createAiCopy, runLlmPipelineStep } from "../lib/llm-api";
+import { blockingRewriteIssues } from "../lib/rewrite-integrity";
 import { appendTaskEvent, buildTaskDraft, clearTaskFromStep, createTask, getTask, updateTask, uploadTaskAsset } from "../lib/task-api";
 import { takeTaskHandoff } from "../lib/task-handoff";
 import { synthesizeTts } from "../lib/tts-api";
@@ -65,6 +66,11 @@ function composeNarrationText(text: string, form: BuilderFormState): string {
     body,
     outro && !body.endsWith(outro) ? applyLead(outro) : "",
   ].filter(Boolean).join("\n\n");
+}
+
+function assertRewriteReady(task: StoryboundTask): void {
+  const issues = blockingRewriteIssues(task);
+  if (issues.length) throw new Error(`Step 2 完整性校验未通过：${issues.map((issue) => issue.message).join("；")}`);
 }
 
 function mechanicalShots(text: string, targetScenes: number | null, maxChars = 55): StoryboardShot[] {
@@ -220,7 +226,12 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       title: handoff.title,
       inputText: handoff.inputText,
       sourceMode: "paste",
-      ...(handoff.track ? { track: handoff.track } : {}),
+      ...(handoff.track ? {
+        track: handoff.track,
+        promptTemplateId: `system-${handoff.track}`,
+        promptTemplateOverride: null,
+        visualStyle: originalDefaultStyleByTrack[handoff.track] ?? current.visualStyle,
+      } : {}),
     }));
   }, [taskId]);
 
@@ -300,6 +311,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       outroCtaEnabled: activeForm.outroCtaEnabled,
       outroCta: activeForm.outroCtaEnabled ? activeForm.outroCta.trim() : "",
       ttsMode: activeForm.ttsMode,
+      promptTemplateId: activeForm.promptTemplateId,
       promptTemplateOverride: activeForm.promptTemplateOverride,
     };
   }
@@ -514,6 +526,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }
 
   async function executeStep(activeTask: StoryboundTask, step: number, signal: AbortSignal): Promise<StoryboundTask> {
+    if (step >= 2) assertRewriteReady(activeTask);
     if (step === 3 && activeTask.options.materialSource !== "ai") {
       const shots = activeTask.artifacts.storyboard?.shots || [];
       if (!shots.length) throw new Error("没有分镜，无法匹配本地或网络素材");
@@ -665,6 +678,14 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   async function handleSaveArtifact(step: number): Promise<void> {
     if (!task || busy) return;
+    if (step === 1) {
+      try {
+        assertRewriteReady(task);
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : "Step 2 完整性校验未通过");
+        return;
+      }
+    }
     setBusy(true);
     try {
       let active = await updateTask(task.id, { artifacts: task.artifacts, title: task.artifacts.rewrite?.title || task.title });
@@ -676,6 +697,12 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   async function regenerateImage(shotId: number): Promise<void> {
     if (!task || busy) return;
+    try {
+      assertRewriteReady(task);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Step 2 完整性校验未通过");
+      return;
+    }
     const prompt = task.artifacts.prompts?.prompts.find((item) => item.shotId === shotId);
     if (!prompt) return;
     setBusy(true);
@@ -729,6 +756,12 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   async function repairFailedImages(): Promise<void> {
     if (!task || busy) return;
+    try {
+      assertRewriteReady(task);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Step 2 完整性校验未通过");
+      return;
+    }
     const failed = task.media.images.filter((item) => item.status === "failed");
     const prompts = failed.map((image) => task.artifacts.prompts?.prompts.find((item) => item.shotId === image.shotId)).filter((item): item is NonNullable<typeof item> => Boolean(item));
     if (!prompts.length) return;
@@ -748,6 +781,12 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   async function regenerateAudio(shotId: number): Promise<void> {
     if (!task || busy) return;
+    try {
+      assertRewriteReady(task);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Step 2 完整性校验未通过");
+      return;
+    }
     if (shotId === 0 && task.videoForm !== "podcast") {
       const shots = task.artifacts.storyboard?.shots || [];
       const narrationText = shots.map((shot) => compactShotText(shot.text)).filter(Boolean).join("");
@@ -808,8 +847,47 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   async function repackDraft(): Promise<void> {
     if (!task || busy) return;
+    try {
+      assertRewriteReady(task);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Step 2 完整性校验未通过");
+      return;
+    }
     setBusy(true);
     try { setTask(await buildTaskDraft(task.id)); } catch (error) { window.alert(error instanceof Error ? error.message : "剪映草稿生成失败"); } finally { setBusy(false); }
+  }
+
+  async function repairPromptAlignment(targetTrack: string): Promise<void> {
+    if (!task || busy || !targetTrack.trim()) return;
+    const confirmed = window.confirm(`将任务统一为“${targetTrack}”赛道，并清空错误的改写、分镜、图片、配音和草稿产物。原始输入文案会保留，是否继续？`);
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      const visualStyle = originalDefaultStyleByTrack[targetTrack] ?? form.visualStyle;
+      const nextForm: BuilderFormState = {
+        ...form,
+        track: targetTrack,
+        promptTemplateId: `system-${targetTrack}`,
+        promptTemplateOverride: null,
+        visualStyle,
+      };
+      setForm(nextForm);
+      await updateTask(task.id, {
+        track: targetTrack,
+        visualStyle,
+        options: {
+          ...task.options,
+          promptTemplateId: nextForm.promptTemplateId,
+          promptTemplateOverride: null,
+        },
+      });
+      const cleared = await clearTaskFromStep(task.id, 1);
+      setTask(cleared);
+      onOpenPipeline(cleared);
+      setSaved(true);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function uploadImages(files: FileList | File[]): Promise<void> {
@@ -874,7 +952,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         <div className={`credential-warning ${hasTtsCredentials && hasLlmCredentials ? "credential-warning--ready" : "credential-warning--partial"}`}><span className="credential-warning__icon">▽</span><div className="credential-warning__copy"><strong>{hasTtsCredentials && hasLlmCredentials ? "TTS 与 LLM 已就绪" : hasTtsCredentials ? "TTS 已就绪，还有 1 项凭证未配置" : "还有必要的本地凭据未配置"}</strong><span>{hasTtsCredentials ? `${activeTtsProvider === "minimax" ? "MiniMax" : "豆包"} 可直接配音` : "缺少 TTS 凭据"} · {hasLlmCredentials ? `原版 ${llmCredentialStatus.promptLibrary?.sourceVersion || "1.16.1"} 提示词库已接入` : "仍需 LLM API Key"}</span></div><button type="button" onClick={onNavigateSettings}>前往设置 →</button></div>
 
         {!task || task.runState === "idle" || task.status === "draft" ? <TaskCreateForm form={form} voices={availableVoices} hasLlmCredentials={hasLlmCredentials} hasTtsCredentials={hasTtsCredentials} aiGenerating={aiGenerating} taskReady={Boolean(task)} referenceName={task?.options.referenceImage?.fileName} coverLocalName={task?.options.coverLocalAsset?.fileName} externalAudioName={task?.media.externalAudio?.fileName} bgmName={task?.media.bgm?.fileName} onChange={changeForm} onGenerateCopy={() => void handleGenerateCopy()} onUploadImages={(files) => void uploadImages(files)} onUploadReference={(file) => void uploadReference(file)} onUploadCover={(file) => void uploadCover(file)} onUploadTemplateBackground={uploadTemplateBackground} onUploadExternalAudio={(file) => void uploadExternalAudio(file)} onUploadBgm={(file) => void uploadBgm(file)} /> : null}
-        {task ? <TaskWorkbench task={task} busy={busy} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
+        {task ? <TaskWorkbench task={task} busy={busy} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRepairPromptAlignment={(track) => void repairPromptAlignment(track)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
       </div>
       <footer className="task-builder__footer"><div className="task-builder__footer-inner"><div className="footer-status"><span className={canStart ? "is-ready" : ""}>{busy ? "正在处理并写入任务目录…" : saved ? "所有更改已保存" : task ? `任务 ${task.id.slice(0, 8)} · ${task.status}` : canStart ? "文案长度已满足" : "请输入至少 50 字文案"}</span></div><div className="footer-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void handleSave()}>保存草稿</button>{!task || task.status === "draft" ? <button type="button" className="secondary-button" disabled={!canStart || busy} onClick={() => void handleEnqueue()}>加入队列</button> : null}{!task || task.status === "draft" || task.status === "pending" ? <button type="button" className="start-button" disabled={!canStart || busy} onClick={() => void handleStart()}><span>▶</span>{task?.status === "pending" ? "立即执行" : "开始制作"}</button> : task.runState === "completed" ? <button type="button" className="start-button" disabled={busy} onClick={() => void repackDraft()}>重新打包草稿</button> : null}</div></div></footer>
     </main>

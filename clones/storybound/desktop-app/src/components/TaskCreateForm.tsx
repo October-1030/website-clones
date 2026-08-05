@@ -277,6 +277,8 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
   const applyMarketItem = (item: MarketItem) => onChange({
     ...(item.apply.track ? {
       track: item.apply.track,
+      promptTemplateId: `system-${item.apply.track}`,
+      promptTemplateOverride: null,
       visualStyle: originalDefaultStyleByTrack[item.apply.track] ?? form.visualStyle,
     } : {}),
     ...(item.apply.visualStyle ? { visualStyle: item.apply.visualStyle } : {}),
