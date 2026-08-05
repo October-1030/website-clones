@@ -102,7 +102,13 @@ try {
   const draftInfo = JSON.parse(await readFile(join(result.draft.projectDir, "draft_info.json"), "utf8"));
   const narrationTrack = draftInfo.tracks?.find((track) => track.name === "audio_main");
   if (narrationTrack?.segments?.length !== 1) throw new Error(`连续旁白应只有 1 个音频片段，实际为 ${narrationTrack?.segments?.length || 0}`);
-  if (draftInfo.materials?.audios?.length !== 1) throw new Error(`连续旁白应只有 1 个音频素材，实际为 ${draftInfo.materials?.audios?.length || 0}`);
+  const narrationMaterialIds = new Set(narrationTrack.segments.map((segment) => segment.material_id));
+  const narrationMaterials = (draftInfo.materials?.audios || []).filter((material) => narrationMaterialIds.has(material.id));
+  if (narrationMaterials.length !== 1) throw new Error(`连续旁白主轨应引用 1 个音频素材，实际为 ${narrationMaterials.length}`);
+  const bgmTrack = draftInfo.tracks?.find((track) => track.name === "bgm");
+  if (bgmTrack?.segments?.some((segment) => narrationMaterialIds.has(segment.material_id))) {
+    throw new Error("连续旁白主音频被错误复用到 BGM 轨道");
+  }
   if (narrationTrack.segments[0].target_timerange?.duration !== 4_000_000) throw new Error("连续旁白没有覆盖完整 4 秒时间线");
   const textById = new Map((draftInfo.materials?.texts || []).map((item) => [item.id, JSON.parse(item.content).text]));
   const subtitleTrack = draftInfo.tracks?.find((track) => track.name === "subtitle");
