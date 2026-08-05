@@ -162,11 +162,12 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
   const effectiveStepStatuses = task.stepStatuses.map((status, index): PipelineStatus => {
     if (!rewriteBlockers.length) return status;
     if (index === 1) return "failed";
-    if (index > 1 && status === "done") return "paused";
+    if (index > 1 && status !== "skipped") return "paused";
     return status;
   });
   const finishedCount = effectiveStepStatuses.filter((status) => status === "done" || status === "skipped").length;
   const templateTrack = systemTemplateTrack(task.options.promptTemplateId);
+  const hasTemplateMismatch = Boolean(templateTrack && templateTrack !== task.track);
   const templateLabel = task.options.promptTemplateOverride?.name || templateTrack || task.track;
   const activeTemplate = task.options.draftTemplateConfig
     ?? draftTemplateById(task.options.draftTemplateId || "default-portrait-9-16").config;
@@ -221,9 +222,30 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
     <section className="pipeline-panel" aria-live="polite">
       <div className="pipeline-panel__header">
         <div><span className={`pipeline-state pipeline-state--${rewriteBlockers.length ? "invalid" : task.runState}`}>{rewriteBlockers.length ? "Step 2 异常，旧产物已冻结" : task.runState === "running" ? "流水线执行中" : task.runState === "paused" ? task.error ? "步骤失败，等待处理" : "已暂停，等待确认" : task.runState === "cancelled" ? "任务已取消" : task.runState === "completed" ? "全部完成" : "任务草稿"}</span><h2>{task.title}</h2><p>{finishedCount} / {pipelineSteps.length} 步有效 · {task.mode === "auto" ? "全自动" : task.mode === "semi_auto" ? "半自动" : "直接出片"} · 已持久化</p></div>
-        <div className="pipeline-actions">{task.runState === "running" ? <button type="button" className="secondary-button" onClick={onPause}>本步完成后暂停</button> : null}{task.runState === "paused" || task.runState === "cancelled" ? <button type="button" className="primary-button" disabled={busy} onClick={onContinue}>继续执行</button> : null}{task.runState === "running" || task.runState === "paused" ? <button type="button" className="danger-button" onClick={onCancel}>取消并保留断点</button> : null}</div>
+        <div className="pipeline-actions">
+          {rewriteBlockers.length ? <button type="button" className="secondary-button" disabled>请先修复 Step 2</button> : null}
+          {!rewriteBlockers.length && task.runState === "running" ? <button type="button" className="secondary-button" onClick={onPause}>本步完成后暂停</button> : null}
+          {!rewriteBlockers.length && (task.runState === "paused" || task.runState === "cancelled") ? <button type="button" className="primary-button" disabled={busy} onClick={onContinue}>继续执行</button> : null}
+          {!rewriteBlockers.length && (task.runState === "running" || task.runState === "paused") ? <button type="button" className="danger-button" onClick={onCancel}>取消并保留断点</button> : null}
+        </div>
       </div>
-      {task.error ? <div className="pipeline-error"><span>步骤失败：{task.error}</span><div><button type="button" disabled={busy} onClick={onContinue}>重试本步骤</button></div></div> : null}
+      {task.error ? (
+        <div className="pipeline-error">
+          <span>步骤失败：{task.error}</span>
+          <div>
+            {hasTemplateMismatch && templateTrack ? (
+              <>
+                <button type="button" className="is-recommended" disabled={busy} onClick={() => onRepairPromptAlignment(templateTrack)}>按已保存模板“{templateTrack}”修正（推荐）</button>
+                <button type="button" disabled={busy} onClick={() => onRepairPromptAlignment(task.track)}>改用“{task.track}”赛道规则</button>
+              </>
+            ) : rewriteBlockers.length ? (
+              <button type="button" className="is-recommended" disabled={busy} onClick={() => onRunFromStep(1)}>清除异常产物并重跑 Step 2</button>
+            ) : (
+              <button type="button" disabled={busy} onClick={onContinue}>重试本步骤</button>
+            )}
+          </div>
+        </div>
+      ) : null}
       <progress value={finishedCount} max={pipelineSteps.length}>{finishedCount} / {pipelineSteps.length}</progress>
       <ol className="pipeline-steps">{pipelineSteps.map((step, index) => { const status = effectiveStepStatuses[index] ?? "pending"; return <li key={step.id} className={`pipeline-step pipeline-step--${status}`}><span className="pipeline-step__number">{status === "done" ? "✓" : status === "skipped" ? "—" : step.id + 1}</span><div className="pipeline-step__copy"><div><strong>{step.title}</strong>{task.mode === "direct" && step.id === 2 ? <em>机械切分</em> : null}</div><span>{task.mode === "direct" && step.id === 2 ? "按空行和标点切分，不调用 AI" : step.description}</span></div><span className="pipeline-step__status">{statusLabels[status]}</span>{status === "done" || status === "failed" ? <button type="button" disabled={busy} onClick={() => onRunFromStep(step.id)}>从此重跑</button> : null}</li>; })}</ol>
 

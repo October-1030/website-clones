@@ -1217,6 +1217,8 @@
 
 .pipeline-error > div {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -1226,6 +1228,12 @@
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 145, 138, 0.24);
   border-radius: 6px;
+}
+
+.pipeline-error button.is-recommended {
+  color: #05d6a0;
+  background: rgba(5, 214, 160, 0.08);
+  border-color: rgba(5, 214, 160, 0.32);
 }
 
 .pipeline-audio {
