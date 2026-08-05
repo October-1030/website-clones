@@ -19,12 +19,12 @@ import { TaskBuilder } from "./components/TaskBuilder";
 import { TtsSettingsPage } from "./components/TtsSettingsPage";
 import { VoiceLabPage } from "./components/VoiceLabPage";
 import { defaultLlmConfig } from "./data/llm-data";
-import { defaultTtsConfig } from "./data/tts-data";
 import { transcribeBenchmarkVideo, transcribeMedia } from "./lib/asr-api";
 import { fetchLlmStatus } from "./lib/llm-api";
 import { runLlmPipelineStep } from "./lib/llm-api";
 import { saveTaskHandoff } from "./lib/task-handoff";
 import { fetchTtsStatus } from "./lib/tts-api";
+import { readTtsPreferences, writeTtsPreferences } from "./lib/tts-preference-store";
 import type { AppPage } from "./types/app";
 import type { LlmConfig, LlmCredentialStatus, PipelineContext } from "./types/llm";
 import type { TtsConfig, TtsCredentialStatus } from "./types/tts";
@@ -143,13 +143,17 @@ function App() {
   const [currentBatchId, setCurrentBatchId] = useState<string | null>(initialRoute.current.batchId);
   const [activeQueue, setActiveQueue] = useState<string[]>(readQueue);
   const activeQueueRef = useRef(activeQueue);
-  const [ttsConfig, setTtsConfig] = useState<TtsConfig>(defaultTtsConfig);
+  const [ttsConfig, setTtsConfig] = useState<TtsConfig>(readTtsPreferences);
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(defaultLlmConfig);
   const [credentialStatus, setCredentialStatus] = useState<TtsCredentialStatus>(emptyCredentialStatus);
   const [llmCredentialStatus, setLlmCredentialStatus] = useState<LlmCredentialStatus>(emptyLlmCredentialStatus);
   const [benchmarkSearch, setBenchmarkSearch] = useState("");
   const providerWasAutoSelected = useRef(false);
   const llmProviderWasAutoSelected = useRef(false);
+  const handleTtsConfigChange = useCallback((next: TtsConfig) => {
+    setTtsConfig(next);
+    writeTtsPreferences(next);
+  }, []);
   const handleOpenPipeline = useCallback(() => undefined, []);
   const handleNavigate = useCallback((page: AppPage) => {
     if (page === "create") setCurrentTaskId(null);
@@ -289,7 +293,11 @@ function App() {
       setCredentialStatus(status);
       if (status.minimax.available && !providerWasAutoSelected.current) {
         providerWasAutoSelected.current = true;
-        setTtsConfig((current) => ({ ...current, provider: "minimax" }));
+        setTtsConfig((current) => {
+          const next = { ...current, provider: "minimax" as const };
+          writeTtsPreferences(next);
+          return next;
+        });
       }
     }).catch(() => undefined);
   }, []);
@@ -322,7 +330,7 @@ function App() {
           autoRun={Boolean(currentTaskId && activeQueue.includes(currentTaskId))}
           onTaskIdChange={setCurrentTaskId}
           onLlmConfigChange={setLlmConfig}
-          onTtsConfigChange={setTtsConfig}
+          onTtsConfigChange={handleTtsConfigChange}
           onOpenPipeline={handleOpenPipeline}
           onQueueAdvance={handleQueueAdvance}
           onNavigateSettings={() => setCurrentPage("settings")}
@@ -334,7 +342,7 @@ function App() {
         <VoiceLabPage
           config={ttsConfig}
           credentialStatus={credentialStatus}
-          onChange={setTtsConfig}
+          onChange={handleTtsConfigChange}
           onOpenSettings={() => setCurrentPage("settings")}
         />
       ) : null}
@@ -361,7 +369,7 @@ function App() {
           credentialStatus={credentialStatus}
           llmConfig={llmConfig}
           llmCredentialStatus={llmCredentialStatus}
-          onChange={setTtsConfig}
+          onChange={handleTtsConfigChange}
           onLlmChange={setLlmConfig}
         />
       ) : null}

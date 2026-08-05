@@ -35,6 +35,12 @@ interface TaskBuilderProps {
   onNavigateSettings: () => void;
 }
 
+interface TaskVoicePreview {
+  voiceId: string;
+  name: string;
+  url: string;
+}
+
 function createTaskId(): string {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `storybound-${Date.now().toString(36)}`;
 }
@@ -184,8 +190,13 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const [loading, setLoading] = useState(Boolean(taskId));
   const [busy, setBusy] = useState(false);
   const [aiGenerating, setAiGenerating] = useState(false);
+  const [previewingVoiceId, setPreviewingVoiceId] = useState("");
+  const [voicePreview, setVoicePreview] = useState<TaskVoicePreview | null>(null);
+  const [voicePreviewError, setVoicePreviewError] = useState("");
   const [saved, setSaved] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const voicePreviewUrlRef = useRef("");
+  const voicePreviewPlayerRef = useRef<HTMLAudioElement | null>(null);
   const cancelRequestedRef = useRef(false);
   const pauseRequestedRef = useRef(false);
   const autoStartedRef = useRef<string | null>(null);
@@ -195,6 +206,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const availableVoices = useMemo(() => activeTtsProvider === "minimax"
     ? availableMinimaxVoices(config)
     : volcengineVoices.filter((voice) => voice.version === config.volcengine.version), [activeTtsProvider, config]);
+  const configuredVoiceId = activeTtsProvider === "minimax" ? config.minimax.voiceId : config.volcengine.voiceId;
   const hasTtsCredentials = activeTtsProvider === "minimax"
     ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
     : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
@@ -203,6 +215,37 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const providerReady = (provider: TtsProvider) => provider === "minimax"
     ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
     : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
+
+  const previewVoice = useCallback(async (voiceId: string) => {
+    if (!voiceId || previewingVoiceId || !hasTtsCredentials) return;
+    const voice = availableVoices.find((item) => item.id === voiceId);
+    if (!voice) {
+      setVoicePreviewError("当前音色不在已加载的音色库中，请先在系统设置读取平台音色。");
+      return;
+    }
+    setPreviewingVoiceId(voiceId);
+    setVoicePreviewError("");
+    try {
+      const audio = await synthesizeTts({
+        provider: activeTtsProvider,
+        text: "真正重要的不是走得多快，而是每一步都走在自己的方向上。",
+        voiceId,
+        speed: form.ttsSpeed,
+        config,
+      });
+      const url = URL.createObjectURL(audio.blob);
+      voicePreviewPlayerRef.current?.pause();
+      if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
+      voicePreviewUrlRef.current = url;
+      setVoicePreview({ voiceId, name: voice.name, url });
+      voicePreviewPlayerRef.current = new Audio(url);
+      await voicePreviewPlayerRef.current.play().catch(() => undefined);
+    } catch (error) {
+      setVoicePreviewError(error instanceof Error ? error.message : "音色试听失败");
+    } finally {
+      setPreviewingVoiceId("");
+    }
+  }, [activeTtsProvider, availableVoices, config, form.ttsSpeed, hasTtsCredentials, previewingVoiceId]);
 
   useEffect(() => {
     if (taskId || form.videoForm === "podcast" || form.ttsProvider === config.provider) return;
@@ -242,11 +285,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         liufei_xiaolei: ["zh_male_liufei_v2_saturn_bigtts", "zh_male_xiaolei_v2_saturn_bigtts"],
       }[form.podcastPair]
       : undefined;
-    const configuredVoice = activeTtsProvider === "minimax" ? config.minimax.voiceId : config.volcengine.voiceId;
-    const voiceA = selectedPair?.[0] || (availableVoices.some((voice) => voice.id === form.ttsVoiceId) ? form.ttsVoiceId : "") || configuredVoice || availableVoices[0]?.id || "";
+    const voiceA = selectedPair?.[0] || (availableVoices.some((voice) => voice.id === form.ttsVoiceId) ? form.ttsVoiceId : "") || configuredVoiceId || availableVoices[0]?.id || "";
     const voiceB = selectedPair?.[1] || (availableVoices.some((voice) => voice.id === form.ttsVoiceIdB) ? form.ttsVoiceIdB : "") || availableVoices.find((voice) => voice.id !== voiceA)?.id || voiceA;
     if (voiceA !== form.ttsVoiceId || voiceB !== form.ttsVoiceIdB) setForm((current) => ({ ...current, ttsVoiceId: voiceA, ttsVoiceIdB: voiceB }));
-  }, [activeTtsProvider, availableVoices, config.minimax.voiceId, config.volcengine.voiceId, form.podcastPair, form.ttsVoiceId, form.ttsVoiceIdB, form.videoForm]);
+  }, [availableVoices, configuredVoiceId, form.podcastPair, form.ttsVoiceId, form.ttsVoiceIdB, form.videoForm]);
 
   useEffect(() => {
     let cancelled = false;
@@ -275,6 +317,42 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }, [busy, form, task]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => () => {
+    voicePreviewPlayerRef.current?.pause();
+    if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
+  }, []);
+
+  const applyVoiceToTask = useCallback(async (voiceId: string) => {
+    if (!task || busy || !voiceId) return;
+    const voice = availableVoices.find((item) => item.id === voiceId);
+    if (!voice) {
+      window.alert("当前音色不在已加载的音色库中，请先在系统设置读取平台音色。");
+      return;
+    }
+    if (task.options.ttsVoiceId === voiceId && task.options.ttsProvider === activeTtsProvider) return;
+    const hasGeneratedAudio = Boolean(task.media.audioSegments.length || task.media.continuousAudio || task.media.podcast || task.draft);
+    if (hasGeneratedAudio && !window.confirm(`改用“${voice.name}”后，现有配音和剪映草稿需要重新生成；图片、分镜和文案会保留。是否继续？`)) return;
+    setBusy(true);
+    setSaved(false);
+    try {
+      let updated = await updateTask(task.id, {
+        options: {
+          ...task.options,
+          voiceSource: "tts",
+          ttsProvider: activeTtsProvider,
+          ttsVoiceId: voiceId,
+        },
+      });
+      if (hasGeneratedAudio) updated = await clearTaskFromStep(task.id, 5);
+      setTask(updated);
+      setForm(formFromTask(updated, config.provider));
+      setSaved(true);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "无法更新本任务音色");
+    } finally {
+      setBusy(false);
+    }
+  }, [activeTtsProvider, availableVoices, busy, config.provider, task]);
 
   const changeForm = useCallback((patch: Partial<BuilderFormState>) => {
     setSaved(false);
@@ -951,8 +1029,8 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         <header className="task-builder__header"><span className="task-builder__header-icon">✧</span><div><h1>{task ? "任务详情与产物工作台" : "创建视频任务"}</h1><p>{task ? "所有中间产物已落盘，可编辑、局部重跑和重新打包" : "粘贴或创作文案，按原版七步流程生成剪映草稿"}</p></div></header>
         <div className={`credential-warning ${hasTtsCredentials && hasLlmCredentials ? "credential-warning--ready" : "credential-warning--partial"}`}><span className="credential-warning__icon">▽</span><div className="credential-warning__copy"><strong>{hasTtsCredentials && hasLlmCredentials ? "TTS 与 LLM 已就绪" : hasTtsCredentials ? "TTS 已就绪，还有 1 项凭证未配置" : "还有必要的本地凭据未配置"}</strong><span>{hasTtsCredentials ? `${activeTtsProvider === "minimax" ? "MiniMax" : "豆包"} 可直接配音` : "缺少 TTS 凭据"} · {hasLlmCredentials ? `原版 ${llmCredentialStatus.promptLibrary?.sourceVersion || "1.16.1"} 提示词库已接入` : "仍需 LLM API Key"}</span></div><button type="button" onClick={onNavigateSettings}>前往设置 →</button></div>
 
-        {!task || task.runState === "idle" || task.status === "draft" ? <TaskCreateForm form={form} voices={availableVoices} hasLlmCredentials={hasLlmCredentials} hasTtsCredentials={hasTtsCredentials} aiGenerating={aiGenerating} taskReady={Boolean(task)} referenceName={task?.options.referenceImage?.fileName} coverLocalName={task?.options.coverLocalAsset?.fileName} externalAudioName={task?.media.externalAudio?.fileName} bgmName={task?.media.bgm?.fileName} onChange={changeForm} onGenerateCopy={() => void handleGenerateCopy()} onUploadImages={(files) => void uploadImages(files)} onUploadReference={(file) => void uploadReference(file)} onUploadCover={(file) => void uploadCover(file)} onUploadTemplateBackground={uploadTemplateBackground} onUploadExternalAudio={(file) => void uploadExternalAudio(file)} onUploadBgm={(file) => void uploadBgm(file)} /> : null}
-        {task ? <TaskWorkbench task={task} busy={busy} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRepairPromptAlignment={(track) => void repairPromptAlignment(track)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
+        {!task || task.runState === "idle" || task.status === "draft" ? <TaskCreateForm form={form} voices={availableVoices} hasLlmCredentials={hasLlmCredentials} hasTtsCredentials={hasTtsCredentials} aiGenerating={aiGenerating} taskReady={Boolean(task)} referenceName={task?.options.referenceImage?.fileName} coverLocalName={task?.options.coverLocalAsset?.fileName} externalAudioName={task?.media.externalAudio?.fileName} bgmName={task?.media.bgm?.fileName} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId) => void previewVoice(voiceId)} onChange={changeForm} onGenerateCopy={() => void handleGenerateCopy()} onUploadImages={(files) => void uploadImages(files)} onUploadReference={(file) => void uploadReference(file)} onUploadCover={(file) => void uploadCover(file)} onUploadTemplateBackground={uploadTemplateBackground} onUploadExternalAudio={(file) => void uploadExternalAudio(file)} onUploadBgm={(file) => void uploadBgm(file)} /> : null}
+        {task ? <TaskWorkbench task={task} busy={busy} voices={availableVoices} configuredVoiceId={configuredVoiceId} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId) => void previewVoice(voiceId)} onApplyTaskVoice={(voiceId) => void applyVoiceToTask(voiceId)} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRepairPromptAlignment={(track) => void repairPromptAlignment(track)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
       </div>
       <footer className="task-builder__footer"><div className="task-builder__footer-inner"><div className="footer-status"><span className={canStart ? "is-ready" : ""}>{busy ? "正在处理并写入任务目录…" : saved ? "所有更改已保存" : task ? `任务 ${task.id.slice(0, 8)} · ${task.status}` : canStart ? "文案长度已满足" : "请输入至少 50 字文案"}</span></div><div className="footer-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void handleSave()}>保存草稿</button>{!task || task.status === "draft" ? <button type="button" className="secondary-button" disabled={!canStart || busy} onClick={() => void handleEnqueue()}>加入队列</button> : null}{!task || task.status === "draft" || task.status === "pending" ? <button type="button" className="start-button" disabled={!canStart || busy} onClick={() => void handleStart()}><span>▶</span>{task?.status === "pending" ? "立即执行" : "开始制作"}</button> : task.runState === "completed" ? <button type="button" className="start-button" disabled={busy} onClick={() => void repackDraft()}>重新打包草稿</button> : null}</div></div></footer>
     </main>

@@ -50,9 +50,13 @@
 - The local service checks `MINIMAX_SECRETS_FILE`, then `C:\tmp\minimax-secrets.txt`, then the legacy D-drive file.
 - Local credentials remain server-side. `/api/tts/status` exposes availability and source filename only, never the key.
 - A manually entered page credential temporarily overrides the local file for the current session.
+- The selected provider, model, voice ID, and fetched voice metadata persist locally across refreshes. API keys, access tokens, and App IDs are explicitly excluded from browser storage.
 
 ## Task pipeline integration
 - The image-story task form uses the same provider, model and voice configuration as Voice Lab.
+- The creation form exposes a short-sentence preview beside the exact selected task voice and speed.
+- An existing task shows both its saved voice and the current system default. When they differ, the user can preview either and explicitly apply the system default to the task.
+- Changing a task voice preserves all pre-TTS artifacts. If audio or a draft already exists, the UI asks for confirmation and clears only Step 6 audio and downstream draft artifacts.
 - Step 6 (`TTS 配音`, internal index 5) calls the real provider instead of the 700ms simulation.
 - Missing credentials or provider errors mark that step failed and pause the pipeline with settings/retry actions.
 - Success creates an in-memory MP3 artifact with player, segment/size metadata and download action, then advances to draft packaging.

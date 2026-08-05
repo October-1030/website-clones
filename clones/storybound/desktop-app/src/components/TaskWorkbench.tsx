@@ -4,10 +4,18 @@ import { blockingRewriteIssues, systemTemplateTrack, taskRewriteIntegrityIssues 
 import type { PipelineStatus } from "../types/app";
 import type { ImagePrompt, StoryboardShot } from "../types/llm";
 import type { StoredImage, StoryboundTask, TaskTimelineEntry } from "../types/task";
+import type { TtsVoice } from "../types/tts";
 
 interface TaskWorkbenchProps {
   task: StoryboundTask;
   busy: boolean;
+  voices: TtsVoice[];
+  configuredVoiceId: string;
+  voicePreview: { voiceId: string; name: string; url: string } | null;
+  previewingVoiceId: string;
+  voicePreviewError: string;
+  onPreviewVoice: (voiceId: string) => void;
+  onApplyTaskVoice: (voiceId: string) => void;
   onTaskChange: (task: StoryboundTask) => void;
   onPause: () => void;
   onContinue: () => void;
@@ -154,7 +162,7 @@ function sopQualityChecks(task: StoryboundTask): SopCheck[] {
   return checks;
 }
 
-export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, onCancel, onRunFromStep, onSaveArtifact, onRepairPromptAlignment, onRegenerateImage, onUploadImage, onUploadDynamicVideo, onBorrowImage, onRepairFailedImages, onRegenerateAudio, onUpdateImageCrop, onUpdateTimeline, onRepackDraft }: TaskWorkbenchProps) {
+export function TaskWorkbench({ task, busy, voices, configuredVoiceId, voicePreview, previewingVoiceId, voicePreviewError, onPreviewVoice, onApplyTaskVoice, onTaskChange, onPause, onContinue, onCancel, onRunFromStep, onSaveArtifact, onRepairPromptAlignment, onRegenerateImage, onUploadImage, onUploadDynamicVideo, onBorrowImage, onRepairFailedImages, onRegenerateAudio, onUpdateImageCrop, onUpdateTimeline, onRepackDraft }: TaskWorkbenchProps) {
   const failedImages = task.media.images.filter((image) => image.status === "failed");
   const qualityChecks = sopQualityChecks(task);
   const rewriteIssues = taskRewriteIntegrityIssues(task);
@@ -169,6 +177,9 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
   const templateTrack = systemTemplateTrack(task.options.promptTemplateId);
   const hasTemplateMismatch = Boolean(templateTrack && templateTrack !== task.track);
   const templateLabel = task.options.promptTemplateOverride?.name || templateTrack || task.track;
+  const taskVoice = voices.find((voice) => voice.id === task.options.ttsVoiceId);
+  const configuredVoice = voices.find((voice) => voice.id === configuredVoiceId);
+  const voiceDiffersFromDefault = Boolean(configuredVoiceId && configuredVoiceId !== task.options.ttsVoiceId);
   const activeTemplate = task.options.draftTemplateConfig
     ?? draftTemplateById(task.options.draftTemplateId || "default-portrait-9-16").config;
   const updatePrecheck = (cleanText: string) => {
@@ -248,6 +259,24 @@ export function TaskWorkbench({ task, busy, onTaskChange, onPause, onContinue, o
       ) : null}
       <progress value={finishedCount} max={pipelineSteps.length}>{finishedCount} / {pipelineSteps.length}</progress>
       <ol className="pipeline-steps">{pipelineSteps.map((step, index) => { const status = effectiveStepStatuses[index] ?? "pending"; return <li key={step.id} className={`pipeline-step pipeline-step--${status}`}><span className="pipeline-step__number">{status === "done" ? "✓" : status === "skipped" ? "—" : step.id + 1}</span><div className="pipeline-step__copy"><div><strong>{step.title}</strong>{task.mode === "direct" && step.id === 2 ? <em>机械切分</em> : null}</div><span>{task.mode === "direct" && step.id === 2 ? "按空行和标点切分，不调用 AI" : step.description}</span></div><span className="pipeline-step__status">{statusLabels[status]}</span>{status === "done" || status === "failed" ? <button type="button" disabled={busy} onClick={() => onRunFromStep(step.id)}>从此重跑</button> : null}</li>; })}</ol>
+
+      {task.videoForm !== "podcast" && task.options.voiceSource !== "external" ? (
+        <section className="task-voice-control" aria-label="本任务配音设置">
+          <div className="task-voice-control__head">
+            <div><strong>本任务配音</strong><span>试听和最终生成使用同一个音色 ID 与 {task.options.ttsSpeed ?? 1}× 语速</span></div>
+            <span className={voiceDiffersFromDefault ? "is-warning" : "is-ready"}>{voiceDiffersFromDefault ? "系统默认尚未应用" : "已跟随系统默认"}</span>
+          </div>
+          <div className="task-voice-control__body">
+            <label><span>本任务音色</span><select aria-label="更换本任务音色" value={task.options.ttsVoiceId || ""} disabled={busy} onChange={(event) => onApplyTaskVoice(event.target.value)}>{taskVoice ? null : <option value={task.options.ttsVoiceId}>{task.options.ttsVoiceId || "未选择"}</option>}{voices.map((voice) => <option key={voice.id} value={voice.id}>{voice.name} · {voice.tag}</option>)}</select></label>
+            <button type="button" disabled={busy || !taskVoice || Boolean(previewingVoiceId)} onClick={() => taskVoice ? onPreviewVoice(taskVoice.id) : undefined}>{previewingVoiceId === taskVoice?.id ? "试听生成中…" : `试听本任务音色${taskVoice ? `“${taskVoice.name}”` : ""}`}</button>
+            {voiceDiffersFromDefault ? <button type="button" disabled={busy || !configuredVoice || Boolean(previewingVoiceId)} onClick={() => configuredVoice ? onPreviewVoice(configuredVoice.id) : undefined}>{previewingVoiceId === configuredVoice?.id ? "试听生成中…" : `试听系统默认${configuredVoice ? `“${configuredVoice.name}”` : ""}`}</button> : null}
+            {voiceDiffersFromDefault ? <button type="button" className="is-primary" disabled={busy || !configuredVoice} onClick={() => configuredVoice ? onApplyTaskVoice(configuredVoice.id) : undefined}>应用系统默认{configuredVoice ? `“${configuredVoice.name}”` : ""}</button> : null}
+          </div>
+          {voiceDiffersFromDefault ? <p>当前任务保存的是“{taskVoice?.name || task.options.ttsVoiceId}”；系统设置当前选中“{configuredVoice?.name || configuredVoiceId}”。只有点击应用后，本任务才会改用新音色。</p> : null}
+          {voicePreview ? <div className="task-voice-preview" aria-live="polite"><div><strong>试听 · {voicePreview.name}</strong><span>短句试听会按 MiniMax / 火山规则产生一次 TTS 调用</span></div><audio controls src={voicePreview.url} /></div> : null}
+          {voicePreviewError ? <p className="task-voice-error">试听失败：{voicePreviewError}</p> : null}
+        </section>
+      ) : null}
 
       {task.artifacts.precheck ? <div className="artifact-editor"><div className="artifact-editor__head"><div><strong>Step 1 · 文案预审</strong><span>{task.artifacts.precheck.warnings.length} 条提醒 · {task.artifacts.precheck.sensitiveTerms.length} 个敏感词</span></div><button type="button" className="primary-button" disabled={busy} onClick={() => onSaveArtifact(0)}>保存并从改写继续</button></div><textarea className="artifact-textarea" value={task.artifacts.precheck.cleanText} onChange={(event) => updatePrecheck(event.target.value)} />{task.artifacts.precheck.warnings.length ? <div className="artifact-tags">{task.artifacts.precheck.warnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}</div> : null}
 
