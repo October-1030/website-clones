@@ -1104,6 +1104,12 @@
   min-width: 138px;
 }
 
+.task-voice-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .task-voice-control {
   display: grid;
   gap: 12px;
@@ -1987,6 +1993,11 @@
 
   .task-voice-select-row,
   .task-voice-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .task-voice-preview-actions {
+    display: grid;
     grid-template-columns: 1fr;
   }
 

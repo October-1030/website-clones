@@ -54,8 +54,9 @@
 
 ## Task pipeline integration
 - The image-story task form uses the same provider, model and voice configuration as Voice Lab.
-- The creation form exposes a short-sentence preview beside the exact selected task voice and speed.
-- An existing task shows both its saved voice and the current system default. When they differ, the user can preview either and explicitly apply the system default to the task.
+- The creation form exposes both a low-cost short-sentence preview and an explicit full-document preview beside the exact selected task voice and speed.
+- An existing task shows both its saved voice and the current system default. When they differ, the user can preview either and explicitly apply the system default to the task. Full-document preview uses the saved rewrite narration first, then precheck text, then original input.
+- Full-document preview is a user-triggered temporary TTS result. It displays the character count, does not advance the task, and does not replace or persist the formal Step 6 audio.
 - Changing a task voice preserves all pre-TTS artifacts. If audio or a draft already exists, the UI asks for confirmation and clears only Step 6 audio and downstream draft artifacts.
 - Step 6 (`TTS 配音`, internal index 5) calls the real provider instead of the 700ms simulation.
 - Missing credentials or provider errors mark that step failed and pause the pipeline with settings/retry actions.
