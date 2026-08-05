@@ -335,16 +335,19 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
   }, []);
 
-  const applyVoiceToTask = useCallback(async (voiceId: string) => {
+  async function applyVoiceToTask(voiceId: string): Promise<void> {
     if (!task || busy || !voiceId) return;
     const voice = availableVoices.find((item) => item.id === voiceId);
     if (!voice) {
       window.alert("当前音色不在已加载的音色库中，请先在系统设置读取平台音色。");
       return;
     }
-    if (task.options.ttsVoiceId === voiceId && task.options.ttsProvider === activeTtsProvider) return;
+    const generatedAudioMatches = task.videoForm === "podcast"
+      || (!task.media.audioSegments.some((segment) => segment.voiceId !== voiceId)
+        && (!task.media.continuousAudio || task.media.continuousAudio.voiceId === voiceId));
+    if (task.options.ttsVoiceId === voiceId && task.options.ttsProvider === activeTtsProvider && generatedAudioMatches) return;
     const hasGeneratedAudio = Boolean(task.media.audioSegments.length || task.media.continuousAudio || task.media.podcast || task.draft);
-    if (hasGeneratedAudio && !window.confirm(`改用“${voice.name}”后，现有配音和剪映草稿需要重新生成；图片、分镜和文案会保留。是否继续？`)) return;
+    if (hasGeneratedAudio && !window.confirm(`改用“${voice.name}”后，将立即重新生成全部配音、字幕时间线和剪映草稿；图片、分镜、文案及已有动态视频会保留。是否继续？`)) return;
     setBusy(true);
     setSaved(false);
     try {
@@ -356,16 +359,19 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
           ttsVoiceId: voiceId,
         },
       });
-      if (hasGeneratedAudio) updated = await clearTaskFromStep(task.id, 5);
+      if (hasGeneratedAudio) updated = await clearTaskFromStep(task.id, 5, { preserveVideos: true });
       setTask(updated);
       setForm(formFromTask(updated, config.provider));
+      if (hasGeneratedAudio) {
+        await runPipeline(updated, 5);
+      }
       setSaved(true);
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "无法更新本任务音色");
     } finally {
       setBusy(false);
     }
-  }, [activeTtsProvider, availableVoices, busy, config.provider, task]);
+  }
 
   const changeForm = useCallback((patch: Partial<BuilderFormState>) => {
     setSaved(false);
@@ -561,9 +567,18 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
 
   async function runDynamicStoryboardStep(activeTask: StoryboundTask, signal: AbortSignal): Promise<StoryboundTask> {
     if (!activeTask.options.dynamicStoryboard || !activeTask.options.videoIntro) return activeTask;
+    const allShotIds = (activeTask.artifacts.storyboard?.shots || []).map((shot) => shot.id);
+    const configuredCount = Number(activeTask.options.videoIntroCount ?? 0);
+    const targetShotIds = configuredCount === -1 ? allShotIds : allShotIds.slice(0, Math.max(0, configuredCount));
+    const readyVideoShotIds = new Set((activeTask.media.videos || [])
+      .filter((video) => video.status === "ready" && video.path)
+      .map((video) => video.shotId));
+    const pendingShotIds = targetShotIds.filter((shotId) => !readyVideoShotIds.has(shotId));
+    if (!pendingShotIds.length) return activeTask;
     const runninghub = readImageProviderConfig().runninghub;
     const result = await generateRunningHubStoryboards({
       taskId: activeTask.id,
+      shotIds: pendingShotIds,
       apiKey: runninghub.apiKey,
       model: runninghub.model,
       concurrency: runninghub.concurrency,
@@ -943,7 +958,9 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       setBusy(true);
       const controller = new AbortController();
       try {
-        const continuousAudio = await synthesizeSegment(task, 0, narrationText, task.media.continuousAudio?.voiceId || task.options.ttsVoiceId || form.ttsVoiceId, controller.signal);
+        const voiceId = task.options.ttsVoiceId || form.ttsVoiceId || task.media.continuousAudio?.voiceId;
+        if (!voiceId) throw new Error("请选择配音音色");
+        const continuousAudio = await synthesizeSegment(task, 0, narrationText, voiceId, controller.signal);
         const provider = task.options.ttsProvider || config.provider;
         const timeline = provider === "minimax"
           ? timelineFromWordAlignment(shots, continuousAudio)
@@ -958,7 +975,11 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     setBusy(true);
     const controller = new AbortController();
     try {
-      const segment = await synthesizeSegment(task, shotId, current?.text || shot?.text || "", current?.voiceId || task.options.ttsVoiceId || form.ttsVoiceId, controller.signal, current?.speaker);
+      const voiceId = task.videoForm === "podcast"
+        ? current?.voiceId || task.options.ttsVoiceId || form.ttsVoiceId
+        : task.options.ttsVoiceId || form.ttsVoiceId || current?.voiceId;
+      if (!voiceId) throw new Error("请选择配音音色");
+      const segment = await synthesizeSegment(task, shotId, current?.text || shot?.text || "", voiceId, controller.signal, current?.speaker);
       const audioSegments = [...task.media.audioSegments.filter((item) => item.id !== current?.id), segment].sort((a, b) => a.shotId - b.shotId);
       if (task.videoForm === "podcast") {
         let cursor = 0;

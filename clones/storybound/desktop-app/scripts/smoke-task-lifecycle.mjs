@@ -190,6 +190,14 @@ try {
   if (oldDraftExists) throw new Error("新草稿落地后没有清理旧草稿目录");
   const zip = Buffer.from(await (await request(`/api/tasks/${taskId}/draft.zip`)).arrayBuffer());
   if (zip.subarray(0, 2).toString("ascii") !== "PK") throw new Error("下载结果不是 ZIP");
+  const voiceReset = await json(`/api/tasks/${taskId}/clear-from-step`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ step: 5, preserveVideos: true }),
+  });
+  if (voiceReset.task.media.videos?.length !== 1 || voiceReset.task.media.audioSegments?.length || voiceReset.task.draft) {
+    throw new Error("更换音色时没有正确保留动态分镜并清理配音/草稿");
+  }
   process.stdout.write(JSON.stringify({ ok: true, taskId, projectName: result.draft.projectName, tracks: result.draft.trackCount, files: result.draft.fileCount, zipBytes: zip.length }) + "\n");
 } finally {
   if (created && process.env.KEEP_TASK !== "1") await request(`/api/tasks/${taskId}`, { method: "DELETE" }).catch(() => undefined);

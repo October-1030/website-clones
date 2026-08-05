@@ -312,7 +312,7 @@ export function createTaskStore(root) {
     };
   }
 
-  async function clearFromStep(taskId, fromStep) {
+  async function clearFromStep(taskId, fromStep, options = {}) {
     const task = await readTask(taskId);
     if (!task) throw new Error("任务不存在");
     const step = Math.max(0, Math.min(6, Number(fromStep) || 0));
@@ -334,7 +334,7 @@ export function createTaskStore(root) {
         mkdir(join(taskDir(taskId), "videos"), { recursive: true }),
       ]);
     }
-    if (step === 5) {
+    if (step === 5 && !options.preserveVideos) {
       media.videos = [];
       await rm(join(taskDir(taskId), "videos"), { recursive: true, force: true });
       await mkdir(join(taskDir(taskId), "videos"), { recursive: true });
@@ -363,7 +363,7 @@ export function createTaskStore(root) {
     task.updatedAt = nowIso();
     await writeJsonAtomic(taskFile(taskId), task);
     await mirrorArtifacts(taskId, task);
-    await appendEvent(taskId, { type: "artifacts_cleared", step, detail: `从 Step ${step} 清理下游产物` });
+    await appendEvent(taskId, { type: "artifacts_cleared", step, preserveVideos: Boolean(options.preserveVideos), detail: `从 Step ${step} 清理下游产物` });
     return task;
   }
 

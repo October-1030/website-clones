@@ -124,6 +124,11 @@
 .image-card-actions label,.image-card-actions a { position:relative;padding:4px 8px;color:var(--builder-brand);background:transparent;border:1px solid rgba(18,214,160,.24);border-radius:6px;font-size:11px;cursor:pointer;text-decoration:none; }
 .image-card-actions input { position:absolute;inset:0;opacity:0;cursor:pointer; }
 .audio-workbench { display:grid;gap:8px; }
+.audio-voice-mismatch { display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 14px;color:#ffcc66;background:rgba(241,185,20,.08);border:1px solid rgba(241,185,20,.32);border-radius:8px; }
+.audio-voice-mismatch>div { display:grid;gap:3px; }
+.audio-voice-mismatch strong { color:#ffd98a; }
+.audio-voice-mismatch span { color:#c5b58c;font-size:11px; }
+.audio-voice-mismatch button { flex:0 0 auto;padding:7px 10px;color:#07120f;background:var(--builder-brand);border:0;border-radius:6px;font-weight:700; }
 .audio-workbench article { display:grid;grid-template-columns:72px minmax(150px,1fr) minmax(220px,1fr) auto auto;align-items:center;gap:10px;padding:10px 12px;background:#0c1115;border:1px solid var(--builder-border-soft);border-radius:8px; }
 .audio-workbench article>span,.audio-workbench article small { color:var(--builder-muted);font-size:11px; }
 .audio-workbench article p { margin:0;overflow:hidden;color:#d8dee3;text-overflow:ellipsis;white-space:nowrap; }

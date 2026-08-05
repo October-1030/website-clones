@@ -2435,7 +2435,11 @@ async function handleTaskApi(request, response, pathname) {
     }
     if (parts[3] === "clear-from-step" && request.method === "POST") {
       const body = await readJson(request);
-      sendJson(response, 200, { task: await taskStore.clearFromStep(taskId, body.step) });
+      sendJson(response, 200, {
+        task: await taskStore.clearFromStep(taskId, body.step, {
+          preserveVideos: Boolean(body.preserveVideos),
+        }),
+      });
       return;
     }
     if (parts[3] === "draft" && request.method === "POST") {

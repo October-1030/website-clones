@@ -46,11 +46,15 @@ export async function deleteTask(taskId: string): Promise<void> {
   await jsonRequest(`/api/tasks/${encodeURIComponent(taskId)}`, { method: "DELETE" });
 }
 
-export async function clearTaskFromStep(taskId: string, step: number): Promise<StoryboundTask> {
+export async function clearTaskFromStep(
+  taskId: string,
+  step: number,
+  options: { preserveVideos?: boolean } = {},
+): Promise<StoryboundTask> {
   const payload = await jsonRequest<{ task: StoryboundTask }>(`/api/tasks/${encodeURIComponent(taskId)}/clear-from-step`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ step }),
+    body: JSON.stringify({ step, preserveVideos: Boolean(options.preserveVideos) }),
   });
   return payload.task;
 }
