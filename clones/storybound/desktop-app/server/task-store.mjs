@@ -241,6 +241,8 @@ export function createTaskStore(root) {
             : task.artifacts?.[key];
       if (value !== undefined && value !== null) {
         await writeJsonAtomic(join(base, fileName), value);
+      } else {
+        await rm(join(base, fileName), { force: true });
       }
     }
   }
@@ -350,8 +352,12 @@ export function createTaskStore(root) {
     task.status = "paused";
     task.runState = "paused";
     task.error = null;
+    task.completedAt = null;
+    task.updatedAt = nowIso();
+    await writeJsonAtomic(taskFile(taskId), task);
+    await mirrorArtifacts(taskId, task);
     await appendEvent(taskId, { type: "artifacts_cleared", step, detail: `从 Step ${step} 清理下游产物` });
-    return updateTask(taskId, task);
+    return task;
   }
 
   async function deleteTask(taskId) {

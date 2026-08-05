@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { buildJianyingDraft } from "./server/draft-builder.mjs";
 import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
-import { metadataIssue, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
+import { metadataIssue, rewriteStructureContract, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
 import { createTaskStore, resolveStoryboundDataRoot } from "./server/task-store.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -1378,10 +1378,11 @@ async function runLlmPipeline(body) {
       }
     }
     const rewritePayload = await callLlmJson(config, pipelineMessages(
-      [originalPromptLibrary.writerAgentPrompt, promptOverride.rewritePrompt || track?.rewritePrompt, copyOptionPrompt(rewriteContext)],
+      [originalPromptLibrary.writerAgentPrompt, promptOverride.rewritePrompt || track?.rewritePrompt, rewriteStructureContract(rewriteBase.sourceText), copyOptionPrompt(rewriteContext)],
       "只执行 WriterAgent 的改写与自评阶段，严格返回 JSON 对象。narration 必须直接填写可供 TTS 朗读的实际完整正文，禁止返回字段说明、占位词或示例；同时返回 scores 对象与 totalScore 数值。",
       rewriteBase,
     ), 0.52, "WriterAgent 改写", {
+      retryInstruction: "上一次改写未通过完整性或内容形态校验。重新执行时必须保持原稿的题材和结构；观点/清单型原稿不得添加虚构人物、姓名、籍贯、和尚、村庄、婚姻、年表、对话或完整故事线。只返回严格 JSON。",
       validate: (payload) => writerPayloadIssue(
         payload,
         rewriteBase.sourceText,

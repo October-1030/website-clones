@@ -375,7 +375,7 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
         ) : null}
         <div className="field-group">
           <label className="field-label">文案内容 <small>{form.inputText.length} 字 / 至少 50 字</small></label>
-          <textarea className="copy-textarea" value={form.inputText} placeholder={form.sourceMode === "ai" ? "AI 生成后会填入这里，也可以手动编辑" : "粘贴一段人物故事、口播稿或带货文案"} onChange={(event) => onChange({ inputText: event.target.value })} />
+          <textarea className="copy-textarea" value={form.inputText} placeholder={form.sourceMode === "ai" ? "AI 生成后会填入这里，也可以手动编辑" : "粘贴一段人物故事、口播稿或带货文案"} onChange={(event) => onChange({ inputText: event.target.value, ...(form.sourceMode === "ai" && !form.aiBrief.trim() ? { sourceMode: "paste" as const } : {}) })} />
         </div>
         <div className="field-group"><span className="field-label field-label--standalone">视频形式</span><div className="choice-grid choice-grid--two">
           {[{ value: "narration" as const, title: "旁白视频", description: "单人配音讲述（默认）" }, { value: "podcast" as const, title: "双人播客", description: "两位主播一问一答聊内容" }].map((item) => <button key={item.value} type="button" className={`choice-card ${form.videoForm === item.value ? "is-selected" : ""}`} onClick={() => onChange({ videoForm: item.value })}><span className="choice-card__radio" /><span><strong>{item.title}</strong><small>{item.description}</small></span></button>)}

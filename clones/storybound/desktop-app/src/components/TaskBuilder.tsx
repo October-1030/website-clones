@@ -704,6 +704,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   async function handleStart(): Promise<void> {
     if (!canStart || busy) return;
     let activeForm = form;
+    if (activeForm.sourceMode === "ai" && !activeForm.aiBrief.trim() && activeForm.inputText.trim().length >= 50) {
+      activeForm = { ...activeForm, sourceMode: "paste" };
+      setForm(activeForm);
+    }
     if (form.sourceMode === "ai" && form.inputText.trim().length < 50) {
       const generated = await handleGenerateCopy();
       if (!generated) return;
