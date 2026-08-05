@@ -219,7 +219,7 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       videoIntro: dynamicStoryboard,
       videoIntroCount: dynamicStoryboard ? form.videoIntroCount : 0,
       videoIntroDurationMode: form.videoIntroDurationMode,
-      videoIntroDuration: dynamicStoryboard && form.videoIntroDurationMode === "fixed" ? form.videoIntroDuration : 0,
+      videoIntroDuration: dynamicStoryboard && form.videoIntroDurationMode === "fixed" ? Math.max(5, Math.min(15, form.videoIntroDuration)) : 0,
       bgmSync: form.bgmSync,
       bgmId: form.bgmId,
       coverMode: coverEnabled ? form.coverMode : "off",

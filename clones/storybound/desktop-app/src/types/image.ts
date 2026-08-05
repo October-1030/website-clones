@@ -11,6 +11,15 @@ export interface GeneratedImage {
   useReference?: boolean;
   status?: "pending" | "ready" | "failed" | "borrowed";
   error?: string;
+  source?: "wikimedia-commons" | string;
+  sourceTitle?: string;
+  sourceUrl?: string;
+  creator?: string;
+  license?: string;
+  licenseUrl?: string;
+  attribution?: string;
+  matchReason?: string;
+  matchConfidence?: number;
 }
 
 export interface ImageGenerationRequest {

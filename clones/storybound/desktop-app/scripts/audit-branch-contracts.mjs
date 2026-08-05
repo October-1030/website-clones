@@ -54,7 +54,7 @@ async function check(name, run) {
   }
 }
 
-const [promptLibraryText, appData, appSource, createForm, builderModel, taskBuilder, draftBuilder] = await Promise.all([
+const [promptLibraryText, appData, appSource, createForm, builderModel, taskBuilder, draftBuilder, serverSource, stockSource, runningHubSource] = await Promise.all([
   text("original-prompt-library.json"),
   text("src/data/app-data.ts"),
   text("src/App.tsx"),
@@ -62,6 +62,9 @@ const [promptLibraryText, appData, appSource, createForm, builderModel, taskBuil
   text("src/components/task-builder-model.ts"),
   text("src/components/TaskBuilder.tsx"),
   text("server/draft-builder.mjs"),
+  text("server.mjs"),
+  text("server/stock-materials.mjs"),
+  text("server/runninghub.mjs"),
 ]);
 const promptLibrary = JSON.parse(promptLibraryText);
 
@@ -140,13 +143,16 @@ await check("三种执行模式和四种暂停策略有真实执行端", () => {
   ], "流水线模式");
 });
 
-await check("AI/网络/本地素材三条路径有明确消费端或边界", () => {
-  assert.ok(createForm.includes("独立版未接入原作者私有素材检索服务"), "网络素材分支没有公开能力边界");
+await check("AI/网络/本地素材三条路径均有真实消费端", () => {
+  assert.ok(createForm.includes("自动检索 Wikimedia Commons"), "网络素材分支没有自动检索入口");
   includesAll(taskBuilder, [
     'activeTask.options.materialSource === "ai"',
     'activeTask.options.materialSource === "stock" ? "网络素材" : "我的素材库"',
+    "generateStockMaterials",
     "replaceDynamicVideo",
   ], "素材路径");
+  includesAll(stockSource, ["searchCommonsMedia", "stock-license-manifest.json", "sourceUrl", "licenseUrl"], "网络素材授权链");
+  includesAll(serverSource, ["/api/materials/stock/generate", "generateStockMaterials"], "网络素材服务端");
 });
 
 await check("逐镜/连续/外部音频/播客均进入真实时间线与草稿", () => {
@@ -159,6 +165,8 @@ await check("逐镜/连续/外部音频/播客均进入真实时间线与草稿"
     "timelineFromShots",
   ], "配音流水线");
   includesAll(draftBuilder, ["continuousAudio", "externalAudio", "podcastImageMode", "audioSegments"], "草稿打包器");
+  includesAll(taskBuilder, ["generateRunningHubStoryboards", "runDynamicStoryboardStep"], "动态分镜消费端");
+  includesAll(runningHubSource, ["/openapi/v2/media/upload/binary", "/openapi/v2/query", "generateRunningHubVideos"], "RunningHub 协议");
 });
 
 await check("观点清单文案不会再被赛道模板改成虚构故事", () => {

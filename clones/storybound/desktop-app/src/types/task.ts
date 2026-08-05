@@ -114,6 +114,10 @@ export interface StoredVideo extends StoredAsset {
   error?: string;
   width?: number;
   height?: number;
+  provider?: "runninghub" | string;
+  providerTaskId?: string;
+  model?: string;
+  targetDurationSec?: number;
 }
 
 export interface TaskTimelineEntry {
@@ -167,6 +171,7 @@ export interface StoryboundTask {
     podcast: { segments: AudioSegment[]; totalDurationSec: number } | null;
     externalAudio: StoredAsset | null;
     bgm: StoredAsset | null;
+    stockLicenseManifest?: (StoredAsset & { assets?: Array<Record<string, unknown>> }) | null;
     timeline?: TaskTimelineEntry[] | null;
   };
   draft: DraftResult | null;

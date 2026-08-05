@@ -4,8 +4,11 @@ import { originalDefaultStyleByTrack, pipelineSteps } from "../data/app-data";
 import { availableMinimaxVoices, volcengineVoices } from "../data/tts-data";
 import { buildCoverImagePrompt } from "../lib/cover-prompt";
 import { generateImages } from "../lib/image-api";
+import { readImageProviderConfig } from "../lib/image-provider-store";
 import { createAiCopy, runLlmPipelineStep } from "../lib/llm-api";
+import { generateStockMaterials } from "../lib/material-api";
 import { blockingRewriteIssues } from "../lib/rewrite-integrity";
+import { fetchRunningHubStatus, generateRunningHubStoryboards } from "../lib/runninghub-api";
 import { appendTaskEvent, buildTaskDraft, clearTaskFromStep, createTask, getTask, updateTask, uploadTaskAsset } from "../lib/task-api";
 import { takeTaskHandoff } from "../lib/task-handoff";
 import { synthesizeTts } from "../lib/tts-api";
@@ -488,6 +491,26 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (!prompts.length) throw new Error("没有绘图提示词，请先完成 Step 4");
     const existing = new Map(activeTask.media.images.filter((image) => image.path && image.status !== "failed").map((image) => [image.shotId, image]));
     const missing = prompts.filter((prompt) => !existing.has(prompt.shotId));
+    if (activeTask.options.materialSource === "stock") {
+      let stockTask = activeTask;
+      if (missing.length) {
+        stockTask = await generateStockMaterials(activeTask.id, missing.map((prompt) => prompt.shotId), llmConfig, signal);
+        setTask(stockTask);
+        onOpenPipeline(stockTask);
+      }
+      let stockImages = stockTask.media.images;
+      if (stockTask.options.autoBorrowImage) stockImages = borrowFailedImages(stockImages);
+      const unusable = stockImages.filter((image) => !image.path);
+      if (unusable.length) {
+        if (stockImages !== stockTask.media.images) {
+          stockTask = await persistState(stockTask, { media: { ...stockTask.media, images: stockImages }, draft: null });
+        }
+        throw new Error(`还有 ${unusable.length} 个分镜未找到可确认授权的匹配素材，请人工替换或使用相邻画面补位`);
+      }
+      return stockImages === stockTask.media.images
+        ? stockTask
+        : persistState(stockTask, { media: { ...stockTask.media, images: stockImages }, draft: null });
+    }
     let generated: StoredImage[] = [];
     if (missing.length && activeTask.options.materialSource === "ai") {
       const result = await generateImages({ taskId: activeTask.id, prompts: missing, apiKey: config.minimax.apiKey, aspectRatio: activeTask.aspectRatio, maxImages: missing.length, track: activeTask.track, visualStyle: activeTask.visualStyle }, signal);
@@ -508,7 +531,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         ...asset,
         status: "ready",
       }];
-    } else if (activeTask.options.coverMode && activeTask.options.coverMode !== "off" && activeTask.options.materialSource !== "stock") {
+    } else if (activeTask.options.coverMode && activeTask.options.coverMode !== "off") {
       const coverTitle = activeTask.artifacts.rewrite?.title || activeTask.title;
       const coverSubtitles = activeTask.artifacts.rewrite?.subtitle || [];
       const coverConfigs = [{
@@ -534,6 +557,22 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       }
     }
     return persistState(activeTask, { media: { ...activeTask.media, images, coverImages }, draft: null });
+  }
+
+  async function runDynamicStoryboardStep(activeTask: StoryboundTask, signal: AbortSignal): Promise<StoryboundTask> {
+    if (!activeTask.options.dynamicStoryboard || !activeTask.options.videoIntro) return activeTask;
+    const runninghub = readImageProviderConfig().runninghub;
+    const result = await generateRunningHubStoryboards({
+      taskId: activeTask.id,
+      apiKey: runninghub.apiKey,
+      model: runninghub.model,
+      concurrency: runninghub.concurrency,
+      signal,
+    });
+    setTask(result.task);
+    onOpenPipeline(result.task);
+    if (result.failedCount) throw new Error(`RunningHub 动态分镜有 ${result.failedCount} 个镜头失败；静态图片已保留，可在产物区查看错误并重试`);
+    return result.task;
   }
 
   async function synthesizeSegment(activeTask: StoryboundTask, shotId: number, text: string, voiceId: string, signal: AbortSignal, speaker?: "A" | "B"): Promise<AudioSegment> {
@@ -634,7 +673,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     }
     if (step <= 3) return runLlmStep(activeTask, step as 0 | 1 | 2 | 3, signal);
     if (step === 4) return runImageStep(activeTask, signal);
-    if (step === 5) return runAudioStep(activeTask, signal);
+    if (step === 5) {
+      const withAudio = await runAudioStep(activeTask, signal);
+      return runDynamicStoryboardStep(withAudio, signal);
+    }
     return buildTaskDraft(activeTask.id);
   }
 
@@ -704,6 +746,21 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   async function handleStart(): Promise<void> {
     if (!canStart || busy) return;
     let activeForm = form;
+    if (activeForm.dynamicStoryboard) {
+      const runninghub = readImageProviderConfig().runninghub;
+      if (!runninghub.apiKey.trim()) {
+        try {
+          const status = await fetchRunningHubStatus();
+          if (!status.available) {
+            window.alert("动态分镜需要 RunningHub API Key。请先到系统设置 → AI 绘图 → RunningHub 配置；密钥只保存在当前会话或本机服务端。");
+            return;
+          }
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : "无法检查 RunningHub 配置");
+          return;
+        }
+      }
+    }
     if (activeForm.sourceMode === "ai" && !activeForm.aiBrief.trim() && activeForm.inputText.trim().length >= 50) {
       activeForm = { ...activeForm, sourceMode: "paste" };
       setForm(activeForm);

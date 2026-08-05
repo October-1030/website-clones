@@ -203,6 +203,7 @@ export function createTaskStore(root) {
         podcast: null,
         externalAudio: null,
         bgm: null,
+        stockLicenseManifest: null,
       }, input.media || {}),
       draft: input.draft || null,
       error: input.error || null,
@@ -325,12 +326,18 @@ export function createTaskStore(root) {
       media.images = [];
       media.videos = [];
       media.coverImages = [];
+      media.stockLicenseManifest = null;
       await rm(join(taskDir(taskId), "images"), { recursive: true, force: true });
       await rm(join(taskDir(taskId), "videos"), { recursive: true, force: true });
       await Promise.all([
         mkdir(join(taskDir(taskId), "images"), { recursive: true }),
         mkdir(join(taskDir(taskId), "videos"), { recursive: true }),
       ]);
+    }
+    if (step === 5) {
+      media.videos = [];
+      await rm(join(taskDir(taskId), "videos"), { recursive: true, force: true });
+      await mkdir(join(taskDir(taskId), "videos"), { recursive: true });
     }
     if (step <= 5) {
       media.audioSegments = [];

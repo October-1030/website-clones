@@ -13,6 +13,8 @@ import { buildJianyingDraft } from "./server/draft-builder.mjs";
 import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
 import { metadataIssue, rewriteStructureContract, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
+import { generateRunningHubVideos, runningHubModels, testRunningHubConnection } from "./server/runninghub.mjs";
+import { saveStockSelections, searchCommonsMedia } from "./server/stock-materials.mjs";
 import { createTaskStore, resolveStoryboundDataRoot } from "./server/task-store.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -65,6 +67,11 @@ const llmSecretCandidates = [
   "C:\\tmp\\storybound-secrets.txt",
   "C:\\tmp\\llm-secrets.txt",
 ].filter(Boolean);
+const runningHubSecretCandidates = [
+  process.env.RUNNINGHUB_SECRETS_FILE,
+  "C:\\tmp\\storybound-secrets.txt",
+  "C:\\tmp\\runninghub-secrets.txt",
+].filter(Boolean);
 const asrCommand = String(process.env.STORYBOUND_ASR_COMMAND || "").trim();
 const asrArgs = (() => {
   try {
@@ -106,6 +113,38 @@ function parseKeyValueSecrets(contents) {
     if (match?.[1]) values[match[1].toUpperCase()] = match[2].trim();
   }
   return values;
+}
+
+async function findLocalRunningHubCredential() {
+  const envApiKey = String(process.env.RUNNINGHUB_API_KEY || "").trim();
+  if (envApiKey) return { apiKey: envApiKey, source: "环境变量" };
+  for (const file of runningHubSecretCandidates) {
+    try {
+      const values = parseKeyValueSecrets(await readFile(file, "utf8"));
+      const apiKey = String(values.RUNNINGHUB_API_KEY || values.RUNNING_HUB_API_KEY || "").trim();
+      if (apiKey) return { apiKey, source: basename(file) };
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+  return null;
+}
+
+async function resolveRunningHubApiKey(input) {
+  const provided = String(input || "").trim();
+  if (provided) return provided;
+  const local = await findLocalRunningHubCredential();
+  if (local?.apiKey) return local.apiKey;
+  throw new Error("RunningHub 未配置：请在系统设置填写 API Key，或在本机凭据文件配置 RUNNINGHUB_API_KEY");
+}
+
+async function getRunningHubStatus() {
+  const local = await findLocalRunningHubCredential();
+  return {
+    available: Boolean(local),
+    source: local?.source || null,
+    models: runningHubModels.map(({ id, name, durationSec }) => ({ id, name, durationSec })),
+  };
 }
 
 async function findLocalMinimaxCredential() {
@@ -1304,6 +1343,199 @@ async function callLlmJson(config, messages, temperature, label, options = {}) {
   throw new Error(`${label}连续${attemptLimit}次调用失败：${providerMessage(lastError, "解析失败")}`);
 }
 
+function stockPlanIssue(payload, expectedShotIds) {
+  const queries = Array.isArray(payload?.queries) ? payload.queries : [];
+  const ids = new Set(queries.map((item) => Number(item?.shotId)));
+  if (queries.length !== expectedShotIds.length || expectedShotIds.some((id) => !ids.has(id))) {
+    return "网络素材检索词数量或 shotId 与分镜不一致";
+  }
+  if (queries.some((item) => !String(item?.queryZh || item?.queryEn || "").trim())) return "存在空检索词";
+  return "";
+}
+
+async function buildStockSearchPlans(config, task, shots) {
+  const expectedShotIds = shots.map((shot) => Number(shot.id));
+  const payload = await callLlmJson(config, [
+    {
+      role: "system",
+      content: [
+        "你是纪录片与人物故事的网络素材检索编辑。为每个分镜生成 Wikimedia Commons 可搜索的短检索词。",
+        "只写可验证的人名、地点、年份、物件和动作；不得把画风、镜头参数、情绪词、虚构细节写进检索词。",
+        "若分镜出现真实人物，exactSubject 必须填写其规范姓名；人物不存在于分镜时留空。",
+        "queryZh 和 queryEn 都要简短，优先 2–8 个关键词；reason 说明检索目标。",
+        "只返回严格 JSON，不要输出 Markdown。",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: JSON.stringify({
+        title: task.artifacts?.rewrite?.title || task.title,
+        track: task.track,
+        shots: shots.map((shot) => ({ shotId: shot.id, text: shot.text, visual: shot.visual })),
+        contract: { queries: [{ shotId: 1, queryZh: "", queryEn: "", exactSubject: "", reason: "" }] },
+      }),
+    },
+  ], 0.15, "网络素材检索词生成", {
+    validate: (value) => stockPlanIssue(value, expectedShotIds),
+    retryInstruction: "上次检索词未覆盖全部分镜。按输入 shotId 一一返回，禁止遗漏、合并或新增，只输出严格 JSON。",
+  });
+  return payload.queries.map((item) => ({
+    shotId: Number(item.shotId),
+    queryZh: String(item.queryZh || "").trim(),
+    queryEn: String(item.queryEn || "").trim(),
+    exactSubject: String(item.exactSubject || "").trim(),
+    reason: String(item.reason || "").trim(),
+  }));
+}
+
+function stockQueryVariants(plan) {
+  const variants = [];
+  const append = (value) => {
+    const query = String(value || "").replace(/\s+/g, " ").trim();
+    if (query && !variants.includes(query)) variants.push(query);
+  };
+  append(plan.exactSubject);
+  for (const value of [plan.queryEn, plan.queryZh]) {
+    append(value);
+    if (!/^[\x00-\x7F]+$/.test(String(value || ""))) continue;
+    const words = String(value).trim().split(/\s+/).filter(Boolean);
+    for (let length = words.length - 1; length >= Math.min(3, words.length); length -= 1) {
+      append(words.slice(0, length).join(" "));
+    }
+  }
+  return variants.slice(0, 6);
+}
+
+async function commonsCandidatesForPlan(plan, signal) {
+  const candidates = [];
+  const seen = new Set();
+  for (const query of stockQueryVariants(plan)) {
+    let results = [];
+    try {
+      results = await searchCommonsMedia(query, { limit: 12, signal });
+    } catch {
+      continue;
+    }
+    for (const candidate of results) {
+      if (seen.has(candidate.id)) continue;
+      seen.add(candidate.id);
+      candidates.push(candidate);
+    }
+    if (candidates.length >= 6) break;
+  }
+  return candidates.slice(0, 12);
+}
+
+function stockRankingIssue(payload, plans) {
+  const selections = Array.isArray(payload?.selections) ? payload.selections : [];
+  const ids = new Set(selections.map((item) => Number(item?.shotId)));
+  if (selections.length !== plans.length || plans.some((plan) => !ids.has(plan.shotId))) return "素材选择没有覆盖全部分镜";
+  return "";
+}
+
+async function rankStockCandidates(config, plans, candidatesByShot) {
+  const selections = [];
+  for (let start = 0; start < plans.length; start += 8) {
+    const batch = plans.slice(start, start + 8);
+    const payload = await callLlmJson(config, [
+      {
+        role: "system",
+        content: [
+          "你是事实核查严格的纪录片素材编辑。请从候选 Wikimedia Commons 素材中为每个分镜选择最匹配的一项。",
+          "真实人物必须与 exactSubject 明确一致；无法确认就把 candidateId 留空，不得用相似外国人或无关人物代替。",
+          "普通场景可依据标题和描述选择语义最接近的素材。confidence 为 0–1。",
+          "只返回严格 JSON，不输出解释。",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          items: batch.map((plan) => ({
+            ...plan,
+            candidates: (candidatesByShot.get(plan.shotId) || []).map((candidate) => ({
+              id: candidate.id,
+              title: candidate.title,
+              description: candidate.description,
+              creator: candidate.creator,
+              license: candidate.license,
+              width: candidate.width,
+              height: candidate.height,
+            })),
+          })),
+          contract: { selections: [{ shotId: 1, candidateId: "", confidence: 0, reason: "" }] },
+        }),
+      },
+    ], 0.1, "网络素材事实核查", {
+      validate: (value) => stockRankingIssue(value, batch),
+      retryInstruction: "按每个输入 shotId 返回一项选择；不能确认真实人物时 candidateId 必须为空。只输出严格 JSON。",
+    });
+    selections.push(...payload.selections.map((item) => ({
+      shotId: Number(item.shotId),
+      candidateId: String(item.candidateId || "").trim(),
+      confidence: Math.max(0, Math.min(1, Number(item.confidence) || 0)),
+      reason: String(item.reason || "").trim(),
+    })));
+  }
+  return selections;
+}
+
+async function generateStockMaterials(body) {
+  const taskId = String(body.taskId || "").trim();
+  const task = await taskStore.readTask(taskId);
+  if (!task) throw new Error("任务不存在");
+  const requestedIds = new Set((body.shotIds || []).map(Number).filter((id) => Number.isInteger(id) && id > 0));
+  const shots = (task.artifacts?.storyboard?.shots || []).filter((shot) => requestedIds.size === 0 || requestedIds.has(shot.id));
+  if (!shots.length) throw new Error("没有需要检索素材的分镜");
+  const config = await resolveLlmConfig(body.llmConfig);
+  const plans = await buildStockSearchPlans(config, task, shots);
+  const candidateEntries = await mapLimit(plans, 3, async (plan) => [plan.shotId, await commonsCandidatesForPlan(plan, body.signal)]);
+  const candidatesByShot = new Map(candidateEntries);
+  const ranked = await rankStockCandidates(config, plans, candidatesByShot);
+  const rankedByShot = new Map(ranked.map((selection) => [selection.shotId, selection]));
+  const selections = plans.map((plan) => {
+    const candidates = candidatesByShot.get(plan.shotId) || [];
+    const ranking = rankedByShot.get(plan.shotId) || { candidateId: "", confidence: 0, reason: "" };
+    let candidate = candidates.find((item) => item.id === ranking.candidateId) || null;
+    if (plan.exactSubject) {
+      const subject = plan.exactSubject.toLocaleLowerCase();
+      const confirmed = candidate && `${candidate.title} ${candidate.description}`.toLocaleLowerCase().includes(subject);
+      if (!confirmed || ranking.confidence < 0.55) candidate = null;
+    } else if (!candidate && candidates.length) {
+      candidate = candidates[0];
+    }
+    return {
+      shotId: plan.shotId,
+      query: plan.queryEn || plan.queryZh,
+      candidate,
+      confidence: ranking.confidence,
+      reason: ranking.reason || plan.reason,
+      error: plan.exactSubject && !candidate ? `未找到能确认“${plan.exactSubject}”身份的授权素材` : "",
+    };
+  });
+  const saved = await saveStockSelections(taskStore, taskId, selections);
+  const selectedIds = new Set(saved.images.map((image) => image.shotId));
+  const images = [
+    ...(task.media?.images || []).filter((image) => !selectedIds.has(image.shotId)),
+    ...saved.images,
+  ].sort((a, b) => a.shotId - b.shotId);
+  const prompts = plans.map((plan) => ({
+    shotId: plan.shotId,
+    prompt: `网络检索：${plan.queryZh}${plan.queryEn ? ` / ${plan.queryEn}` : ""}`,
+    negativePrompt: plan.exactSubject ? `不得使用无法确认身份的“${plan.exactSubject}”相似人物` : "",
+  }));
+  const updated = await taskStore.updateTask(taskId, {
+    artifacts: { ...task.artifacts, prompts: { prompts, templateVersion: "stock-wikimedia-m3-v1" } },
+    media: { ...task.media, images, stockLicenseManifest: saved.manifest },
+    draft: null,
+  });
+  await taskStore.appendEvent(taskId, {
+    type: "stock_materials_complete",
+    step: 4,
+    detail: `已检索 ${plans.length} 个分镜，匹配 ${saved.images.filter((image) => image.status === "ready").length} 项 Wikimedia Commons 授权素材`,
+  });
+  return { task: updated, plans, manifest: saved.manifest };
+}
+
 function splitShotsFromAnchors(sourceText, anchors, track) {
   const source = String(sourceText || "").replace(/[“”]/g, "");
   const cleanAnchors = Array.isArray(anchors) ? anchors.map((item) => String(item || "").replace(/[“”]/g, "").trim()).filter(Boolean) : [];
@@ -1577,6 +1809,77 @@ async function handleLlmApi(request, response, pathname) {
     sendJson(response, 404, { error: "未知 LLM 接口" });
   } catch (error) {
     sendJson(response, 400, { error: providerMessage(error, "LLM 请求失败") });
+  }
+}
+
+async function handleMaterialApi(request, response, pathname) {
+  if (request.method !== "POST") {
+    sendJson(response, 405, { error: "只支持 POST" });
+    return;
+  }
+  try {
+    const body = await readJson(request);
+    if (pathname === "/api/materials/stock/generate") {
+      sendJson(response, 200, await generateStockMaterials(body));
+      return;
+    }
+    sendJson(response, 404, { error: "未知素材接口" });
+  } catch (error) {
+    sendJson(response, 400, { error: providerMessage(error, "网络素材检索失败") });
+  }
+}
+
+async function handleRunningHubApi(request, response, pathname) {
+  try {
+    if (pathname === "/api/runninghub/status" && request.method === "GET") {
+      sendJson(response, 200, await getRunningHubStatus());
+      return;
+    }
+    if (request.method !== "POST") {
+      sendJson(response, 405, { error: "只支持 POST" });
+      return;
+    }
+    const body = await readJson(request);
+    const apiKey = await resolveRunningHubApiKey(body.apiKey);
+    if (pathname === "/api/runninghub/test") {
+      sendJson(response, 200, await testRunningHubConnection(apiKey));
+      return;
+    }
+    if (pathname === "/api/runninghub/generate") {
+      const taskId = String(body.taskId || "").trim();
+      const task = await taskStore.readTask(taskId);
+      if (!task) throw new Error("任务不存在");
+      const allShotIds = (task.artifacts?.storyboard?.shots || []).map((shot) => shot.id);
+      const requestedIds = (body.shotIds || []).map(Number).filter((id) => allShotIds.includes(id));
+      const configuredCount = Number(task.options?.videoIntroCount ?? 0);
+      const shotIds = requestedIds.length
+        ? requestedIds
+        : configuredCount === -1
+          ? allShotIds
+          : allShotIds.slice(0, Math.max(0, configuredCount));
+      if (!shotIds.length) throw new Error("动态分镜已开启，但没有选中任何分镜");
+      const generated = await generateRunningHubVideos({
+        taskStore,
+        task,
+        apiKey,
+        shotIds,
+        model: body.model,
+        concurrency: body.concurrency,
+        probeMediaDuration,
+      });
+      const generatedIds = new Set(generated.map((video) => video.shotId));
+      const videos = [
+        ...(task.media?.videos || []).filter((video) => !generatedIds.has(video.shotId)),
+        ...generated,
+      ].sort((a, b) => a.shotId - b.shotId);
+      const updated = await taskStore.updateTask(taskId, { media: { ...task.media, videos }, draft: null });
+      const failedCount = generated.filter((video) => video.status === "failed").length;
+      sendJson(response, 200, { task: updated, generatedCount: generated.length - failedCount, failedCount });
+      return;
+    }
+    sendJson(response, 404, { error: "未知 RunningHub 接口" });
+  } catch (error) {
+    sendJson(response, 400, { error: providerMessage(error, "RunningHub 请求失败") });
   }
 }
 
@@ -2272,6 +2575,14 @@ const server = createServer(async (request, response) => {
   }
   if (pathname.startsWith("/api/llm/")) {
     await handleLlmApi(request, response, pathname);
+    return;
+  }
+  if (pathname.startsWith("/api/materials/")) {
+    await handleMaterialApi(request, response, pathname);
+    return;
+  }
+  if (pathname.startsWith("/api/runninghub/")) {
+    await handleRunningHubApi(request, response, pathname);
     return;
   }
   if (pathname.startsWith("/api/images/")) {

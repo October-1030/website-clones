@@ -9,6 +9,7 @@ import {
   type ImageProviderId,
 } from "../lib/image-provider-store";
 import { runLlmPipelineStep } from "../lib/llm-api";
+import { fetchRunningHubStatus, testRunningHub, type RunningHubStatus } from "../lib/runninghub-api";
 import { cloneMinimaxVoice, fetchMinimaxVoices, synthesizeTts, testTts } from "../lib/tts-api";
 import type { LlmConfig, LlmCredentialStatus, LlmProvider } from "../types/llm";
 import type {
@@ -91,6 +92,7 @@ export function TtsSettingsPage({
   const [cloneName, setCloneName] = useState("");
   const [cloneText, setCloneText] = useState("这是一段示例文本，用来测试克隆音色。");
   const [imageConfig, setImageConfig] = useState(readImageProviderConfig);
+  const [runningHubStatus, setRunningHubStatus] = useState<RunningHubStatus | null>(null);
   const [ttsSpeed, setTtsSpeed] = useState(1);
   const [asrProvider, setAsrProvider] = useState<"local" | "volcengine">("local");
   const [diagnosticMessage, setDiagnosticMessage] = useState("");
@@ -105,6 +107,12 @@ export function TtsSettingsPage({
   useEffect(() => () => {
     if (voicePreview?.url) URL.revokeObjectURL(voicePreview.url);
   }, [voicePreview?.url]);
+
+  useEffect(() => {
+    void fetchRunningHubStatus()
+      .then(setRunningHubStatus)
+      .catch(() => setRunningHubStatus({ available: false, source: null, models: [] }));
+  }, []);
 
   useEffect(() => {
     const player = voicePreviewAudioRef.current;
@@ -127,7 +135,9 @@ export function TtsSettingsPage({
       ? (imageReady ? "ok" : "empty")
       : activeImageProvider === "custom"
         ? (imageConfig.custom.apiKey && imageConfig.custom.baseUrl && imageConfig.custom.model ? "filled" : "empty")
-        : "unavailable",
+        : activeImageProvider === "runninghub"
+          ? (imageConfig.runninghub.apiKey || runningHubStatus?.available ? (imageTestState.kind === "success" ? "ok" : "filled") : "empty")
+          : "unavailable",
     tts: ttsReady ? (requestState.kind === "success" ? "ok" : "filled") : "empty",
     asr: asrProvider === "volcengine" && credentialStatus.volcengine.available ? "ok" : "unavailable",
     draft: "unavailable",
@@ -154,6 +164,7 @@ export function TtsSettingsPage({
       ...imageConfig,
       ...patch,
       custom: { ...imageConfig.custom, ...(patch.custom || {}) },
+      runninghub: { ...imageConfig.runninghub, ...(patch.runninghub || {}) },
     };
     setImageConfig(next);
     writeImageProviderConfig(next);
@@ -206,7 +217,7 @@ export function TtsSettingsPage({
     }
   };
 
-  const handleImageTest = () => {
+  const handleImageTest = async () => {
     if (activeImageProvider === "gpt_image") {
       setImageTestState(imageReady
         ? { kind: "success", message: "本地服务已确认 MiniMax 凭据可用；实际出图请到画图实验室验证。" }
@@ -222,6 +233,19 @@ export function TtsSettingsPage({
       setImageTestState(configured
         ? { kind: "unavailable", message: "配置已填写，但设置页没有无扣费探测接口；请在画图实验室生成 1 张图做真实验证。" }
         : { kind: "error", message: "请先填写 Base URL、API Key 和模型。" });
+      return;
+    }
+    if (activeImageProvider === "runninghub") {
+      setImageTestState({ kind: "busy", message: "正在调用 RunningHub 账户状态接口…" });
+      try {
+        const result = await testRunningHub(imageConfig.runninghub.apiKey);
+        setImageTestState({
+          kind: "success",
+          message: `连接成功 · 余额 ${result.remainCoins || "已返回"} · 当前任务 ${result.currentTaskCounts}`,
+        });
+      } catch (error) {
+        setImageTestState({ kind: "error", message: error instanceof Error ? error.message : "RunningHub 连接失败" });
+      }
       return;
     }
     setImageTestState({
@@ -445,7 +469,30 @@ export function TtsSettingsPage({
                 <UnavailableProviderCard title="即梦 AI" description="原版通过桌面端读取 Session ID，并可选择模型、比例、分辨率和 1–10 并发。浏览器独立版不收集 Cookie。" fields={["Session ID", "模型：即梦 4.0 / 3.0", "画面比例", "分辨率", "并发数"]} onCheck={handleImageTest} state={imageTestState} />
               ) : null}
               {activeImageProvider === "runninghub" ? (
-                <UnavailableProviderCard title="RunningHub 国际站" description="原版 v1.17.0 使用 runninghub.ai 企业级共享 API Key，提供 X / V2 / G-2.0 模型、分辨率、并发和代理。独立版未接入其桌面端适配器。" fields={["企业级共享 API Key", "模型：X / V2 / G-2.0", "分辨率：1K / 2K / 4K", "并发数（建议 3–5）", "代理地址"]} onCheck={handleImageTest} state={imageTestState} />
+                <div className="tts-card settings-card-v17">
+                  <CredentialBanner
+                    title={runningHubStatus?.available ? "本机 RunningHub 凭据可用" : "RunningHub 动态分镜"}
+                    detail={runningHubStatus?.available ? `已从 ${runningHubStatus.source || "本机"} 安全读取；页面可留空。` : "API Key 只保存在当前浏览器会话，不写入项目或 GitHub。"}
+                    ready={Boolean(runningHubStatus?.available || imageConfig.runninghub.apiKey)}
+                  />
+                  <Field label="API Key" hint={runningHubStatus?.available ? "本地已就绪，可留空" : "必填"}>
+                    <input className="settings-input" type="password" autoComplete="off" value={imageConfig.runninghub.apiKey} onChange={(event) => updateImageConfig({ runninghub: { ...imageConfig.runninghub, apiKey: event.target.value } })} placeholder={runningHubStatus?.available ? "使用本机凭据" : "粘贴 RunningHub API Key"} />
+                  </Field>
+                  <div className="tts-two-column">
+                    <Field label="图片转视频模型" help="使用 RunningHub 官方 Standard API；PixVerse 支持按镜头时长生成 5–15 秒。">
+                      <select className="settings-input" value={imageConfig.runninghub.model} onChange={(event) => updateImageConfig({ runninghub: { ...imageConfig.runninghub, model: event.target.value === "hailuo-2.3-fast-pro" ? "hailuo-2.3-fast-pro" : event.target.value === "pixverse-v6" ? "pixverse-v6" : "hailuo-2.3-fast" } })}>
+                        <option value="hailuo-2.3-fast">海螺 2.3 Fast · 6 秒</option>
+                        <option value="hailuo-2.3-fast-pro">海螺 2.3 Fast Pro · 6 秒</option>
+                        <option value="pixverse-v6">PixVerse V6 · 5–15 秒</option>
+                      </select>
+                    </Field>
+                    <Field label="并发数" help="动态视频会计费；默认 1，最多 3。">
+                      <input className="settings-input" type="number" min={1} max={3} value={imageConfig.runninghub.concurrency} onChange={(event) => updateImageConfig({ runninghub: { ...imageConfig.runninghub, concurrency: Math.max(1, Math.min(3, Number(event.target.value) || 1)) } })} />
+                    </Field>
+                  </div>
+                  <p className="settings-provider-note">静态分镜完成并生成真实 TTS 时间线后，系统按“前 3 张 / 全部 / 自定义”上传对应图片、轮询结果、下载 MP4，并回写到同一镜头。海螺输出 6 秒；PixVerse 按真实配音或固定目标生成 5–15 秒；草稿最终仍以真实配音时间线对齐。</p>
+                  <div className="tts-card-footer"><button className="tts-test-button" disabled={imageTestState.kind === "busy"} onClick={() => void handleImageTest()} type="button">测试真实连接</button><InlineRequestState state={imageTestState} /></div>
+                </div>
               ) : null}
               {activeImageProvider === "modelscope" ? (
                 <UnavailableProviderCard title="魔搭社区" description="原版使用 ModelScope Access Token，支持免费额度查询、模型选择、自定义模型和额度耗尽切换。独立版未接入其桌面端 Token 保管与额度接口。" fields={["Access Token", "文生图模型", "自定义模型", "并发数（建议 1）", "额度用完自动切换"]} onCheck={handleImageTest} state={imageTestState} />

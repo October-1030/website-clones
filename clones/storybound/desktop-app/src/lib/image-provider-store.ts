@@ -7,6 +7,11 @@ export interface ImageProviderConfig {
     model: string;
     apiKey: string;
   };
+  runninghub: {
+    apiKey: string;
+    model: "hailuo-2.3-fast" | "hailuo-2.3-fast-pro" | "pixverse-v6";
+    concurrency: number;
+  };
 }
 
 const storageKey = "storybound-image-provider-session-v1";
@@ -18,6 +23,11 @@ const defaults: ImageProviderConfig = {
     baseUrl: "",
     model: "gpt-image-1",
     apiKey: "",
+  },
+  runninghub: {
+    apiKey: "",
+    model: "hailuo-2.3-fast",
+    concurrency: 1,
   },
 };
 
@@ -31,6 +41,15 @@ export function readImageProviderConfig(): ImageProviderConfig {
         baseUrl: String(value.custom?.baseUrl || ""),
         model: String(value.custom?.model || defaults.custom.model),
         apiKey: String(value.custom?.apiKey || ""),
+      },
+      runninghub: {
+        apiKey: String(value.runninghub?.apiKey || ""),
+        model: value.runninghub?.model === "hailuo-2.3-fast-pro"
+          ? "hailuo-2.3-fast-pro"
+          : value.runninghub?.model === "pixverse-v6"
+            ? "pixverse-v6"
+            : "hailuo-2.3-fast",
+        concurrency: Math.max(1, Math.min(3, Number(value.runninghub?.concurrency) || 1)),
       },
     };
   } catch {
