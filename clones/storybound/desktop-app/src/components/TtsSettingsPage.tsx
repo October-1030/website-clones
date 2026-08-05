@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { llmProviderOptions } from "../data/llm-data";
 import { minimaxVoices, volcengineVoices } from "../data/tts-data";
@@ -85,6 +85,8 @@ export function TtsSettingsPage({
   const [voiceSearch, setVoiceSearch] = useState("");
   const [previewingVoiceId, setPreviewingVoiceId] = useState("");
   const [voicePreview, setVoicePreview] = useState<{ name: string; url: string } | null>(null);
+  const [voicePreviewPlayback, setVoicePreviewPlayback] = useState<"ready" | "playing" | "ended">("ready");
+  const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
   const [cloneFile, setCloneFile] = useState<File | null>(null);
   const [cloneName, setCloneName] = useState("");
   const [cloneText, setCloneText] = useState("这是一段示例文本，用来测试克隆音色。");
@@ -103,6 +105,15 @@ export function TtsSettingsPage({
   useEffect(() => () => {
     if (voicePreview?.url) URL.revokeObjectURL(voicePreview.url);
   }, [voicePreview?.url]);
+
+  useEffect(() => {
+    const player = voicePreviewAudioRef.current;
+    if (!voicePreview || !player) return;
+    player.currentTime = 0;
+    void player.play()
+      .then(() => setVoicePreviewPlayback("playing"))
+      .catch(() => setVoicePreviewPlayback("ready"));
+  }, [voicePreview]);
 
   const imageReady = credentialStatus.minimax.available || Boolean(config.minimax.apiKey.trim());
   const llmReady = llmCredentialStatus.available || Boolean(llmConfig.apiKey.trim());
@@ -237,6 +248,7 @@ export function TtsSettingsPage({
 
   const handlePreviewVoice = async (voice: TtsVoice) => {
     setPreviewingVoiceId(voice.id);
+    setVoicePreviewPlayback("ready");
     setRequestState({ kind: "busy", message: `正在生成“${voice.name}”短句试听…` });
     try {
       const audio = await synthesizeTts({
@@ -253,6 +265,15 @@ export function TtsSettingsPage({
     } finally {
       setPreviewingVoiceId("");
     }
+  };
+
+  const replayVoicePreview = () => {
+    const player = voicePreviewAudioRef.current;
+    if (!player) return;
+    player.currentTime = 0;
+    void player.play()
+      .then(() => setVoicePreviewPlayback("playing"))
+      .catch(() => setVoicePreviewPlayback("ready"));
   };
 
   const handleSync = async () => {
@@ -505,7 +526,7 @@ export function TtsSettingsPage({
                     ) : null}
                   </>
                 )}
-                {voicePreview ? <div className="tts-voice-preview-player" aria-live="polite"><div><strong>试听 · {voicePreview.name}</strong><small>短句试听会按当前 TTS 平台的字符计费规则计费。</small></div><audio autoPlay controls src={voicePreview.url} /></div> : null}
+                {voicePreview ? <div className="tts-voice-preview-player" aria-live="polite" data-testid="tts-voice-preview-player"><div className="tts-voice-preview-copy"><strong>试听 · {voicePreview.name}</strong><small>{voicePreviewPlayback === "playing" ? "正在播放" : voicePreviewPlayback === "ended" ? "播放结束，可重新试听" : "若浏览器未自动播放，请点“重新播放”"} · 短句试听按平台规则计费</small></div><audio ref={voicePreviewAudioRef} controls src={voicePreview.url} onEnded={() => setVoicePreviewPlayback("ended")} onPause={() => setVoicePreviewPlayback((state) => state === "ended" ? state : "ready")} onPlay={() => setVoicePreviewPlayback("playing")} /><button className="tts-voice-preview-replay" onClick={replayVoicePreview} type="button">重新播放</button><button aria-label="关闭试听播放器" className="tts-voice-preview-close" onClick={() => setVoicePreview(null)} type="button">×</button></div> : null}
                 <Field label="测试语速" help="仅用于本页试听；创建任务仍以任务表单中选定的速度为准。">
                   <div className="settings-speed-grid">{speedOptions.map((speed) => <button className={ttsSpeed === speed ? "active" : ""} key={speed} onClick={() => setTtsSpeed(speed)} type="button">{speed.toFixed(1)}×</button>)}</div>
                 </Field>

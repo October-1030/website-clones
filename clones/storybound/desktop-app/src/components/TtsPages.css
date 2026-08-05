@@ -45,10 +45,13 @@
 .tts-voice-library-search input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px color-mix(in oklch, var(--brand) 11%, transparent); }
 .tts-voice-library-search span, .tts-empty-voices, .tts-voice-library > p { color: var(--text-muted); font-size: 11px; }
 .tts-empty-voices { margin: 10px 0 0; }
-.tts-voice-preview-player { display: flex; align-items: center; gap: 14px; padding: 12px 14px; margin-top: 16px; color: var(--brand); background: color-mix(in oklch, var(--brand) 7%, transparent); border: 1px solid color-mix(in oklch, var(--brand) 28%, transparent); border-radius: 10px; }
-.tts-voice-preview-player > div { display: flex; min-width: 180px; flex-direction: column; gap: 3px; }
+.tts-voice-preview-player { position: fixed; z-index: 40; right: 28px; bottom: 22px; display: flex; width: min(720px, calc(100vw - 410px)); align-items: center; gap: 12px; padding: 12px 44px 12px 14px; color: var(--brand); background: color-mix(in oklch, var(--bg-elevated) 94%, transparent); border: 1px solid color-mix(in oklch, var(--brand) 38%, var(--border)); border-radius: 12px; box-shadow: 0 16px 42px rgb(0 0 0 / 42%); backdrop-filter: blur(16px); }
+.tts-voice-preview-copy { display: flex; min-width: 180px; flex: 1 1 220px; flex-direction: column; gap: 3px; }
 .tts-voice-preview-player small { color: var(--text-muted); font-size: 10px; }
-.tts-voice-preview-player audio { width: min(520px, 100%); height: 36px; }
+.tts-voice-preview-player audio { width: min(360px, 100%); height: 36px; flex: 1 1 300px; }
+.tts-voice-preview-replay { flex: 0 0 auto; padding: 7px 10px; color: var(--brand); background: color-mix(in oklch, var(--brand) 9%, var(--bg-input)); border: 1px solid color-mix(in oklch, var(--brand) 34%, var(--border)); border-radius: 7px; cursor: pointer; font-size: 11px; font-weight: 700; }
+.tts-voice-preview-close { position: absolute; top: 7px; right: 9px; width: 25px; height: 25px; padding: 0; color: var(--text-muted); background: transparent; border: 0; border-radius: 6px; cursor: pointer; font-size: 19px; line-height: 1; }
+.tts-voice-preview-close:hover { color: var(--text-primary); background: var(--bg-hover); }
 .tts-clone-form { display: grid; grid-template-columns: 1.2fr .8fr 1.4fr auto; align-items: end; gap: 10px; padding: 14px; margin-top: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px; }
 .tts-clone-form label { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: 11px; }
 .tts-clone-form input { height: 38px; }
@@ -547,6 +550,9 @@ select.settings-input { cursor: pointer; }
   .tts-provider-grid--settings { grid-template-columns: 1fr; }
   .settings-path-row { align-items: stretch; flex-direction: column; }
   .settings-path-row button { width: 100%; }
+  .tts-voice-preview-player { right: 12px; bottom: 12px; width: calc(100vw - 24px); flex-wrap: wrap; }
+  .tts-voice-preview-copy { flex-basis: calc(100% - 34px); }
+  .tts-voice-preview-player audio { flex: 1 1 calc(100% - 100px); }
 }
 
 @media (max-width: 480px) {
