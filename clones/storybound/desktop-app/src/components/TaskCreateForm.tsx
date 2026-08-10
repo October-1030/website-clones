@@ -40,6 +40,7 @@ import {
   writeTaskPresets,
 } from "../lib/task-preset-store";
 import type { TtsVoice } from "../types/tts";
+import type { ImageProviderId } from "../types/image";
 import { DraftTemplateEditor } from "./DraftTemplateEditor";
 import type { BuilderFormState } from "./task-builder-model";
 import { coverTemplates } from "../lib/cover-prompt";
@@ -166,6 +167,12 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
   const [presetDialogOpen, setPresetDialogOpen] = useState(false);
   const [customPromptTemplates, setCustomPromptTemplates] = useState(readCustomPromptTemplates);
   const selectedVoice = voices.find((voice) => voice.id === form.ttsVoiceId);
+  const selectImageProvider = (provider: ImageProviderId) => {
+    const next = { ...imageProviderConfig, provider };
+    setImageProviderConfig(next);
+    writeImageProviderConfig(next);
+    onChange({ imageProvider: provider });
+  };
   useEffect(() => {
     const refresh = () => setCustomTemplates(readCustomDraftTemplates());
     window.addEventListener(draftTemplateStoreEvent, refresh);
@@ -495,15 +502,7 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
         {form.materialSource === "local" || form.materialSource === "stock" ? <label className="upload-tile field-group"><input type="file" accept="image/*" multiple onChange={(event) => event.target.files && onUploadImages(event.target.files)} /><strong>{form.materialSource === "stock" ? "自动检索 Wikimedia Commons · 也可手动导入" : "素材库为空？从本机批量导入"}</strong><span>{form.materialSource === "stock" ? "系统用你的 M3 生成检索词并核对候选，下载后保留作者、来源和许可清单；真实人物无法确认时会停下来要求替换，不会拿相似外国人补位" : taskReady ? "按文件顺序匹配分镜，也可在产物区逐张替换" : "上传时会自动创建本地任务目录"}</span></label> : null}
         <div className="field-group option-checks"><label><input type="checkbox" checked={form.autoBorrowImage} onChange={(event) => onChange({ autoBorrowImage: event.target.checked })} />失败图自动使用相邻画面补位</label></div>
         <div className="field-group form-grid form-grid--two"><div><span className="field-label field-label--standalone">画面生成比例</span><div className="segmented-control">{ratios.map((ratio) => <button key={ratio.value} type="button" disabled={Boolean(form.draftTemplateId)} className={form.aspectRatio === ratio.value ? "is-selected" : ""} onClick={() => onChange({ aspectRatio: ratio.value })}>{ratio.label}</button>)}</div><p className="template-hint">{form.draftTemplateId ? `已跟随剪映草稿模板：${activeTemplate.image.ratio}` : "未选择草稿模板时可自由选择"}</p></div><div className="settings-note"><strong>成片时长由真实配音决定</strong><span>目标字数、分镜数和 TTS 语速共同决定总时长；不会强行拉伸音频。</span></div></div>
-        <div className="field-group"><span className="field-label field-label--standalone">图片引擎</span><div className="segmented-control"><button type="button" className={imageProviderConfig.provider === "minimax" ? "is-selected" : ""} onClick={() => {
-          const next = { ...imageProviderConfig, provider: "minimax" as const };
-          setImageProviderConfig(next);
-          writeImageProviderConfig(next);
-        }}>MiniMax image-01</button><button type="button" className={imageProviderConfig.provider === "openai-compatible" ? "is-selected" : ""} onClick={() => {
-          const next = { ...imageProviderConfig, provider: "openai-compatible" as const };
-          setImageProviderConfig(next);
-          writeImageProviderConfig(next);
-        }}>兼容图片引擎</button></div><p className="template-hint">{imageProviderConfig.provider === "minimax" ? "使用系统设置中的 MiniMax 凭据。" : imageProviderConfig.custom.baseUrl && imageProviderConfig.custom.apiKey ? `已配置 ${imageProviderConfig.custom.model}` : "请先在系统设置填写兼容图片引擎。"}</p></div>
+        <div className="field-group"><span className="field-label field-label--standalone">图片引擎</span><div className="segmented-control"><button type="button" className={form.imageProvider === "jimeng" ? "is-selected" : ""} onClick={() => selectImageProvider("jimeng")}>即梦 Seedream</button><button type="button" className={form.imageProvider === "all-purpose" ? "is-selected" : ""} onClick={() => selectImageProvider("all-purpose")}>全能绘图</button><button type="button" className={form.imageProvider === "minimax" ? "is-selected" : ""} onClick={() => selectImageProvider("minimax")}>MiniMax image-01</button><button type="button" className={form.imageProvider === "openai-compatible" ? "is-selected" : ""} onClick={() => selectImageProvider("openai-compatible")}>自定义平台</button></div><p className="template-hint">{form.imageProvider === "minimax" ? "新增路线：使用本机 MiniMax 凭据，适合人物参考近景。" : form.imageProvider === "jimeng" ? (imageProviderConfig.jimeng.apiKey ? `已配置 ${imageProviderConfig.jimeng.model}` : "保留原站即梦路线；请先在系统设置填写火山方舟 API Key。") : form.imageProvider === "all-purpose" ? (imageProviderConfig.allPurpose.apiKey ? `已配置 ${imageProviderConfig.allPurpose.model}` : "保留原站全能绘图路线；独立版需配置你自己的兼容图片 API。") : (imageProviderConfig.custom.apiKey ? `已配置 ${imageProviderConfig.custom.model}` : "请先在系统设置填写自定义图片平台。")}</p></div>
         <div className="field-group"><span className="field-label field-label--standalone">视觉风格</span><div className="chip-list">{availableVisualStyles.map((item) => <button key={item} type="button" className={`chip ${form.visualStyle === item ? "is-selected" : ""}`} onClick={() => onChange({ visualStyle: item })}>{item}</button>)}</div></div>
         <details className="custom-pause-panel field-group"><summary>新建自定义画风</summary><div className="form-grid form-grid--two"><label><span className="field-label field-label--standalone">画风名称</span><input className="text-input" value={newStyleName} onChange={(event) => setNewStyleName(event.target.value)} placeholder="例如：赛博朋克雨夜" /></label><label><span className="field-label field-label--standalone">提示词前缀</span><input className="text-input" value={newStylePrompt} onChange={(event) => setNewStylePrompt(event.target.value)} placeholder="描述色调、材质、光线与构图" /></label></div><button className="primary-button" type="button" disabled={!newStyleName.trim() || !newStylePrompt.trim()} onClick={() => {
           const created = { id: `style-${crypto.randomUUID()}`, name: newStyleName.trim(), prompt: newStylePrompt.trim(), negativePrompt: "文字，水印，标志，低清晰度" };

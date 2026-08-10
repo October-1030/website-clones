@@ -3,6 +3,7 @@ import type { PipelineLlmArtifacts, PromptTemplateOverride } from "./llm";
 import type { ExecutionMode, PausePreset, PipelineStatus, VideoForm } from "./app";
 import type { DraftTemplateConfig } from "./draft-template";
 import type { TtsProvider } from "./tts";
+import type { ImageProviderId } from "./image";
 
 export type TaskRunState = "idle" | "queued" | "running" | "paused" | "cancelled" | "completed";
 export type TaskStatus = "draft" | "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
@@ -11,6 +12,7 @@ export type CoverMode = "off" | "titled" | "plain" | "local";
 export type VoiceSource = "tts" | "external";
 
 export interface TaskOptions {
+  imageProvider?: ImageProviderId;
   rewriteIntensity?: "standard" | "deep" | "rewrite";
   narrativePov?: "original" | "first" | "third";
   targetLength?: number | null;

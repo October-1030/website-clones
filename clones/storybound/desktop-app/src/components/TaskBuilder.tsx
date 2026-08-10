@@ -192,7 +192,7 @@ function timelineFromWordAlignment(shots: StoryboardShot[], audio: AudioSegment)
 }
 
 export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredentialStatus, taskId, autoRun = false, onTaskIdChange, onOpenPipeline, onQueueAdvance, onNavigateSettings }: TaskBuilderProps) {
-  const [form, setForm] = useState<BuilderFormState>(() => ({ ...defaultBuilderForm, ttsProvider: config.provider }));
+  const [form, setForm] = useState<BuilderFormState>(() => ({ ...defaultBuilderForm, ttsProvider: config.provider, imageProvider: readImageProviderConfig().provider }));
   const [task, setTask] = useState<StoryboundTask | null>(null);
   const [loading, setLoading] = useState(Boolean(taskId));
   const [busy, setBusy] = useState(false);
@@ -519,7 +519,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     }
     let generated: StoredImage[] = [];
     if (missing.length && activeTask.options.materialSource === "ai") {
-      const result = await generateImages({ taskId: activeTask.id, prompts: missing, apiKey: config.minimax.apiKey, aspectRatio: activeTask.aspectRatio, maxImages: missing.length, track: activeTask.track, visualStyle: activeTask.visualStyle }, signal);
+      const result = await generateImages({ taskId: activeTask.id, prompts: missing, apiKey: config.minimax.apiKey, aspectRatio: activeTask.aspectRatio, maxImages: missing.length, track: activeTask.track, visualStyle: activeTask.visualStyle, provider: activeTask.options.imageProvider }, signal);
       generated = result.images.map((image) => ({ ...image, status: image.status || (image.url ? "ready" : "failed") })) as StoredImage[];
     }
     let images = prompts.map((prompt) => existing.get(prompt.shotId) || generated.find((image) => image.shotId === prompt.shotId) || ({ id: `missing-${prompt.shotId}`, shotId: prompt.shotId, prompt: prompt.prompt, url: "", status: "failed", error: "没有匹配的本地素材" } as StoredImage));
@@ -558,7 +558,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
           mode: coverConfig.mode === "titled" ? "titled" : "plain",
           templateId: coverConfig.templateId,
         });
-        const coverResult = await generateImages({ taskId: activeTask.id, prompts: [{ shotId: 9001 + index, ...coverPrompt }], apiKey: config.minimax.apiKey, aspectRatio: coverAspectRatio(coverConfig.ratio), maxImages: 1, track: activeTask.track, visualStyle: activeTask.visualStyle, coverBackgroundOnly: true }, signal);
+        const coverResult = await generateImages({ taskId: activeTask.id, prompts: [{ shotId: 9001 + index, ...coverPrompt }], apiKey: config.minimax.apiKey, aspectRatio: coverAspectRatio(coverConfig.ratio), maxImages: 1, track: activeTask.track, visualStyle: activeTask.visualStyle, coverBackgroundOnly: true, provider: activeTask.options.imageProvider }, signal);
         coverImages.push(...coverResult.images.map((image) => ({ ...image, status: image.status || (image.path ? "ready" : "failed") })) as StoredImage[]);
       }
     }
@@ -871,7 +871,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (!prompt) return;
     setBusy(true);
     try {
-      const result = await generateImages({ taskId: task.id, prompts: [prompt], apiKey: config.minimax.apiKey, aspectRatio: task.aspectRatio, maxImages: 1, track: task.track, visualStyle: task.visualStyle });
+      const result = await generateImages({ taskId: task.id, prompts: [prompt], apiKey: config.minimax.apiKey, aspectRatio: task.aspectRatio, maxImages: 1, track: task.track, visualStyle: task.visualStyle, provider: task.options.imageProvider, force: true });
       const image = result.images[0] as StoredImage | undefined;
       if (!image?.path) throw new Error(image?.error || "重画失败");
       const images = [...task.media.images.filter((item) => item.shotId !== shotId), { ...image, status: "ready" as const }].sort((a, b) => a.shotId - b.shotId);
@@ -931,7 +931,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (!prompts.length) return;
     setBusy(true);
     try {
-      const result = await generateImages({ taskId: task.id, prompts, apiKey: config.minimax.apiKey, aspectRatio: task.aspectRatio, maxImages: prompts.length, track: task.track, visualStyle: task.visualStyle });
+      const result = await generateImages({ taskId: task.id, prompts, apiKey: config.minimax.apiKey, aspectRatio: task.aspectRatio, maxImages: prompts.length, track: task.track, visualStyle: task.visualStyle, provider: task.options.imageProvider, force: true });
       const repaired = new Map(result.images.map((image) => [image.shotId, { ...image, status: image.path ? "ready" as const : "failed" as const } as StoredImage]));
       const images = task.media.images.map((image) => repaired.get(image.shotId) || image);
       const statuses = [...task.stepStatuses]; statuses[6] = "pending";

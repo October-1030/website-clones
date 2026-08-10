@@ -18,6 +18,7 @@
     "smoke:integrity": "node scripts/smoke-pipeline-integrity.mjs",
     "smoke:branches": "node scripts/audit-branch-contracts.mjs",
     "smoke:providers": "node scripts/smoke-material-providers.mjs",
+    "smoke:image-providers": "node scripts/smoke-image-provider-routing.mjs",
     "smoke:stock-live": "node scripts/smoke-stock-live.mjs",
     "rebuild:tutorial": "node scripts/rebuild-pocket-watch-tutorial.mjs",
     "smoke:pipeline": "node scripts/smoke-original-pipeline.mjs"

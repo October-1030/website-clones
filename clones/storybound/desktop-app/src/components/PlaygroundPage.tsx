@@ -10,7 +10,7 @@ import {
 } from "../lib/image-provider-store";
 import { marketStoreEvent, readInstalledMarketItems } from "../lib/market-store";
 import { createTask, deleteTask, updateTask, uploadTaskAsset } from "../lib/task-api";
-import type { ImageGenerationRequest } from "../types/image";
+import type { ImageGenerationRequest, ImageProviderId } from "../types/image";
 import "./PlaygroundPage.css";
 
 type PlaygroundMode = "text" | "reference";
@@ -65,6 +65,12 @@ const FORM_STORAGE_KEY = "storybound-playground-form-v1";
 const GALLERY_STORAGE_KEY = "storybound-playground-gallery-v1";
 const IMAGE_DB_NAME = "storybound-playground";
 const IMAGE_STORE_NAME = "generated-images";
+const imageProviderNames: Record<ImageProviderId, string> = {
+  jimeng: "即梦 Seedream",
+  "all-purpose": "全能绘图",
+  minimax: "MiniMax image-01",
+  "openai-compatible": "自定义图片引擎",
+};
 const aspectRatios: PlaygroundAspectRatio[] = ["9:16", "16:9", "1:1", "4:3", "3:4", "3:2", "2:3", "21:9"];
 const resolutions: PlaygroundResolution[] = ["1K", "2K", "4K"];
 const defaultForm: PlaygroundForm = {
@@ -579,10 +585,11 @@ export function PlaygroundPage({ apiKey = "" }: PlaygroundPageProps) {
         maxImages: 1,
         track: "通用故事",
         visualStyle: active.style === NO_STYLE ? "" : active.style,
+        provider: imageProviderConfig.provider,
       });
       const image = response.images[0];
       if (!image || image.status === "failed" || !image.url) {
-        throw new Error(image?.error || "MiniMax 未返回可用图片");
+        throw new Error(image?.error || `${imageProviderNames[imageProviderConfig.provider]}未返回可用图片`);
       }
       const imageUrl = await postProcessImage(image.url, active.aspectRatio, active.resolution);
       await storeImage(active.id, imageUrl);
@@ -596,7 +603,7 @@ export function PlaygroundPage({ apiKey = "" }: PlaygroundPageProps) {
       return {
         ...active,
         status: "failed",
-        error: error instanceof Error ? error.message : "MiniMax 生图失败",
+        error: error instanceof Error ? error.message : `${imageProviderNames[imageProviderConfig.provider]}生图失败`,
         elapsedMs: Math.round(performance.now() - startedAt),
       };
     }
@@ -746,9 +753,9 @@ export function PlaygroundPage({ apiKey = "" }: PlaygroundPageProps) {
         <div className="playground-section-heading">
           <div>
             <h2>生成设置</h2>
-            <p>每个画风 × 每个比例生成一张真实 MiniMax 图片。</p>
+            <p>每个画风 × 每个比例生成一张真实图片；当前使用 {imageProviderNames[imageProviderConfig.provider]}。</p>
           </div>
-          <span className="playground-stability-badge">image-01 · 真实接口</span>
+          <span className="playground-stability-badge">{imageProviderNames[imageProviderConfig.provider]} · 真实接口</span>
         </div>
 
         <div className="playground-mode-switch" aria-label="生成模式">
@@ -770,6 +777,16 @@ export function PlaygroundPage({ apiKey = "" }: PlaygroundPageProps) {
           </button>
         </div>
         <div className="playground-mode-switch" aria-label="图片引擎">
+          <button className={imageProviderConfig.provider === "jimeng" ? "is-selected" : ""} type="button" onClick={() => {
+            const next = { ...imageProviderConfig, provider: "jimeng" as const };
+            setImageProviderConfig(next);
+            writeImageProviderConfig(next);
+          }}><strong>即梦 Seedream</strong><span>{imageProviderConfig.jimeng.apiKey ? imageProviderConfig.jimeng.model : "请先到系统设置配置"}</span></button>
+          <button className={imageProviderConfig.provider === "all-purpose" ? "is-selected" : ""} type="button" onClick={() => {
+            const next = { ...imageProviderConfig, provider: "all-purpose" as const };
+            setImageProviderConfig(next);
+            writeImageProviderConfig(next);
+          }}><strong>全能绘图</strong><span>{imageProviderConfig.allPurpose.apiKey ? imageProviderConfig.allPurpose.model : "请先到系统设置配置"}</span></button>
           <button className={imageProviderConfig.provider === "minimax" ? "is-selected" : ""} type="button" onClick={() => {
             const next = { ...imageProviderConfig, provider: "minimax" as const };
             setImageProviderConfig(next);
@@ -779,7 +796,7 @@ export function PlaygroundPage({ apiKey = "" }: PlaygroundPageProps) {
             const next = { ...imageProviderConfig, provider: "openai-compatible" as const };
             setImageProviderConfig(next);
             writeImageProviderConfig(next);
-          }}><strong>兼容图片引擎</strong><span>{imageProviderConfig.custom.apiKey ? imageProviderConfig.custom.model : "请先到系统设置配置"}</span></button>
+          }}><strong>自定义平台</strong><span>{imageProviderConfig.custom.apiKey ? imageProviderConfig.custom.model : "请先到系统设置配置"}</span></button>
         </div>
 
         <label className="playground-field">
@@ -814,7 +831,7 @@ export function PlaygroundPage({ apiKey = "" }: PlaygroundPageProps) {
               />
               <span aria-hidden="true">＋</span>
               <strong>{referenceBusy ? "正在读取图片…" : "添加参考图"}</strong>
-              <small>多图会合成一张参考板传给 MiniMax，不会写入任务历史。</small>
+              <small>多图会合成一张参考板；即梦与 MiniMax 可用于人物参考，不会写入任务历史。</small>
             </label>
             {form.references.length ? (
               <div className="playground-reference-grid">
@@ -899,7 +916,7 @@ export function PlaygroundPage({ apiKey = "" }: PlaygroundPageProps) {
                 </button>
               ))}
             </div>
-            <p className="playground-adapter-note">image-01 原生生成后在本机精确裁切所选比例，并输出对应 1K / 2K / 4K 像素尺寸。</p>
+            <p className="playground-adapter-note">{imageProviderNames[imageProviderConfig.provider]} 原生生成后在本机精确裁切所选比例，并输出对应 1K / 2K / 4K 像素尺寸。</p>
           </div>
         </div>
 
@@ -966,7 +983,7 @@ export function PlaygroundPage({ apiKey = "" }: PlaygroundPageProps) {
                     ) : result.status === "loading" || restoring ? (
                       <div className="playground-result__loading">
                         <span />
-                        <strong>{restoring ? "正在恢复本地图片" : "MiniMax 正在出图"}</strong>
+                        <strong>{restoring ? "正在恢复本地图片" : `${imageProviderNames[imageProviderConfig.provider]} 正在出图`}</strong>
                         <small>{result.style} · {result.aspectRatio} · {result.resolution}</small>
                       </div>
                     ) : (

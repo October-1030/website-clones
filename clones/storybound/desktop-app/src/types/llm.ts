@@ -1,3 +1,5 @@
+import type { ImageProviderId } from "./image";
+
 export type LlmProvider = "minimax" | "openai" | "deepseek" | "siliconflow" | "custom";
 
 export interface LlmConfig {
@@ -104,6 +106,8 @@ export interface ImagePrompt {
    * actually visible; environment and prop inserts stay text-to-image.
    */
   useReference?: boolean;
+  /** Optional per-shot provider override. Missing values follow the task default. */
+  provider?: ImageProviderId;
 }
 
 export interface PromptResult {

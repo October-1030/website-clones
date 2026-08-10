@@ -1,5 +1,7 @@
 import type { ImagePrompt } from "./llm";
 
+export type ImageProviderId = "jimeng" | "all-purpose" | "minimax" | "openai-compatible";
+
 export interface GeneratedImage {
   id: string;
   shotId: number;
@@ -20,6 +22,7 @@ export interface GeneratedImage {
   attribution?: string;
   matchReason?: string;
   matchConfidence?: number;
+  provider?: ImageProviderId | string;
 }
 
 export interface ImageGenerationRequest {
@@ -31,6 +34,8 @@ export interface ImageGenerationRequest {
   track: string;
   visualStyle: string;
   coverBackgroundOnly?: boolean;
+  provider?: ImageProviderId;
+  force?: boolean;
 }
 
 export interface ImageGenerationResponse {

@@ -717,7 +717,7 @@ async function generateMinimaxImages(body) {
     // A failed/aborted browser run may already have written some images before
     // task.json was updated. Reuse those files so retrying is a true checkpoint
     // resume and never spends API credits on the same shot twice.
-    if (body.taskId) {
+    if (body.taskId && !body.force) {
       const existingPath = taskStore.resolveTaskFile(body.taskId, "images", `${shotId}.jpg`);
       if (existingPath && existsSync(existingPath)) {
         const existingStat = await stat(existingPath);
@@ -730,6 +730,7 @@ async function generateMinimaxImages(body) {
           url: `/api/tasks/${encodeURIComponent(body.taskId)}/files/images/${encodeURIComponent(`${shotId}.jpg`)}`,
           path: existingPath,
           bytes: existingStat.size,
+          provider: "minimax",
           status: "ready",
           resumed: true,
         };
@@ -770,6 +771,7 @@ async function generateMinimaxImages(body) {
             url: saved?.url || `data:image/jpeg;base64,${base64}`,
             path: saved?.path,
             bytes: saved?.bytes || Math.round(base64.length * 0.75),
+            provider: "minimax",
             status: "ready",
           };
         }
@@ -787,6 +789,7 @@ async function generateMinimaxImages(body) {
             url: saved?.url || imageUrl,
             path: saved?.path,
             bytes: saved?.bytes,
+            provider: "minimax",
             status: "ready",
           };
         }
@@ -801,6 +804,7 @@ async function generateMinimaxImages(body) {
       prompt,
       useReference: useSubjectReference,
       retryLevel: retryPrompts.length - 1,
+      provider: "minimax",
       url: "",
       status: "failed",
       error: `第 ${index + 1} 镜生图重试失败：${providerMessage(lastError, "MiniMax 生图失败")}`,
@@ -834,12 +838,28 @@ async function generateCompatibleImages(body) {
     throw new Error("OpenAI-compatible 图片引擎配置不完整");
   }
   const endpoint = compatibleImageEndpoint(config.baseUrl);
-  const maxImages = Math.max(1, Math.min(18, Number(body.maxImages || prompts.length)));
+  const provider = ["jimeng", "all-purpose", "openai-compatible"].includes(body.provider)
+    ? body.provider
+    : "openai-compatible";
+  const providerName = String(config.providerName || "图片 Provider");
+  const providerFilePart = provider.replace(/[^a-z0-9-]/giu, "-");
+  const maxImages = Math.max(1, Math.min(120, Number(body.maxImages || prompts.length)));
   const selectedPrompts = prompts.slice(0, maxImages);
   const generationTask = body.taskId ? await taskStore.readTask(body.taskId) : null;
-  const images = await mapLimit(selectedPrompts, 2, async (item, index) => {
+  const track = originalTrack(body.track);
+  let referenceDataUrl = null;
+  const reference = generationTask?.options?.referenceImage;
+  if (config.supportsReference && reference?.path && existsSync(reference.path)) {
+    const extension = extname(reference.path).toLowerCase();
+    const mime = extension === ".png" ? "image/png" : "image/jpeg";
+    const encoded = (await readFile(reference.path)).toString("base64");
+    if (encoded.length < 14 * 1024 * 1024) referenceDataUrl = `data:${mime};base64,${encoded}`;
+  }
+  const concurrency = Math.max(1, Math.min(10, Number(config.concurrency) || 2));
+  const images = await mapLimit(selectedPrompts, concurrency, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
     const prompt = String(item.prompt || "").trim().slice(0, 4000);
+    const useReference = Boolean(referenceDataUrl) && promptUsesReference(item, shotId, generationTask, track);
     try {
       const response = await fetchWithTimeout(endpoint, {
         method: "POST",
@@ -853,6 +873,7 @@ async function generateCompatibleImages(body) {
           n: 1,
           size: compatibleImageSize(body.aspectRatio),
           response_format: "b64_json",
+          ...(useReference ? { image: referenceDataUrl } : {}),
         }),
       }, 180000);
       const text = await response.text();
@@ -863,10 +884,10 @@ async function generateCompatibleImages(body) {
       let url = "";
       if (image?.b64_json) {
         const buffer = Buffer.from(image.b64_json, "base64");
-        saved = body.taskId ? await taskStore.saveBuffer(body.taskId, "images", `${shotId}.png`, buffer) : null;
+        saved = body.taskId ? await taskStore.saveBuffer(body.taskId, "images", `${shotId}-${providerFilePart}.png`, buffer) : null;
         url = saved?.url || `data:image/png;base64,${image.b64_json}`;
       } else if (image?.url) {
-        saved = body.taskId ? await taskStore.saveRemoteAsset(body.taskId, "images", `${shotId}.png`, image.url) : null;
+        saved = body.taskId ? await taskStore.saveRemoteAsset(body.taskId, "images", `${shotId}-${providerFilePart}.png`, image.url) : null;
         url = saved?.url || image.url;
       } else {
         throw new Error("图片 Provider 未返回 b64_json 或 url");
@@ -887,6 +908,8 @@ async function generateCompatibleImages(body) {
         path: saved?.path,
         bytes: saved?.bytes,
         retryLevel: 0,
+        useReference,
+        provider,
         status: "ready",
       };
     } catch (error) {
@@ -896,8 +919,10 @@ async function generateCompatibleImages(body) {
         prompt,
         url: "",
         retryLevel: 0,
+        useReference,
+        provider,
         status: "failed",
-        error: providerMessage(error, "图片 Provider 生图失败"),
+        error: providerMessage(error, `${providerName}生图失败`),
       };
     }
   });

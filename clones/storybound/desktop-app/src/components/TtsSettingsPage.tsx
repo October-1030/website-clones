@@ -32,7 +32,7 @@ interface TtsSettingsPageProps {
 }
 
 type SettingsSectionId = "llm" | "image" | "tts" | "asr" | "draft" | "license" | "ai-creation" | "about";
-type ImageSettingsProvider = "jimeng" | "gpt_image" | "runninghub" | "modelscope" | "custom";
+type ImageSettingsProvider = "jimeng" | "all-purpose" | "minimax" | "runninghub" | "modelscope" | "custom";
 type StatusKind = "ok" | "fail" | "filled" | "empty" | "unavailable";
 type RequestState = {
   kind: "idle" | "busy" | "success" | "error" | "unavailable";
@@ -57,7 +57,8 @@ const settingsSections: Array<{
 
 const imageProviders: Array<{ id: ImageSettingsProvider; name: string }> = [
   { id: "jimeng", name: "即梦" },
-  { id: "gpt_image", name: "全能绘图" },
+  { id: "all-purpose", name: "全能绘图" },
+  { id: "minimax", name: "MiniMax" },
   { id: "runninghub", name: "RunningHub" },
   { id: "modelscope", name: "魔搭社区" },
   { id: "custom", name: "自定义平台" },
@@ -76,7 +77,7 @@ export function TtsSettingsPage({
   const [activeSection, setActiveSection] = useState<SettingsSectionId>("llm");
   const [activeImageProvider, setActiveImageProvider] = useState<ImageSettingsProvider>(() => {
     const saved = readImageProviderConfig();
-    return saved.provider === "openai-compatible" ? "custom" : "gpt_image";
+    return saved.provider === "openai-compatible" ? "custom" : saved.provider;
   });
   const [requestState, setRequestState] = useState<RequestState>({ kind: "idle", message: "" });
   const [llmTestState, setLlmTestState] = useState<RequestState>({ kind: "idle", message: "" });
@@ -131,8 +132,12 @@ export function TtsSettingsPage({
 
   const sectionStatus: Record<SettingsSectionId, StatusKind> = {
     llm: llmReady ? (llmTestState.kind === "success" ? "ok" : "filled") : "empty",
-    image: activeImageProvider === "gpt_image"
+    image: activeImageProvider === "minimax"
       ? (imageReady ? "ok" : "empty")
+      : activeImageProvider === "jimeng"
+        ? (imageConfig.jimeng.apiKey && imageConfig.jimeng.baseUrl && imageConfig.jimeng.model ? "filled" : "empty")
+        : activeImageProvider === "all-purpose"
+          ? (imageConfig.allPurpose.apiKey && imageConfig.allPurpose.baseUrl && imageConfig.allPurpose.model ? "filled" : "empty")
       : activeImageProvider === "custom"
         ? (imageConfig.custom.apiKey && imageConfig.custom.baseUrl && imageConfig.custom.model ? "filled" : "empty")
         : activeImageProvider === "runninghub"
@@ -163,6 +168,8 @@ export function TtsSettingsPage({
     const next = {
       ...imageConfig,
       ...patch,
+      jimeng: { ...imageConfig.jimeng, ...(patch.jimeng || {}) },
+      allPurpose: { ...imageConfig.allPurpose, ...(patch.allPurpose || {}) },
       custom: { ...imageConfig.custom, ...(patch.custom || {}) },
       runninghub: { ...imageConfig.runninghub, ...(patch.runninghub || {}) },
     };
@@ -175,7 +182,7 @@ export function TtsSettingsPage({
   const selectImageProvider = (provider: ImageSettingsProvider) => {
     setActiveImageProvider(provider);
     setImageTestState({ kind: "idle", message: "" });
-    if (provider === "gpt_image") setImageProvider("minimax");
+    if (provider === "jimeng" || provider === "all-purpose" || provider === "minimax") setImageProvider(provider);
     if (provider === "custom") setImageProvider("openai-compatible");
   };
 
@@ -218,10 +225,19 @@ export function TtsSettingsPage({
   };
 
   const handleImageTest = async () => {
-    if (activeImageProvider === "gpt_image") {
+    if (activeImageProvider === "minimax") {
       setImageTestState(imageReady
         ? { kind: "success", message: "本地服务已确认 MiniMax 凭据可用；实际出图请到画图实验室验证。" }
         : { kind: "error", message: "未检测到可用的 MiniMax 凭据。" });
+      return;
+    }
+    if (activeImageProvider === "jimeng" || activeImageProvider === "all-purpose") {
+      const current = activeImageProvider === "jimeng" ? imageConfig.jimeng : imageConfig.allPurpose;
+      const name = activeImageProvider === "jimeng" ? "即梦 Seedream" : "全能绘图";
+      const configured = Boolean(current.apiKey.trim() && current.baseUrl.trim() && current.model.trim());
+      setImageTestState(configured
+        ? { kind: "unavailable", message: `${name} 配置已填写。为避免无意扣费，设置页不自动生图；请到画图实验室生成 1 张做真实验证。` }
+        : { kind: "error", message: `请先填写 ${name} 的 Base URL、API Key 和模型。` });
       return;
     }
     if (activeImageProvider === "custom") {
@@ -436,7 +452,7 @@ export function TtsSettingsPage({
                   </button>
                 ))}
               </div>
-              {activeImageProvider === "gpt_image" ? (
+              {activeImageProvider === "minimax" ? (
                 <div className="tts-card settings-card-v17">
                   <CredentialBanner title="独立版真实引擎 · MiniMax image-01" detail="沿用本机 MiniMax 凭据；不扣原版 Storybound 积分。" ready={imageReady} />
                   <Field label="画面比例" help="创建任务时选择的比例优先。"><select className="settings-input" defaultValue="9:16"><option>9:16</option><option>16:9</option><option>1:1</option><option>4:3</option></select></Field>
@@ -446,6 +462,31 @@ export function TtsSettingsPage({
                   </div>
                   <Field label="代理地址" hint="服务端管理" help="页面不接收或导出代理凭据。"><input className="settings-input" disabled placeholder="未配置（直连）" /></Field>
                   <div className="tts-card-footer"><button className="tts-test-button" onClick={handleImageTest} type="button">检查图片凭据</button><InlineRequestState state={imageTestState} /></div>
+                </div>
+              ) : null}
+              {activeImageProvider === "jimeng" ? (
+                <div className="tts-card settings-card-v17">
+                  <CredentialBanner title="原站路线 · 即梦 Seedream" detail="通过火山方舟官方图片生成 API 使用；API 凭据与即梦网页版会员相互独立。" ready={Boolean(imageConfig.jimeng.apiKey)} />
+                  <Field label="Base URL" hint="必填"><input className="settings-input settings-mono" value={imageConfig.jimeng.baseUrl} onChange={(event) => updateImageConfig({ jimeng: { ...imageConfig.jimeng, baseUrl: event.target.value } })} /></Field>
+                  <Field label="API Key" hint="仅当前会话"><input className="settings-input" type="password" autoComplete="off" value={imageConfig.jimeng.apiKey} onChange={(event) => updateImageConfig({ jimeng: { ...imageConfig.jimeng, apiKey: event.target.value } })} placeholder="粘贴火山方舟 API Key" /></Field>
+                  <div className="tts-two-column">
+                    <Field label="模型"><input className="settings-input" value={imageConfig.jimeng.model} onChange={(event) => updateImageConfig({ jimeng: { ...imageConfig.jimeng, model: event.target.value } })} /></Field>
+                    <Field label="并发数" help="原站显示 3 路并发；首次建议 1，验证稳定后再提高。"><input className="settings-input" type="number" min={1} max={10} value={imageConfig.jimeng.concurrency} onChange={(event) => updateImageConfig({ jimeng: { ...imageConfig.jimeng, concurrency: Math.max(1, Math.min(10, Number(event.target.value) || 1)) } })} /></Field>
+                  </div>
+                  <p className="settings-provider-note">使用 Seedream 文生图/参考图能力；人物近景仍可按镜头切回 MiniMax，两个引擎不会共享密钥。</p>
+                  <div className="tts-card-footer"><button className="tts-test-button" onClick={handleImageTest} type="button">检查配置</button><InlineRequestState state={imageTestState} /></div>
+                </div>
+              ) : null}
+              {activeImageProvider === "all-purpose" ? (
+                <div className="tts-card settings-card-v17">
+                  <UnavailableBanner title="原站名称已保留" detail="“全能绘图”是原作者私有服务名称；独立版用你自己的 OpenAI-compatible 图片 API 实现等价路线，不连接或冒充原作者后台。" />
+                  <Field label="Base URL" hint="必填"><input className="settings-input settings-mono" value={imageConfig.allPurpose.baseUrl} onChange={(event) => updateImageConfig({ allPurpose: { ...imageConfig.allPurpose, baseUrl: event.target.value } })} placeholder="https://api.example.com/v1" /></Field>
+                  <Field label="API Key" hint="仅当前会话"><input className="settings-input" type="password" autoComplete="off" value={imageConfig.allPurpose.apiKey} onChange={(event) => updateImageConfig({ allPurpose: { ...imageConfig.allPurpose, apiKey: event.target.value } })} placeholder="粘贴全能绘图 Provider API Key" /></Field>
+                  <div className="tts-two-column">
+                    <Field label="模型"><input className="settings-input" value={imageConfig.allPurpose.model} onChange={(event) => updateImageConfig({ allPurpose: { ...imageConfig.allPurpose, model: event.target.value } })} /></Field>
+                    <Field label="并发数"><input className="settings-input" type="number" min={1} max={10} value={imageConfig.allPurpose.concurrency} onChange={(event) => updateImageConfig({ allPurpose: { ...imageConfig.allPurpose, concurrency: Math.max(1, Math.min(10, Number(event.target.value) || 1)) } })} /></Field>
+                  </div>
+                  <div className="tts-card-footer"><button className="tts-test-button" onClick={handleImageTest} type="button">检查配置</button><InlineRequestState state={imageTestState} /></div>
                 </div>
               ) : null}
               {activeImageProvider === "custom" ? (
@@ -464,9 +505,6 @@ export function TtsSettingsPage({
                   </div>
                   <div className="tts-card-footer"><button className="tts-test-button" onClick={handleImageTest} type="button">检查配置</button><InlineRequestState state={imageTestState} /></div>
                 </div>
-              ) : null}
-              {activeImageProvider === "jimeng" ? (
-                <UnavailableProviderCard title="即梦 AI" description="原版通过桌面端读取 Session ID，并可选择模型、比例、分辨率和 1–10 并发。浏览器独立版不收集 Cookie。" fields={["Session ID", "模型：即梦 4.0 / 3.0", "画面比例", "分辨率", "并发数"]} onCheck={handleImageTest} state={imageTestState} />
               ) : null}
               {activeImageProvider === "runninghub" ? (
                 <div className="tts-card settings-card-v17">

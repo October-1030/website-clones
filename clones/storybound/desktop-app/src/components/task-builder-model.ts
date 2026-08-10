@@ -1,6 +1,7 @@
 import { contentTracks, originalDefaultStyleByTrack, visualStyles } from "../data/app-data";
 import type { ExecutionMode, PausePreset, VideoForm } from "../types/app";
 import type { ImageGenerationRequest } from "../types/image";
+import type { ImageProviderId } from "../types/image";
 import type { DraftTemplateConfig } from "../types/draft-template";
 import type { StoryboundTask, TaskOptions } from "../types/task";
 import type { TtsProvider } from "../types/tts";
@@ -34,6 +35,7 @@ export interface BuilderFormState {
   outroCtaEnabled: boolean;
   outroCta: string;
   materialSource: NonNullable<TaskOptions["materialSource"]>;
+  imageProvider: ImageProviderId;
   autoBorrowImage: boolean;
   dynamicStoryboard: boolean;
   draftTemplateId: string;
@@ -90,6 +92,7 @@ export const defaultBuilderForm: BuilderFormState = {
   outroCtaEnabled: false,
   outroCta: "",
   materialSource: "ai",
+  imageProvider: "minimax",
   autoBorrowImage: false,
   dynamicStoryboard: false,
   draftTemplateId: "",
@@ -150,6 +153,7 @@ export function formFromTask(task: StoryboundTask, fallbackTtsProvider: TtsProvi
     outroCtaEnabled: task.options.outroCtaEnabled ?? Boolean(task.options.outroCta),
     outroCta: task.options.outroCta ?? "",
     materialSource: task.options.materialSource === "person" ? "local" : task.options.materialSource ?? "ai",
+    imageProvider: task.options.imageProvider ?? "minimax",
     autoBorrowImage: task.options.autoBorrowImage ?? false,
     dynamicStoryboard: task.options.videoIntro ?? task.options.dynamicStoryboard ?? false,
     draftTemplateId: task.options.draftTemplateId ?? "",
@@ -212,6 +216,7 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       outroCtaEnabled: form.outroCtaEnabled,
       outroCta: form.outroCta,
       materialSource: form.materialSource,
+      imageProvider: form.imageProvider,
       autoBorrowImage: form.autoBorrowImage,
       dynamicStoryboard,
       draftTemplateId: form.draftTemplateId,
