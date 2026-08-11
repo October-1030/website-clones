@@ -52,6 +52,28 @@ function createTaskId(): string {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `storybound-${Date.now().toString(36)}`;
 }
 
+function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(new DOMException("Aborted", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    const onAbort = () => {
+      window.clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function ttsRetryDelay(error: unknown, attempt: number): number | null {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/MiniMax\s+1002|rate limit|HTTP\s+429/i.test(message)) return 65_000;
+  if (/timeout|network|fetch|HTTP\s+5\d\d/i.test(message)) return 8_000 * (attempt + 1);
+  return null;
+}
+
 function initialStatuses(mode: BuilderFormState["mode"], startStep: number): PipelineStatus[] {
   return pipelineSteps.map((step) => {
     if (mode !== "auto" && step.id < 2) return "skipped";
@@ -596,7 +618,18 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       ? "volcengine"
       : activeTask.options.ttsProvider || config.provider;
     const taskConfig: TtsConfig = { ...config, provider };
-    const audio = await synthesizeTts({ provider, text, voiceId, speed, config: taskConfig, taskId: activeTask.id, shotId, fileName: `${speaker ? `${speaker}-` : ""}${shotId}.mp3`, signal });
+    let audio: Awaited<ReturnType<typeof synthesizeTts>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        audio = await synthesizeTts({ provider, text, voiceId, speed, config: taskConfig, taskId: activeTask.id, shotId, fileName: `${speaker ? `${speaker}-` : ""}${shotId}.mp3`, signal });
+        break;
+      } catch (error) {
+        const delayMs = ttsRetryDelay(error, attempt);
+        if (delayMs === null || attempt === 2) throw error;
+        await waitForRetry(delayMs, signal);
+      }
+    }
+    if (!audio) throw new Error(`第 ${shotId} 段配音重试后仍未返回音频`);
     if (!audio.assetUrl || !audio.assetPath || !audio.fileName) throw new Error(`第 ${shotId} 段音频未写入任务目录`);
     return { id: `audio-${speaker || "N"}-${shotId}-${Date.now()}`, shotId, speaker, text, voiceId, fileName: audio.fileName, path: audio.assetPath, url: audio.assetUrl, bytes: audio.blob.size, durationSec: audio.durationSec, speed, alignment: audio.alignment, status: "ready" };
   }
