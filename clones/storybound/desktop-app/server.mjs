@@ -691,12 +691,20 @@ async function generateMinimaxImages(body) {
   const selectedPrompts = prompts.slice(0, maxImages);
   function coverBackgroundPrompt(value, shotId) {
     if (!body.coverBackgroundOnly || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return value;
+    // MiniMax owns the complete titled-cover composition in the default route.
+    // Keep the title/subtitle instructions in the prompt so the provider can
+    // render the cover as one asset; the compositor remains available as a
+    // fallback for other image providers.
+    if (generationTask?.options?.imageProvider === "minimax") return value;
     const marker = /[，。；]?(?:整体按电影海报式排版|极简排版|情感海报排版|冲击式排版|国风题字排版|人物传奇式排版)[:：][\s\S]*$/u;
     const visualPrompt = String(value).replace(marker, "").replace(/。画面中避免出现[:：][\s\S]*$/u, "").trim();
     return `${visualPrompt}，只生成干净的封面视觉底图，中部构图简洁并预留标题区；画面中不得出现任何文字、字母、数字、水印、标志、招牌或乱码`;
   }
   async function finalizeCover(saved, shotId) {
     if (!saved || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return saved;
+    if (generationTask?.options?.imageProvider === "minimax") {
+      return { ...saved, textComposited: false, textRenderer: "minimax" };
+    }
     try {
       const rendered = await renderTitledCover({
         sourcePath: saved.path,
