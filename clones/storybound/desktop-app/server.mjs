@@ -98,6 +98,9 @@ const benchmarkDajialaEndpoint = String(
 const benchmarkDajialaBalanceEndpoint = String(
   process.env.STORYBOUND_DAJIALA_BALANCE_URL || "https://www.dajiala.com/fbmain/monitor/v3/get_remain_money",
 ).trim();
+const benchmarkJustOneBase = String(
+  process.env.STORYBOUND_JUSTONE_API_BASE_URL || "https://api.justoneapi.com",
+).trim().replace(/\/+$/, "");
 
 function parseMinimaxApiKey(contents) {
   const lines = String(contents || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -2240,7 +2243,9 @@ function benchmarkExternalEndpoint(value, label) {
 function normalizeBenchmarkSourceCredential(value, source) {
   const apiKey = String(value?.apiKey || value?.key || "").trim();
   if (!apiKey) return null;
+  const provider = value?.provider === "justone" ? "justone" : "dajiala";
   return {
+    provider,
     apiKey,
     verifycode: String(value?.verifycode || "").trim(),
     source,
@@ -2251,7 +2256,13 @@ function normalizeBenchmarkSourceCredential(value, source) {
 }
 
 async function findBenchmarkSourceCredential() {
+  const justOneEnvironment = normalizeBenchmarkSourceCredential({
+    provider: "justone",
+    apiKey: process.env.STORYBOUND_JUSTONE_API_TOKEN || process.env.JUSTONE_API_TOKEN,
+  }, "环境变量");
+  if (justOneEnvironment) return justOneEnvironment;
   const environment = normalizeBenchmarkSourceCredential({
+    provider: "dajiala",
     apiKey: process.env.STORYBOUND_DAJIALA_API_KEY || process.env.DAJIALA_API_KEY,
     verifycode: process.env.STORYBOUND_DAJIALA_VERIFYCODE || process.env.DAJIALA_VERIFYCODE,
   }, "环境变量");
@@ -2272,7 +2283,7 @@ async function writeBenchmarkSourceCredential(credential) {
   await mkdir(dirname(benchmarkSourceFile), { recursive: true });
   const temporary = `${benchmarkSourceFile}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(temporary, `${JSON.stringify({
-    provider: "dajiala",
+    provider: credential.provider,
     apiKey: credential.apiKey,
     verifycode: credential.verifycode || "",
     balance: credential.balance,
@@ -2346,10 +2357,16 @@ async function saveBenchmarkSource(input) {
   const apiKey = String(input?.apiKey || "").trim();
   if (!apiKey) throw new Error("请粘贴对标数据访问密钥（API Key）");
   if (apiKey.length > 1000) throw new Error("API Key 长度异常");
+  const provider = input?.provider === "justone" ? "justone" : "dajiala";
   const credential = {
+    provider,
     apiKey,
     verifycode: String(input?.verifycode || "").trim().slice(0, 1000),
   };
+  if (provider === "justone") {
+    await writeBenchmarkSourceCredential({ ...credential, balance: null, checkedAt: new Date().toISOString() });
+    return { balance: null, checkedAt: new Date().toISOString() };
+  }
   const tested = await testBenchmarkSourceCredential(credential);
   await writeBenchmarkSourceCredential({ ...credential, ...tested });
   return tested;
@@ -2360,8 +2377,10 @@ async function benchmarkAccountSyncStatus() {
   if (direct) {
     return {
       configured: true,
-      provider: benchmarkExternalEndpoint(benchmarkDajialaEndpoint, "对标数据源地址").hostname,
-      mode: "direct",
+      provider: direct.provider === "justone"
+        ? benchmarkExternalEndpoint(benchmarkJustOneBase, "对标数据源地址").hostname
+        : benchmarkExternalEndpoint(benchmarkDajialaEndpoint, "对标数据源地址").hostname,
+      mode: direct.provider === "justone" ? "justone" : "direct",
       source: direct.source,
       balance: direct.balance,
       checkedAt: direct.checkedAt,
@@ -2385,7 +2404,7 @@ async function benchmarkAccountSyncStatus() {
   }
   return {
     configured: false,
-    provider: "dajiala.com",
+    provider: "justoneapi.com / dajiala.com",
     mode: "unconfigured",
     source: null,
     balance: null,
@@ -2393,6 +2412,7 @@ async function benchmarkAccountSyncStatus() {
     canDelete: false,
     requiresOriginalAccount: false,
     mayConsumeCredits: true,
+    ready: false,
   };
 }
 
@@ -2479,6 +2499,9 @@ async function parseBenchmarkVideo(input) {
 async function benchmarkAccountRequest(pathname, body) {
   const directCredential = await findBenchmarkSourceCredential();
   if (directCredential) {
+    if (directCredential.provider === "justone") {
+      return benchmarkJustOneRequest(pathname, body, directCredential);
+    }
     if (pathname === "/v1/dajiala/feed-info") {
       return benchmarkDajialaFetch(benchmarkDajialaEndpoint, {
         feed_info: body.feed_info,
@@ -2552,6 +2575,160 @@ async function benchmarkAccountRequest(pathname, body) {
   return payload;
 }
 
+async function benchmarkJustOneFetch(pathname, options = {}) {
+  const base = benchmarkExternalEndpoint(benchmarkJustOneBase, "Just One API 地址");
+  const endpoint = new URL(pathname, `${base.toString().replace(/\/+$/, "")}/`);
+  const providerResponse = await fetchWithTimeout(endpoint, {
+    method: options.method || "GET",
+    headers: { Accept: "application/json", ...(options.headers || {}) },
+    body: options.body,
+  }, 120_000);
+  const providerText = await providerResponse.text();
+  let payload;
+  try {
+    payload = JSON.parse(providerText);
+  } catch {
+    throw new Error(`Just One API 返回异常（HTTP ${providerResponse.status}）`);
+  }
+  const code = Number(payload?.code);
+  if (!providerResponse.ok || code !== 0) {
+    const messages = {
+      100: "Just One API Token 无效或未激活",
+      301: "视频号数据采集失败，请稍后重试",
+      302: "视频号数据接口触发速率限制",
+      303: "视频号数据接口今日配额已用完",
+      400: "视频号数据接口参数无效",
+      600: "当前 Token 没有视频号数据权限",
+      601: "Just One API 余额不足",
+      602: "当前 Token 的预算上限已用完",
+    };
+    const error = new Error(messages[code] || benchmarkText(payload?.message || payload?.msg, `Just One API 请求失败（HTTP ${providerResponse.status}）`));
+    error.statusCode = [601, 602].includes(code) ? 402 : providerResponse.status >= 400 ? providerResponse.status : 502;
+    throw error;
+  }
+  return payload;
+}
+
+function benchmarkFindRemoteAccount(value) {
+  const queue = [value];
+  const seen = new Set();
+  let fallback = null;
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const remoteId = benchmarkText(current.v2Name || current.v2_name || current.username || current.userName);
+    const name = benchmarkText(current.nickname || current.nickName || current.name);
+    if (remoteId.endsWith("@finder")) return { remoteId, name, raw: current };
+    if (!fallback && remoteId) fallback = { remoteId, name, raw: current };
+    Object.values(current).forEach((item) => {
+      if (item && typeof item === "object") queue.push(item);
+    });
+  }
+  return fallback;
+}
+
+function benchmarkFindWorkArray(value) {
+  const queue = [value];
+  const seen = new Set();
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    if (Array.isArray(current)) {
+      if (current.some((item) => item && typeof item === "object" && (
+        item.objectId || item.object_id || item.id || item.feedId || item.objectDesc || item.title
+      ))) return current;
+      current.forEach((item) => queue.push(item));
+      continue;
+    }
+    for (const key of ["object", "objects", "items", "list", "feeds", "videos", "objectList", "feedList"]) {
+      if (Array.isArray(current[key])) return current[key];
+    }
+    Object.values(current).forEach((item) => {
+      if (item && typeof item === "object") queue.push(item);
+    });
+  }
+  return [];
+}
+
+function benchmarkFindPagination(value) {
+  const queue = [value];
+  const seen = new Set();
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const lastBuffer = benchmarkText(current.last_buffer || current.lastBuffer || current.next_buffer || current.nextBuffer);
+    const explicit = Number(current.continue_flag ?? current.continueFlag);
+    if (lastBuffer || Number.isFinite(explicit)) {
+      return { lastBuffer, continueFlag: Number.isFinite(explicit) ? explicit : lastBuffer ? 1 : 0 };
+    }
+    Object.values(current).forEach((item) => {
+      if (item && typeof item === "object") queue.push(item);
+    });
+  }
+  return { lastBuffer: "", continueFlag: 0 };
+}
+
+async function benchmarkJustOneRequest(pathname, body, credential) {
+  if (pathname === "/v1/dajiala/feed-info") {
+    const parsed = await parseBenchmarkVideo({ url: body.feed_info });
+    const keyword = parsed.authorName;
+    if (!keyword) throw new Error("单条视频已解析，但没有取得可搜索的作者名称");
+    const endpoint = new URL("/api/weixin-channels/search-account/v3", `${benchmarkJustOneBase}/`);
+    endpoint.searchParams.set("token", credential.apiKey);
+    endpoint.searchParams.set("keyword", keyword);
+    const payload = await benchmarkJustOneFetch(`${endpoint.pathname}${endpoint.search}`);
+    const account = benchmarkFindRemoteAccount(payload?.data);
+    if (!account?.remoteId) throw new Error(`已识别作者“${keyword}”，但独立数据源没有返回账号唯一标识`);
+    return { code: 0, data: { v2_name: account.remoteId, nickname: account.name || keyword, object_id: "" } };
+  }
+  if (pathname === "/v1/dajiala/feed-list") {
+    const endpoint = new URL("/api/weixin-channels/get-account-videos/v1", `${benchmarkJustOneBase}/`);
+    const form = new URLSearchParams({
+      token: credential.apiKey,
+      v2Name: benchmarkText(body.v2_name),
+      last_buffer: benchmarkText(body.last_buffer),
+    });
+    const payload = await benchmarkJustOneFetch(endpoint.pathname, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    const data = payload?.data && typeof payload.data === "object" ? payload.data : {};
+    const account = benchmarkFindRemoteAccount(data);
+    const rawWorks = benchmarkFindWorkArray(data);
+    const pagination = benchmarkFindPagination(data);
+    return {
+      code: 0,
+      contact: {
+        username: account?.remoteId || body.v2_name,
+        nickname: account?.name || "",
+        head_url: benchmarkText(account?.raw?.headUrl || account?.raw?.head_url || account?.raw?.avatar),
+      },
+      object: rawWorks.map((work) => ({
+        object_id: benchmarkText(work.object_id || work.objectId || work.id || work.feedId),
+        title: benchmarkText(work.title || work.description || work.desc || work?.objectDesc?.description, "未命名视频"),
+        cover_url: benchmarkText(work.cover_url || work.coverUrl || work.cover || work?.objectDesc?.media?.[0]?.coverUrl),
+        download_url: benchmarkText(work.download_url || work.downloadUrl || work.mediaUrl || work.videoUrl || work?.objectDesc?.media?.[0]?.url),
+        decode_key: benchmarkText(work.decode_key || work.decodeKey || work?.objectDesc?.media?.[0]?.decodeKey),
+        openurl: benchmarkText(work.openurl || work.openUrl || work.sourceUrl || work.url),
+        forward_count: benchmarkCount(work.forward_count || work.forwardCount),
+        like_count: benchmarkCount(work.like_count || work.likeCount),
+        comment_count: benchmarkCount(work.comment_count || work.commentCount),
+        fav_count: benchmarkCount(work.fav_count || work.favCount || work.favoriteCount),
+        video_play_len: benchmarkCount(work.video_play_len || work.videoPlayLen || work.duration),
+        publish_time: work.publish_time || work.publishTime || work.createtime || work.createTime,
+      })),
+      last_buffer: pagination.lastBuffer,
+      continue_flag: pagination.continueFlag,
+      cost: 0,
+    };
+  }
+  throw new Error("未知 Just One API 账号同步请求");
+}
+
 async function resolveBenchmarkAccount(input) {
   const sourceUrl = benchmarkSourceUrl(input?.url);
   const payload = await benchmarkAccountRequest("/v1/dajiala/feed-info", { feed_info: sourceUrl });
@@ -2596,6 +2773,76 @@ async function fetchBenchmarkWorks(input) {
       publishTime: benchmarkEpoch(work?.publish_time),
     })),
   };
+}
+
+function mergeBenchmarkSyncedPage(library, accountId, resolved, result, refreshedAt, resetPageDepth) {
+  const accountWorks = library.works.filter((work) => work.accountId === accountId);
+  const byRemoteId = new Map(accountWorks.filter((work) => work.remoteWorkId).map((work) => [work.remoteWorkId, work]));
+  const byUrl = new Map(accountWorks.filter((work) => work.url).map((work) => [work.url, work]));
+  const syncedWorks = result.works.map((remoteWork) => {
+    const existing = byRemoteId.get(remoteWork.remoteWorkId) || byUrl.get(remoteWork.sourceUrl);
+    return {
+      id: existing?.id || `work-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      accountId,
+      url: remoteWork.sourceUrl,
+      mediaUrl: remoteWork.mediaUrl,
+      title: remoteWork.title,
+      publishTime: remoteWork.publishTime ? new Date(remoteWork.publishTime * 1000).toISOString() : "",
+      likes: remoteWork.likes,
+      favorites: remoteWork.favorites,
+      comments: remoteWork.comments,
+      forwards: remoteWork.forwards,
+      growth: existing?.growth || 0,
+      notes: existing?.notes || "",
+      favorite: existing?.favorite || false,
+      created: existing?.created || false,
+      transcript: existing?.transcript || "",
+      analysis: existing?.analysis || "",
+      localMediaName: existing?.localMediaName || "",
+      localMediaType: existing?.localMediaType || "",
+      localMediaSize: existing?.localMediaSize || 0,
+      remoteWorkId: remoteWork.remoteWorkId,
+      description: existing?.description || "",
+      coverUrl: remoteWork.coverUrl,
+      quality: existing?.quality || "",
+      format: existing?.format || "mp4",
+      codec: existing?.codec || "",
+      plays: existing?.plays || 0,
+      expiresAt: existing?.expiresAt || "",
+      duration: remoteWork.duration,
+      decodeKey: remoteWork.decodeKey,
+      createdAt: existing?.createdAt || refreshedAt,
+    };
+  });
+  const syncedIds = new Set(syncedWorks.map((work) => work.id));
+  return {
+    ...library,
+    accounts: library.accounts.map((account) => account.id === accountId ? {
+      ...account,
+      name: result.accountName || resolved.name || account.name,
+      avatar: result.avatar || account.avatar,
+      remoteId: result.remoteId || resolved.remoteId,
+      lastBuffer: result.lastBuffer,
+      continueFlag: result.continueFlag,
+      pageDepth: resetPageDepth ? 1 : account.pageDepth + 1,
+      lastRefreshAt: refreshedAt,
+    } : account),
+    works: [...syncedWorks, ...library.works.filter((work) => !syncedIds.has(work.id))],
+  };
+}
+
+async function refreshSavedBenchmarkAccount(input) {
+  const accountId = benchmarkText(input?.accountId);
+  if (!accountId) throw new Error("缺少需要刷新的本地账号 ID");
+  const library = await readBenchmarkLibrary();
+  const account = library.accounts.find((item) => item.id === accountId);
+  if (!account) throw new Error("本地对标账号不存在");
+  const resolved = account.remoteId
+    ? { remoteId: account.remoteId, name: account.name, sourceUrl: account.sourceUrl, objectId: "" }
+    : await resolveBenchmarkAccount({ url: account.sourceUrl });
+  const result = await fetchBenchmarkWorks({ remoteId: resolved.remoteId });
+  const nextLibrary = mergeBenchmarkSyncedPage(library, account.id, resolved, result, new Date().toISOString(), true);
+  return { library: await writeBenchmarkLibrary(nextLibrary), account: resolved, result };
 }
 
 async function handleBenchmarkApi(request, response, pathname) {
@@ -2675,6 +2922,10 @@ async function handleBenchmarkApi(request, response, pathname) {
       sendJson(response, 200, { result: await fetchBenchmarkWorks(body) });
       return;
     }
+    if (pathname === "/api/benchmark/refresh-saved-account") {
+      sendJson(response, 200, await refreshSavedBenchmarkAccount(body));
+      return;
+    }
     sendJson(response, 404, { error: "未知对标监控接口" });
   } catch (error) {
     sendJson(response, Number(error?.statusCode) || 400, {
@@ -2689,8 +2940,8 @@ async function transcribeBenchmarkLibraryWork(input) {
   const library = await readBenchmarkLibrary();
   const work = library.works.find((item) => item.id === workId);
   if (!work) throw new Error("对标作品不存在");
-  benchmarkSourceUrl(work.url);
   const savedMediaUrl = benchmarkText(work.mediaUrl);
+  if (!savedMediaUrl) benchmarkSourceUrl(work.url);
   const canReuseSavedMedia = Boolean(savedMediaUrl) && !benchmarkMediaIsExpired(work.expiresAt);
   const parsedVideo = canReuseSavedMedia ? null : await parseBenchmarkVideo({ url: work.url });
   const video = parsedVideo || { mediaUrl: savedMediaUrl, format: benchmarkMediaExtension(work.format) };

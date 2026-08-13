@@ -906,7 +906,7 @@ export function BenchmarkPage({
       setNotice("当前账号没有可继续加载的历史页，请先刷新最新作品。");
       return;
     }
-    if (!window.confirm(`加载“${account.name}”下一页历史作品（最多 15 条）可能产生一次数据接口费用。是否继续？`)) return;
+    if (!window.confirm(`加载“${account.name}”下一页历史作品（最多 15 条），独立数据接口可能产生一次调用费用。是否继续？`)) return;
     setBusyAction(`load-more-${account.id}`);
     setNotice("");
     try {
@@ -945,7 +945,7 @@ export function BenchmarkPage({
       return;
     }
     if (!window.confirm(
-      `连续加载“${account.name}”会逐页请求，最多 ${continuousLimit === MAX_CONTINUOUS_SYNC_PAGES ? "40 页（原版单次上限）" : `${continuousLimit} 页`}；每页最多 15 条并可能产生数据接口费用。可在运行时停止，是否继续？`,
+      `连续加载“${account.name}”会逐页请求，最多 ${continuousLimit === MAX_CONTINUOUS_SYNC_PAGES ? "40 页（原版单次上限）" : `${continuousLimit} 页`}；独立数据接口可能按页计费。可在运行时停止，是否继续？`,
     )) return;
 
     const token = createId("continuous-sync");
@@ -1022,7 +1022,7 @@ export function BenchmarkPage({
       setNotice("请先选择至少一个已识别的视频号账号。");
       return;
     }
-    if (!window.confirm(`批量刷新 ${accounts.length} 个账号会逐个拉取最新 15 条作品，数据源可能按账号计费。是否继续？`)) return;
+    if (!window.confirm(`批量刷新 ${accounts.length} 个账号会逐个拉取最新作品，独立数据接口可能按账号计费。是否继续？`)) return;
     setBusyAction("batch-refresh");
     setNotice(`正在批量刷新 0/${accounts.length}…`);
     let success = 0;
@@ -1238,10 +1238,10 @@ export function BenchmarkPage({
               单视频解析：{providerStatus?.singleVideoParser.available ? "可用" : "检查中"}
             </span>
             <span className={providerStatus?.accountSync.configured ? "is-ready" : "is-limited"}>
-              账号作品同步：{providerStatus?.accountSync.configured ? "已就绪" : "未配置"}
+              账号作品同步：{providerStatus?.accountSync.configured ? "独立数据接口已就绪" : "未配置独立数据接口"}
             </span>
-            {!providerStatus?.accountSync.configured && onOpenSettings ? (
-              <button className="benchmark-provider-status__action" type="button" onClick={onOpenSettings}>去激活</button>
+            {!providerStatus?.accountSync.ready && onOpenSettings ? (
+              <button className="benchmark-provider-status__action" type="button" onClick={onOpenSettings}>查看连接方法</button>
             ) : null}
             <span className={asrStatus?.available ? "is-ready" : "is-limited"}>
               本地转写：{asrStatus?.available
@@ -1400,7 +1400,7 @@ export function BenchmarkPage({
                     />
                   </label>
                   <p className="benchmark-account-contract-note">
-                    识别账号会调用一次原版兼容接口，可能扣除原版积分；未识别到远端账号 ID 时不会保存。
+                    单条分享链接先匿名解析作者，再由独立数据接口识别账号 ID；不会读取微信登录态。未识别到账号 ID 时不会保存。
                   </p>
                 </>
               )}
@@ -1622,7 +1622,7 @@ export function BenchmarkPage({
                   正在连续加载：已完成 {continuousLoaded} 页，返回 {continuousWorks} 条作品。可随时点击“停止连续加载”。
                 </div>
               ) : null}
-              <p>账号识别、刷新和历史分页均由点击触发；每页最多 15 条，数据源可能按账号或按页计费。</p>
+              <p>账号识别、刷新和历史分页均由点击触发；不读取微信登录态。独立数据接口可能按账号或按页计费。</p>
             </section>
           ) : null}
 
@@ -1810,7 +1810,7 @@ export function BenchmarkPage({
                     <p>拉取最新作品，按作品合并更新（互动数据刷新、不重复、保留已提取的文案/视频）</p>
                   </header>
                   <div className="benchmark-refresh-dialog__body">
-                    <p>本次刷新将请求一次最新 15 条；数据接口可能产生费用。</p>
+                    <p>本次刷新将请求一次最新作品；独立数据接口可能产生费用。</p>
                     {!account.remoteId ? (
                       <small>此旧记录尚无远端账号 ID，确认后会先用保存的视频分享链接重新识别账号。</small>
                     ) : null}

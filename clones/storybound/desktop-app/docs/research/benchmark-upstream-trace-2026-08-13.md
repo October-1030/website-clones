@@ -68,6 +68,8 @@
 4. 页面仍保留“刷新最新 15 条”“加载更多”“连续加载”和分页游标；
 5. 没有 key 时明确提示“未配置对标数据源”，不再误导用户绑定 Storybound 邮箱。
 
+独立版还接入 Just One API 作为不依赖微信登录态的替代数据源：先用公开视频解析结果中的作者昵称调用账号搜索 V3，取得 `v2Name`，再调用账号视频 V1 按 `last_buffer` 分页。官方文档说明注册后提供有限免费调用次数；成功调用后可能计费。该路线不读取微信 Cookie，不安装根证书，也不修改系统代理。
+
 不得提取、复用或伪造原作者服务器上的上游密钥，也不得伪造 Storybound 邮箱、设备指纹或积分授权。
 
 ## 公开参考
@@ -82,6 +84,10 @@
   `https://api.bugpk.com/doc-short_videos.html`
 - BugPk 相关开源项目
   `https://github.com/jiuhunwl/short_videos`
+- Just One API：视频号账号搜索 V3
+  `https://docs.justoneapi.com/zh/api/wechat-channels/account-search-v3`
+- Just One API：视频号账号视频 V1
+  `https://docs.justoneapi.com/zh/api/wechat-channels/account-videos-v1`
 
 ## 本地证据位置
 

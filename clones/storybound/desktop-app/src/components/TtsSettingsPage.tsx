@@ -107,6 +107,7 @@ export function TtsSettingsPage({
   const [asrProvider, setAsrProvider] = useState<"local" | "volcengine">("local");
   const [diagnosticMessage, setDiagnosticMessage] = useState("");
   const [benchmarkStatus, setBenchmarkStatus] = useState<BenchmarkProviderStatus | null>(null);
+  const [benchmarkProvider, setBenchmarkProvider] = useState<"justone" | "dajiala">("justone");
   const [benchmarkApiKey, setBenchmarkApiKey] = useState("");
   const [benchmarkVerifycode, setBenchmarkVerifycode] = useState("");
   const [benchmarkRequestState, setBenchmarkRequestState] = useState<RequestState>({ kind: "idle", message: "" });
@@ -234,6 +235,7 @@ export function TtsSettingsPage({
     setBenchmarkRequestState({ kind: "busy", message: "正在验证数据源与余额…" });
     try {
       const status = await saveBenchmarkSourceCredential({
+        provider: benchmarkProvider,
         apiKey: benchmarkApiKey,
         verifycode: benchmarkVerifycode,
       });
@@ -243,7 +245,7 @@ export function TtsSettingsPage({
       setBenchmarkRequestState({
         kind: "success",
         message: status.accountSync.balance === null
-          ? "保存成功，账号自动拉取已就绪。"
+          ? "Token 已保存在本机；首次识别账号时会做真实验证。"
           : `保存成功，当前接口余额 ${status.accountSync.balance.toFixed(3)}。`,
       });
     } catch (error) {
@@ -729,31 +731,39 @@ export function TtsSettingsPage({
               <div className="tts-card settings-card-v17">
                 {benchmarkStatus?.accountSync.configured ? (
                   <CredentialBanner
-                    title="账号自动拉取已就绪"
+                    ready={benchmarkStatus.accountSync.ready !== false}
+                    title="独立账号数据接口已就绪"
                     detail={[
-                      benchmarkStatus.accountSync.mode === "direct" ? "自有数据接口" : "原版兼容代理",
+                      benchmarkStatus.accountSync.mode === "justone" ? "Just One API" : benchmarkStatus.accountSync.mode === "direct" ? "大家啦数据" : "原版兼容代理",
                       benchmarkStatus.accountSync.source ? `凭据来自 ${benchmarkStatus.accountSync.source}` : "本机凭据",
-                      benchmarkStatus.accountSync.balance === null ? "余额未显示" : `余额 ${benchmarkStatus.accountSync.balance.toFixed(3)}`,
+                      benchmarkStatus.accountSync.balance === null ? "余额或免费额度以服务商后台为准" : `余额 ${benchmarkStatus.accountSync.balance.toFixed(3)}`,
                     ].join(" · ")}
                   />
                 ) : (
                   <CredentialBanner
                     ready={false}
-                    title="还差一把对标数据访问密钥"
-                    detail="原版也是通过付费数据接口识别视频号账号并逐页拉取作品。配置一次后，今后只需在“对标监控”粘贴任意作品分享链接。"
+                    title="账号全量同步尚未配置"
+                    detail="单条公开视频可匿名解析；整账号作品需要独立数据接口把作者名称解析为 v2Name，再按游标分页。此路线不读取微信登录态、Cookie、代理或证书。"
                   />
                 )}
-                <Field label="访问密钥（API Key）" hint={benchmarkStatus?.accountSync.configured ? "已保存在本机，可留空" : "必填"} help="保存前会调用余额接口做真实验证。服务端不会把已保存的密钥传回页面，也不会写入 GitHub。">
+                <div className="settings-provider-note">
+                  <strong>数据源：</strong>
+                  <select className="settings-input" value={benchmarkProvider} onChange={(event) => setBenchmarkProvider(event.target.value as "justone" | "dajiala")}>
+                    <option value="justone">Just One API（推荐，可先用免费测试额度）</option>
+                    <option value="dajiala">大家啦数据（原版同类接口）</option>
+                  </select>
+                </div>
+                <Field label="访问密钥（API Key / Token）" hint={benchmarkStatus?.accountSync.configured ? "已保存在本机，可留空" : "必填"} help={benchmarkProvider === "justone" ? "Token 只保存在本机；首次识别账号时真实验证。不会传回页面，也不会写入 GitHub。" : "保存前会调用余额接口验证。密钥不会传回页面，也不会写入 GitHub。"}>
                   <input
                     className="settings-input"
                     type="password"
                     autoComplete="off"
                     value={benchmarkApiKey}
                     onChange={(event) => setBenchmarkApiKey(event.target.value)}
-                    placeholder={benchmarkStatus?.accountSync.configured ? "如需更换，请粘贴新密钥" : "粘贴大家啦数据官网显示的 Key"}
+                    placeholder={benchmarkStatus?.accountSync.configured ? "如需更换，请粘贴新 Token" : benchmarkProvider === "justone" ? "粘贴 Just One API Token" : "粘贴大家啦数据官网显示的 Key"}
                   />
                 </Field>
-                <Field label="验证码（Verify code）" hint="通常留空" help="只有数据平台明确要求时才填写；普通账户按公开接口文档留空。">
+                {benchmarkProvider === "dajiala" ? <Field label="验证码（Verify code）" hint="通常留空" help="只有大家啦明确要求时才填写；普通账户按公开接口文档留空。">
                   <input
                     className="settings-input"
                     type="password"
@@ -762,15 +772,15 @@ export function TtsSettingsPage({
                     onChange={(event) => setBenchmarkVerifycode(event.target.value)}
                     placeholder="留空"
                   />
-                </Field>
+                </Field> : null}
                 <div className="settings-provider-note">
-                  <strong>以后怎么用：</strong>进入“对标监控” → 添加账号 → 粘贴该账号任意一条视频号分享链接 → 识别并添加 → 刷新最新 15 条。历史作品用“加载更多”。识别和每页刷新可能产生数据接口费用。
+                  <strong>以后怎么用：</strong>进入“对标监控” → 添加账号 → 粘贴该账号任意一条视频号分享链接 → 识别并添加 → 刷新最新作品。历史作品用“加载更多”连续分页。全程不调用你的微信账号。
                 </div>
                 <div className="tts-card-footer settings-benchmark-actions">
                   <button className="tts-test-button" disabled={benchmarkRequestState.kind === "busy"} onClick={() => void handleSaveBenchmarkSource()} type="button">
-                    {benchmarkRequestState.kind === "busy" ? "检测中…" : benchmarkStatus?.accountSync.configured ? "更换并测试密钥" : "保存并测试"}
+                    {benchmarkRequestState.kind === "busy" ? "处理中…" : benchmarkProvider === "justone" ? benchmarkStatus?.accountSync.configured ? "更换 Token" : "保存 Token" : benchmarkStatus?.accountSync.configured ? "更换并测试密钥" : "保存并测试"}
                   </button>
-                  <a className="tts-secondary settings-external-link" href="https://www.dajiala.com/home/" target="_blank" rel="noreferrer">注册 / 查看密钥 ↗</a>
+                  <a className="tts-secondary settings-external-link" href={benchmarkProvider === "justone" ? "https://justoneapi.com/" : "https://www.dajiala.com/home/"} target="_blank" rel="noreferrer">注册 / 查看 Token ↗</a>
                   {benchmarkStatus?.accountSync.canDelete ? <button className="tts-secondary settings-danger-button" disabled={benchmarkRequestState.kind === "busy"} onClick={() => void handleDeleteBenchmarkSource()} type="button">删除本机密钥</button> : null}
                 </div>
                 <InlineRequestState state={benchmarkRequestState} />

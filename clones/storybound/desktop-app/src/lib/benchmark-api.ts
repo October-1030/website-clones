@@ -6,18 +6,20 @@ export interface BenchmarkProviderStatus {
   accountSync: {
     configured: boolean;
     provider: string;
-    mode: "direct" | "storybound-proxy" | "unconfigured" | "error";
+    mode: "justone" | "direct" | "storybound-proxy" | "unconfigured" | "error";
     source: string | null;
     balance: number | null;
     checkedAt: string | null;
     canDelete: boolean;
     requiresOriginalAccount: boolean;
     mayConsumeCredits: boolean;
+    ready?: boolean;
     error?: string;
   };
 }
 
 export interface BenchmarkSourceInput {
+  provider?: "justone" | "dajiala";
   apiKey: string;
   verifycode?: string;
 }
