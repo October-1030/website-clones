@@ -8,6 +8,12 @@ import {
   type ImageProviderConfig,
   type ImageProviderId,
 } from "../lib/image-provider-store";
+import {
+  deleteBenchmarkSourceCredential,
+  fetchBenchmarkProviderStatus,
+  saveBenchmarkSourceCredential,
+  type BenchmarkProviderStatus,
+} from "../lib/benchmark-api";
 import { runLlmPipelineStep } from "../lib/llm-api";
 import { fetchRunningHubStatus, testRunningHub, type RunningHubStatus } from "../lib/runninghub-api";
 import { cloneMinimaxVoice, fetchMinimaxVoices, synthesizeTts, testTts } from "../lib/tts-api";
@@ -29,9 +35,10 @@ interface TtsSettingsPageProps {
   llmCredentialStatus: LlmCredentialStatus;
   onChange: (config: TtsConfig) => void;
   onLlmChange: (config: LlmConfig) => void;
+  initialSection?: SettingsSectionId;
 }
 
-type SettingsSectionId = "llm" | "image" | "tts" | "asr" | "draft" | "license" | "ai-creation" | "about";
+export type SettingsSectionId = "llm" | "image" | "tts" | "asr" | "benchmark" | "draft" | "license" | "ai-creation" | "about";
 type ImageSettingsProvider = "jimeng" | "all-purpose" | "minimax" | "runninghub" | "modelscope" | "custom";
 type StatusKind = "ok" | "fail" | "filled" | "empty" | "unavailable";
 type RequestState = {
@@ -49,6 +56,7 @@ const settingsSections: Array<{
   { id: "image", icon: "◇", name: "AI 绘图", sub: "分镜图片" },
   { id: "tts", icon: "◖", name: "TTS 配音", sub: "每镜语音" },
   { id: "asr", icon: "≋", name: "语音识别", sub: "歌词 · 字幕对齐" },
+  { id: "benchmark", icon: "☷", name: "对标数据", sub: "视频号作品" },
   { id: "draft", icon: "▱", name: "剪映", sub: "草稿目录 · BGM" },
   { id: "license", icon: "⌁", name: "激活与订阅", sub: "试用 · 激活码" },
   { id: "ai-creation", icon: "✧", name: "AI 创作", sub: "IMA 知识库" },
@@ -73,8 +81,9 @@ export function TtsSettingsPage({
   llmCredentialStatus,
   onChange,
   onLlmChange,
+  initialSection = "llm",
 }: TtsSettingsPageProps) {
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>("llm");
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>(initialSection);
   const [activeImageProvider, setActiveImageProvider] = useState<ImageSettingsProvider>(() => {
     const saved = readImageProviderConfig();
     return saved.provider === "openai-compatible" ? "custom" : saved.provider;
@@ -97,6 +106,10 @@ export function TtsSettingsPage({
   const [ttsSpeed, setTtsSpeed] = useState(1);
   const [asrProvider, setAsrProvider] = useState<"local" | "volcengine">("local");
   const [diagnosticMessage, setDiagnosticMessage] = useState("");
+  const [benchmarkStatus, setBenchmarkStatus] = useState<BenchmarkProviderStatus | null>(null);
+  const [benchmarkApiKey, setBenchmarkApiKey] = useState("");
+  const [benchmarkVerifycode, setBenchmarkVerifycode] = useState("");
+  const [benchmarkRequestState, setBenchmarkRequestState] = useState<RequestState>({ kind: "idle", message: "" });
 
   const systemVoices = useMemo(() => config.minimax.systemVoices ?? [], [config.minimax.systemVoices]);
   const filteredSystemVoices = useMemo(() => {
@@ -110,9 +123,22 @@ export function TtsSettingsPage({
   }, [voicePreview?.url]);
 
   useEffect(() => {
+    setActiveSection(initialSection);
+  }, [initialSection]);
+
+  useEffect(() => {
     void fetchRunningHubStatus()
       .then(setRunningHubStatus)
       .catch(() => setRunningHubStatus({ available: false, source: null, models: [] }));
+  }, []);
+
+  useEffect(() => {
+    void fetchBenchmarkProviderStatus()
+      .then(setBenchmarkStatus)
+      .catch((error: unknown) => setBenchmarkRequestState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "无法读取对标数据源状态",
+      }));
   }, []);
 
   useEffect(() => {
@@ -145,6 +171,9 @@ export function TtsSettingsPage({
           : "unavailable",
     tts: ttsReady ? (requestState.kind === "success" ? "ok" : "filled") : "empty",
     asr: asrProvider === "volcengine" && credentialStatus.volcengine.available ? "ok" : "unavailable",
+    benchmark: benchmarkStatus?.accountSync.configured
+      ? (benchmarkRequestState.kind === "error" ? "fail" : "ok")
+      : benchmarkRequestState.kind === "error" ? "fail" : "empty",
     draft: "unavailable",
     license: "unavailable",
     "ai-creation": "unavailable",
@@ -195,6 +224,49 @@ export function TtsSettingsPage({
       model: preset?.model ?? llmConfig.model,
     });
     setLlmTestState({ kind: "idle", message: "" });
+  };
+
+  const handleSaveBenchmarkSource = async () => {
+    if (!benchmarkApiKey.trim()) {
+      setBenchmarkRequestState({ kind: "error", message: "请先粘贴访问密钥（API Key）" });
+      return;
+    }
+    setBenchmarkRequestState({ kind: "busy", message: "正在验证数据源与余额…" });
+    try {
+      const status = await saveBenchmarkSourceCredential({
+        apiKey: benchmarkApiKey,
+        verifycode: benchmarkVerifycode,
+      });
+      setBenchmarkStatus(status);
+      setBenchmarkApiKey("");
+      setBenchmarkVerifycode("");
+      setBenchmarkRequestState({
+        kind: "success",
+        message: status.accountSync.balance === null
+          ? "保存成功，账号自动拉取已就绪。"
+          : `保存成功，当前接口余额 ${status.accountSync.balance.toFixed(3)}。`,
+      });
+    } catch (error) {
+      setBenchmarkRequestState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "对标数据源验证失败",
+      });
+    }
+  };
+
+  const handleDeleteBenchmarkSource = async () => {
+    if (!window.confirm("删除保存在本机的对标数据访问密钥？账号和已同步作品不会删除。")) return;
+    setBenchmarkRequestState({ kind: "busy", message: "正在删除本机密钥…" });
+    try {
+      const status = await deleteBenchmarkSourceCredential();
+      setBenchmarkStatus(status);
+      setBenchmarkRequestState({ kind: "success", message: "本机密钥已删除；本地账号和作品仍然保留。" });
+    } catch (error) {
+      setBenchmarkRequestState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "删除本机密钥失败",
+      });
+    }
   };
 
   const pickVolcengineVersion = (version: VolcengineVersion) => {
@@ -651,6 +723,61 @@ export function TtsSettingsPage({
             </section>
           ) : null}
 
+          {activeSection === "benchmark" ? (
+            <section className="settings-section-v17">
+              <SectionHeader icon="☷" title="对标数据" sub="视频号账号识别 · 每页 15 条 · 历史分页" status={sectionStatus.benchmark} />
+              <div className="tts-card settings-card-v17">
+                {benchmarkStatus?.accountSync.configured ? (
+                  <CredentialBanner
+                    title="账号自动拉取已就绪"
+                    detail={[
+                      benchmarkStatus.accountSync.mode === "direct" ? "自有数据接口" : "原版兼容代理",
+                      benchmarkStatus.accountSync.source ? `凭据来自 ${benchmarkStatus.accountSync.source}` : "本机凭据",
+                      benchmarkStatus.accountSync.balance === null ? "余额未显示" : `余额 ${benchmarkStatus.accountSync.balance.toFixed(3)}`,
+                    ].join(" · ")}
+                  />
+                ) : (
+                  <CredentialBanner
+                    ready={false}
+                    title="还差一把对标数据访问密钥"
+                    detail="原版也是通过付费数据接口识别视频号账号并逐页拉取作品。配置一次后，今后只需在“对标监控”粘贴任意作品分享链接。"
+                  />
+                )}
+                <Field label="访问密钥（API Key）" hint={benchmarkStatus?.accountSync.configured ? "已保存在本机，可留空" : "必填"} help="保存前会调用余额接口做真实验证。服务端不会把已保存的密钥传回页面，也不会写入 GitHub。">
+                  <input
+                    className="settings-input"
+                    type="password"
+                    autoComplete="off"
+                    value={benchmarkApiKey}
+                    onChange={(event) => setBenchmarkApiKey(event.target.value)}
+                    placeholder={benchmarkStatus?.accountSync.configured ? "如需更换，请粘贴新密钥" : "粘贴大家啦数据官网显示的 Key"}
+                  />
+                </Field>
+                <Field label="验证码（Verify code）" hint="通常留空" help="只有数据平台明确要求时才填写；普通账户按公开接口文档留空。">
+                  <input
+                    className="settings-input"
+                    type="password"
+                    autoComplete="off"
+                    value={benchmarkVerifycode}
+                    onChange={(event) => setBenchmarkVerifycode(event.target.value)}
+                    placeholder="留空"
+                  />
+                </Field>
+                <div className="settings-provider-note">
+                  <strong>以后怎么用：</strong>进入“对标监控” → 添加账号 → 粘贴该账号任意一条视频号分享链接 → 识别并添加 → 刷新最新 15 条。历史作品用“加载更多”。识别和每页刷新可能产生数据接口费用。
+                </div>
+                <div className="tts-card-footer settings-benchmark-actions">
+                  <button className="tts-test-button" disabled={benchmarkRequestState.kind === "busy"} onClick={() => void handleSaveBenchmarkSource()} type="button">
+                    {benchmarkRequestState.kind === "busy" ? "检测中…" : benchmarkStatus?.accountSync.configured ? "更换并测试密钥" : "保存并测试"}
+                  </button>
+                  <a className="tts-secondary settings-external-link" href="https://www.dajiala.com/home/" target="_blank" rel="noreferrer">注册 / 查看密钥 ↗</a>
+                  {benchmarkStatus?.accountSync.canDelete ? <button className="tts-secondary settings-danger-button" disabled={benchmarkRequestState.kind === "busy"} onClick={() => void handleDeleteBenchmarkSource()} type="button">删除本机密钥</button> : null}
+                </div>
+                <InlineRequestState state={benchmarkRequestState} />
+              </div>
+            </section>
+          ) : null}
+
           {activeSection === "draft" ? (
             <section className="settings-section-v17">
               <SectionHeader icon="▱" title="剪映" sub="任务存储 · 草稿目录 · 背景音乐" status="unavailable" />
@@ -709,6 +836,7 @@ export function TtsSettingsPage({
                     <DiagnosticItem label="LLM 配置完整性" ok={llmReady} detail={llmReady ? `${llmCredentialStatus.provider ?? llmConfig.provider} · ${llmCredentialStatus.model ?? llmConfig.model}` : "缺少 API Key / Base URL / 模型"} />
                     <DiagnosticItem label="AI 绘图" ok={imageReady} detail={imageReady ? "MiniMax image-01 凭据可用" : "MiniMax 凭据未配置"} />
                     <DiagnosticItem label="TTS" ok={ttsReady} detail={ttsReady ? `${config.provider} · 默认音色已选` : "当前引擎凭据未配置"} />
+                    <DiagnosticItem label="对标账号同步" ok={Boolean(benchmarkStatus?.accountSync.configured)} detail={benchmarkStatus?.accountSync.configured ? `${benchmarkStatus.accountSync.provider} · 本机凭据已就绪` : "请到对标数据配置访问密钥"} />
                     <DiagnosticItem label="剪映草稿 Sidecar" ok={false} detail="浏览器模式不可检测" unavailable />
                     <DiagnosticItem label="原版账户与授权" ok={false} detail="主动隔离 · 未连接私有服务" unavailable />
                   </div>

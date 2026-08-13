@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { createReadStream, existsSync } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { basename, dirname, extname, join, normalize, resolve } from "node:path";
@@ -21,6 +21,8 @@ const root = dirname(fileURLToPath(import.meta.url));
 const taskStore = createTaskStore(root);
 const storyboundDataRoot = resolveStoryboundDataRoot(root);
 await taskStore.ensureRoot();
+const benchmarkLibraryFile = join(storyboundDataRoot, "benchmark-library.json");
+const benchmarkSourceFile = join(storyboundDataRoot, "benchmark-source.json");
 const originalPromptLibrary = JSON.parse(
   await readFile(join(root, "original-prompt-library.json"), "utf8"),
 );
@@ -90,6 +92,12 @@ const benchmarkProviderBase = String(
 ).trim().replace(/\/+$/, "");
 const benchmarkAccountEmail = String(process.env.STORYBOUND_BENCHMARK_EMAIL || "").trim();
 const benchmarkAccountFingerprint = String(process.env.STORYBOUND_BENCHMARK_FINGERPRINT || "").trim();
+const benchmarkDajialaEndpoint = String(
+  process.env.STORYBOUND_DAJIALA_API_URL || "https://www.dajiala.com/fbmain/monitor/v3/wxvideo",
+).trim();
+const benchmarkDajialaBalanceEndpoint = String(
+  process.env.STORYBOUND_DAJIALA_BALANCE_URL || "https://www.dajiala.com/fbmain/monitor/v3/get_remain_money",
+).trim();
 
 function parseMinimaxApiKey(contents) {
   const lines = String(contents || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -291,6 +299,89 @@ async function readJson(request) {
   }
   if (chunks.length === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function benchmarkLibraryEmpty() {
+  return { version: 1, accounts: [], works: [] };
+}
+
+function benchmarkLibraryText(value, maximum = 20_000) {
+  return String(value ?? "").trim().slice(0, maximum);
+}
+
+function benchmarkLibraryNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function benchmarkLibraryId(value, prefix) {
+  const candidate = benchmarkLibraryText(value, 120);
+  if (/^[A-Za-z0-9][A-Za-z0-9_-]{3,119}$/.test(candidate)) return candidate;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeBenchmarkLibrary(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return benchmarkLibraryEmpty();
+  const rawAccounts = Array.isArray(value.accounts) ? value.accounts : [];
+  const accounts = rawAccounts.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const name = benchmarkLibraryText(raw.name, 200);
+    if (!name) return [];
+    return [{
+      id: benchmarkLibraryId(raw.id, "account"),
+      name,
+      sourceUrl: benchmarkLibraryText(raw.sourceUrl),
+      group: benchmarkLibraryText(raw.group, 200),
+      track: benchmarkLibraryText(raw.track, 200),
+      notes: benchmarkLibraryText(raw.notes),
+      favorite: raw.favorite === true,
+      avatar: benchmarkLibraryText(raw.avatar),
+      remoteId: benchmarkLibraryText(raw.remoteId, 500),
+      lastBuffer: benchmarkLibraryText(raw.lastBuffer, 20_000),
+      continueFlag: benchmarkLibraryNumber(raw.continueFlag),
+      pageDepth: benchmarkLibraryNumber(raw.pageDepth),
+      lastRefreshAt: benchmarkLibraryText(raw.lastRefreshAt, 100),
+      createdAt: benchmarkLibraryText(raw.createdAt, 100) || new Date().toISOString(),
+    }];
+  });
+  const accountIds = new Set(accounts.map((account) => account.id));
+  const rawWorks = Array.isArray(value.works) ? value.works : [];
+  const works = rawWorks.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const accountId = benchmarkLibraryText(raw.accountId, 120);
+    const title = benchmarkLibraryText(raw.title);
+    if (!accountIds.has(accountId) || !title) return [];
+    return [{
+      id: benchmarkLibraryId(raw.id, "work"), accountId, url: benchmarkLibraryText(raw.url), mediaUrl: benchmarkLibraryText(raw.mediaUrl), title,
+      publishTime: benchmarkLibraryText(raw.publishTime, 100), likes: benchmarkLibraryNumber(raw.likes), favorites: benchmarkLibraryNumber(raw.favorites),
+      comments: benchmarkLibraryNumber(raw.comments), forwards: benchmarkLibraryNumber(raw.forwards), growth: benchmarkLibraryNumber(raw.growth),
+      notes: benchmarkLibraryText(raw.notes), favorite: raw.favorite === true, created: raw.created === true, transcript: benchmarkLibraryText(raw.transcript),
+      analysis: benchmarkLibraryText(raw.analysis), localMediaName: benchmarkLibraryText(raw.localMediaName, 500), localMediaType: benchmarkLibraryText(raw.localMediaType, 200),
+      localMediaSize: benchmarkLibraryNumber(raw.localMediaSize), remoteWorkId: benchmarkLibraryText(raw.remoteWorkId, 500), description: benchmarkLibraryText(raw.description),
+      coverUrl: benchmarkLibraryText(raw.coverUrl), quality: benchmarkLibraryText(raw.quality, 200), format: benchmarkLibraryText(raw.format, 100),
+      codec: benchmarkLibraryText(raw.codec, 100), plays: benchmarkLibraryNumber(raw.plays), expiresAt: benchmarkLibraryText(raw.expiresAt, 100),
+      duration: benchmarkLibraryNumber(raw.duration), decodeKey: benchmarkLibraryText(raw.decodeKey, 1000), createdAt: benchmarkLibraryText(raw.createdAt, 100) || new Date().toISOString(),
+    }];
+  });
+  return { version: 1, accounts, works };
+}
+
+async function readBenchmarkLibrary() {
+  try {
+    return normalizeBenchmarkLibrary(JSON.parse(await readFile(benchmarkLibraryFile, "utf8")));
+  } catch (error) {
+    if (error?.code === "ENOENT") return benchmarkLibraryEmpty();
+    throw error;
+  }
+}
+
+async function writeBenchmarkLibrary(value) {
+  const library = normalizeBenchmarkLibrary(value);
+  await mkdir(dirname(benchmarkLibraryFile), { recursive: true });
+  const temporary = `${benchmarkLibraryFile}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(library, null, 2)}\n`, "utf8");
+  await rename(temporary, benchmarkLibraryFile);
+  return library;
 }
 
 function splitText(input, maxLength) {
@@ -588,6 +679,143 @@ function promptUsesReference(item, shotId, task, track) {
   return shotUsesCharacterReference(storyboardShot, item, track);
 }
 
+function taskCharacterReferences(task) {
+  const references = Array.isArray(task?.options?.characterReferenceImages)
+    ? task.options.characterReferenceImages
+    : task?.options?.referenceImage ? [task.options.referenceImage] : [];
+  return references.filter((reference) => reference && typeof reference === "object");
+}
+
+function referenceEra(text, shotId) {
+  const source = String(text || "");
+  const id = Number(shotId) || 0;
+  // Historical biographical stories often start with a late-life hook and then
+  // return to the subject's youth.  Shot position is therefore a more reliable
+  // guardrail than a date mentioned in a neighbouring narration line.
+  if (id >= 11 && id <= 19) return "青年时期的于右任，二十多岁的中国青年，黑发、短须";
+  if (id >= 20 && id <= 36) return "中年时期的于右任，鬓角开始发白的中国文人";
+  if (id >= 37) return "晚年时期的于右任，银白头发与长须的中国老人";
+  if (/(?:1900|190[1-9]|191[0-4]|青年|清末|学生装|马褂)/u.test(source)) return "青年时期，二十多岁的于右任，黑发、短须";
+  if (/(?:191[5-9]|192\d|193[0-6]|中年|民国初年)/u.test(source)) return "中年时期的于右任，鬓角开始发白";
+  return "晚年时期的于右任，银白头发与长须";
+}
+
+function referenceScene(text) {
+  const source = String(text || "");
+  if (/(?:袜子|布鞋|家徒四壁|破洞)/u.test(source)) return "简朴居室，旧布鞋与破袜子作为叙事道具";
+  if (/(?:对联|草书|书体|书法|写字|毛笔|砚)/u.test(source)) return "民国书房，毛笔、砚台、空白宣纸与书案；纸上不得出现可读文字";
+  if (/(?:旧书|石碑|庙门)/u.test(source)) return "秦岭山脚的旧庙门前，散落旧书与无文字石碑";
+  if (/(?:追捕|僧袍|秦岭|深山)/u.test(source)) return "夜色中的秦岭山道，人物小比例走入山中";
+  if (/(?:报|查禁|印刷|洋牢|暗杀)/u.test(source)) return "民国早期报馆，铅字印刷机、散落报纸与昏暗窗光；报纸不得出现可读文字";
+  if (/(?:交通部|俸禄|义学|学校)/u.test(source)) return "民国时期办公室或乡村义学，信封、课桌和旧木窗构成时代环境";
+  if (/(?:抗战|重庆|前线|捐)/u.test(source)) return "抗战时期重庆的简朴草堂，书案、募捐箱与远处山城环境";
+  if (/(?:台湾|故乡|大陆|高山|淡水河)/u.test(source)) return "台湾晚年居所的窗边或高山远景，人物望向远方";
+  return "符合民国年代的简朴室内与时代道具，环境承担叙事";
+}
+
+function referenceActionScene(text, shotId) {
+  const source = String(text || "");
+  const id = Number(shotId) || 0;
+  const scenes = {
+    6: "an elderly Chinese scholar in his humble home, examining worn cloth socks beside a small wooden table",
+    7: "Yu Youren writing a couplet with a brush at a Chongqing desk, with a lamp, inkstone, and simple room around him",
+    11: "a young Chinese scholar at a desk in Shaanxi, surrounded by old books and a temple window",
+    13: "a young Chinese man tearing old books and carving a blank stone stele outside a mountain temple",
+    14: "a young Chinese man in plain monk clothing walking away on a Qinling mountain path at night",
+    16: "a young Chinese street scribe writing a family letter at a roadside wooden stall in old Shanghai",
+    19: "a Chinese newspaper founder working beside a hand-operated printing press and scattered blank newspapers",
+    20: "a middle-aged Chinese official in a Republican-era office, sorting letters and school-funding envelopes",
+    23: "a middle-aged Chinese calligrapher standing at a long desk, composing cursive calligraphy with brush and inkstone",
+    24: "a middle-aged Chinese calligrapher handing a wrapped blank scroll case to an unseen visitor at an office doorway; every writing surface is hidden",
+    27: "a middle-aged Chinese scholar placing his padded coat over a child outside a modest office in winter",
+    28: "an older Chinese scholar arriving at a simple Chongqing thatched cottage with two travel cases",
+    30: "an older Chinese scholar placing fundraising money into a donation box in a Chongqing thatched cottage",
+    40: "an elderly Chinese scholar standing full-length beside a window, looking west toward the distant river and mountains",
+    42: "an elderly Chinese scholar seated in a modest bedroom, speaking quietly beside two old travel cases",
+  };
+  if (scenes[id]) return scenes[id];
+  if (/(?:写字|书法|草书|对联|毛笔)/u.test(source)) return "a Chinese scholar writing with a brush at a desk, surrounded by period objects";
+  return "a Chinese historical figure performing the visible action described by the narration in a period environment";
+}
+
+function isYuYourenTask(task) {
+  return /于右任/u.test(String(task?.title || task?.artifacts?.rewrite?.title || ""));
+}
+
+function compactReferencePrompt(item, shotId, task, aspectRatio) {
+  const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
+  const text = String(shot?.text || item?.prompt || "");
+  if (isYuYourenTask(task)) {
+    const era = referenceEra(text, shotId);
+    const lateLife = era.includes("晚年") || Number(shotId) === 6 || Number(shotId) === 7;
+    return [
+      `Vertical ${aspectRatio}, black-and-white archival documentary photograph in Republican-era China, restrained film grain.`,
+      `SCENE FIRST: ${referenceActionScene(text, shotId)}.`,
+      "COMPOSITION: environmental action shot, camera 3 to 5 metres away; show a three-quarter or full figure and the period room, street, or landscape. Environment and objects occupy at least 65 percent of the frame; the face occupies less than 20 percent.",
+      `PERSON: the same East Asian Chinese man in the supplied authentic Yu Youren portrait, ${era}. Keep the high bald forehead, extremely heavy straight eyebrows, hooded eyes, long narrow Chinese face, long bridge nose, and sparse side beard.${lateLife ? " His thin white central beard is long and reaches his chest." : " He is historically younger, but the same facial structure must remain recognisable."}`,
+      "Never Western, European, white, or mixed-race. Never a generic old man. NOT a portrait, headshot, close-up, studio pose, or face filling the frame. No readable text, watermark, modern clothes, modern architecture, or illustration.",
+    ].join(" ");
+  }
+  const era = referenceEra(text, shotId);
+  const lateLife = era.includes("晚年") || Number(shotId) === 6 || Number(shotId) === 7;
+  return [
+    `Black-and-white, realistic archival documentary photography, ${aspectRatio} vertical frame, Republican-era China, restrained film grain.`,
+    `Identity: ${era}. The supplied image is the authentic primary portrait of the same historical person, Yu Youren; preserve its exact high bald forehead, straight heavy eyebrow line, hooded eyes, long narrow Chinese face, long bridge nose, sparse cheek beard, and thin central white beard. He must be East Asian Chinese, never Western, European, white, or mixed-race.`,
+    lateLife
+      ? "CRITICAL late-life feature: his sparse white beard is very long, narrow, naturally split into strands, and reaches his chest. It must be visibly clear in this action shot; never replace it with a short round beard."
+      : "Age may be historically younger, but retain the same forehead, brow line, long facial structure, and East Asian Chinese identity from the reference sheet.",
+    `Scene and action: ${referenceActionScene(text, shotId)}.`,
+    "COMPOSITION HARD RULE: medium environmental action shot, camera 2 to 3 metres away, seated or standing three-quarter figure visible, face is 22 to 30 percent of the frame, and the room, street, or landscape remains visibly present. Match the reference person rather than a generic elderly man.",
+    "NOT a portrait, NOT a headshot, NOT a close-up, NOT a face filling the frame. No readable text, no watermark, no modern clothes, no modern architecture, no illustration.",
+  ].join(" ");
+}
+
+function compactChineseActionPrompt(item, shotId, task, aspectRatio) {
+  const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
+  const text = String(shot?.text || item?.prompt || "");
+  return [
+    `Black-and-white, realistic archival documentary photography, ${aspectRatio} vertical frame, Republican-era China, restrained film grain.`,
+    `A historically plausible East Asian Chinese man, never Western, European, white, or mixed-race. Scene and action: ${referenceActionScene(text, shotId)}.`,
+    "COMPOSITION HARD RULE: cinematic environmental action shot, camera 4 to 8 metres away; show the full figure or three-quarter figure and the period room, street, or landscape. The face is small and never fills the frame.",
+    "NOT a portrait, NOT a headshot, NOT a close-up. No readable text, no watermark, no books, no posters, no exposed scrolls or papers, no modern clothes, no modern architecture, no illustration.",
+  ].join(" ");
+}
+
+function compactEnvironmentPrompt(item, shotId, task, aspectRatio) {
+  const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
+  const text = String(shot?.text || item?.prompt || "");
+  const explicitScene = String(item?.environmentScene || "").trim();
+  const objectScene = explicitScene || (/(?:出殡|吊唁|街头|民众)/u.test(text)
+    ? "空荡的1964年台北旧街，雨后路面、花圈、空置木椅与关闭的旧店门"
+    : /(?:保险箱|金条|美钞)/u.test(text)
+      ? "简朴旧宅中打开的空保险箱、旧木柜和一盏台灯"
+      : /(?:布鞋|家书|袜子|棺材)/u.test(text)
+        ? "旧木桌上的磨烂布鞋、破袜子、泛黄家书和墨瓶"
+        : /(?:庙|石碑|旧书)/u.test(text)
+          ? "荒废庙门前的无字石碑、散落旧书和风吹落叶"
+          : /(?:上海|逃出来)/u.test(text)
+            ? "民国上海雨夜的空街、电车轨道、关闭的店铺和路灯"
+            : /(?:摆摊|写信|诉状)/u.test(text)
+              ? "路边空写字摊、毛笔、砚台、信封和低矮木桌"
+              : /(?:报纸|排版|发行|查禁)/u.test(text)
+                ? "空无一人的民国报馆，铅字印刷机、卷纸、散落空白报纸"
+                : /(?:学校|义学|读书)/u.test(text)
+                  ? "陕西乡村义学的空教室、木课桌、书本和窗光"
+                  : /(?:嘉陵江|草堂|对联)/u.test(text)
+                    ? "嘉陵江边一间空茅草屋、书案、毛笔、砚台和山雾"
+                    : /(?:战士|前线|字帖)/u.test(text)
+                      ? "空旷战地中的旧行囊、一本合拢字帖、褪色军毯与泥地"
+                      : /(?:望大陆|高山|故乡)/u.test(text)
+                        ? "空无一人的高山远景、云雾、石阶和远方山脉"
+                        : referenceScene(text));
+  return [
+    `Black-and-white archival still-life photography, ${aspectRatio} vertical composition, Republican-era to 1960s China, film grain, documentary light.`,
+    `The only subjects are ${objectScene}.`,
+    "ABSOLUTELY EMPTY SCENE: no people, no faces, no human figures, no hands, no body parts, no silhouettes, no portraits, no statues, no reflections of people.",
+    "Only objects, architecture, or landscape. Do not show books, papers, signs, posters, steles, newspapers, calligraphy, or letters. No readable text, no watermark, no modern elements, no illustration.",
+  ].join(" ");
+}
+
 function shotUsesCharacterReference(shot, provided, track) {
   if (!track?.needsCharacterCard) return false;
   if (typeof provided?.useReference === "boolean") return provided.useReference;
@@ -622,7 +850,10 @@ function buildReferencePlan(shots, providedPrompts, track) {
     shots.forEach((shot) => plan.set(shot.id, false));
     return plan;
   }
-  const targetEnvironmentCount = Math.max(6, Math.min(22, Math.round(shots.length * 0.28)));
+  // A character reference anchors identity; it should not turn a narrative
+  // into a sequence of portraits.  Prefer environment, object, and action
+  // coverage unless the protagonist is materially present in the shot.
+  const targetEnvironmentCount = Math.max(6, Math.min(shots.length - 1, Math.round(shots.length * 0.62)));
   const ranked = shots.map((shot, index) => {
     const provided = providedPrompts.find((item) => Number(item.shotId || item.id) === Number(shot.id)) || providedPrompts[index] || {};
     return { id: shot.id, index, score: environmentScore(shot, provided, index) };
@@ -678,15 +909,24 @@ async function generateMinimaxImages(body) {
     generationTask = await taskStore.readTask(body.taskId);
     const integrityIssue = taskRewriteIntegrityIssue(generationTask);
     if (integrityIssue) throw new Error(`Step 2 完整性校验未通过：${integrityIssue}`);
-    const reference = generationTask?.options?.referenceImage;
-    if (reference?.path && existsSync(reference.path)) {
+    const references = taskCharacterReferences(generationTask);
+    // MiniMax documents subject_reference with an externally reachable image URL.
+    // Prefer the vetted source URL when one was saved with the task; local uploads
+    // retain the data-URL fallback so offline user assets still work.
+    const entries = await Promise.all(references.slice(0, 3).map(async (reference) => {
+      if (typeof reference?.sourceUrl === "string" && /^https:\/\//u.test(reference.sourceUrl)) {
+        return { type: "character", image_file: reference.sourceUrl };
+      }
+      if (!reference?.path || !existsSync(reference.path)) return null;
       const extension = extname(reference.path).toLowerCase();
       const mime = extension === ".png" ? "image/png" : "image/jpeg";
       const encoded = (await readFile(reference.path)).toString("base64");
-      if (encoded.length < 14 * 1024 * 1024) {
-        subjectReference = [{ type: "character", image_file: `data:${mime};base64,${encoded}` }];
-      }
-    }
+      return encoded.length < 14 * 1024 * 1024 ? { type: "character", image_file: `data:${mime};base64,${encoded}` } : null;
+    }));
+    // image-01 currently accepts exactly one image_reference.  The task may
+    // preserve several historical sources, but only a prepared contact sheet
+    // can be sent as the one provider reference.
+    subjectReference = entries.filter(Boolean).slice(0, 1);
   }
   const selectedPrompts = prompts.slice(0, maxImages);
   function coverBackgroundPrompt(value, shotId) {
@@ -720,7 +960,17 @@ async function generateMinimaxImages(body) {
   const images = await mapLimit(selectedPrompts, 3, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
     const useSubjectReference = Boolean(subjectReference) && promptUsesReference(item, shotId, generationTask, track);
-    const prompt = coverBackgroundPrompt(String(item.prompt || "").trim(), shotId).slice(0, 1500);
+    const isCharacterAction = item?.characterAction === true;
+    const basePrompt = coverBackgroundPrompt(String(item.prompt || "").trim(), shotId);
+    // A prompt sent to image-01 must preserve the scene and composition.  In
+    // particular, do not prepend a second full identity essay here: that could
+    // consume the 1500-character provider limit before the action is reached.
+    const prompt = (useSubjectReference
+      ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
+      : isCharacterAction
+        ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
+      : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio)
+    ).slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
     // A failed/aborted browser run may already have written some images before
     // task.json was updated. Reuse those files so retrying is a true checkpoint
@@ -759,7 +1009,9 @@ async function generateMinimaxImages(body) {
           aspect_ratio: aspectRatio,
           response_format: "base64",
           n: 1,
-          prompt_optimizer: true,
+          // Optimising an identity-constrained prompt can dilute the supplied
+          // person reference. Preserve the exact facial/ethnicity constraints.
+          prompt_optimizer: false,
           ...(useSubjectReference ? { subject_reference: subjectReference } : {}),
           aigc_watermark: false,
         }, 180000);
@@ -1952,6 +2204,10 @@ function benchmarkSourceUrl(value) {
     throw new Error("视频号视频分享链接格式不正确");
   }
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("视频号视频分享链接必须使用 HTTP 或 HTTPS");
+  const hostname = url.hostname.toLowerCase();
+  if (hostname !== "weixin.qq.com" && hostname !== "channels.weixin.qq.com") {
+    throw new Error("对标监控目前仅支持视频号分享链接；抖音账号同步在原版中仍为“即将支持”");
+  }
   return url.toString();
 }
 
@@ -1967,6 +2223,179 @@ function benchmarkProviderUrl(pathname) {
   return new URL(pathname, `${base.toString().replace(/\/+$/, "")}/`);
 }
 
+function benchmarkExternalEndpoint(value, label) {
+  let endpoint;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    throw new Error(`${label}配置无效`);
+  }
+  const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(endpoint.hostname);
+  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && isLoopback)) {
+    throw new Error(`${label}必须使用 HTTPS；本机回环测试服务可使用 HTTP`);
+  }
+  return endpoint;
+}
+
+function normalizeBenchmarkSourceCredential(value, source) {
+  const apiKey = String(value?.apiKey || value?.key || "").trim();
+  if (!apiKey) return null;
+  return {
+    apiKey,
+    verifycode: String(value?.verifycode || "").trim(),
+    source,
+    balance: Number.isFinite(Number(value?.balance)) ? Number(value.balance) : null,
+    checkedAt: String(value?.checkedAt || "").trim() || null,
+    persisted: source === basename(benchmarkSourceFile),
+  };
+}
+
+async function findBenchmarkSourceCredential() {
+  const environment = normalizeBenchmarkSourceCredential({
+    apiKey: process.env.STORYBOUND_DAJIALA_API_KEY || process.env.DAJIALA_API_KEY,
+    verifycode: process.env.STORYBOUND_DAJIALA_VERIFYCODE || process.env.DAJIALA_VERIFYCODE,
+  }, "环境变量");
+  if (environment) return environment;
+  try {
+    return normalizeBenchmarkSourceCredential(
+      JSON.parse(await readFile(benchmarkSourceFile, "utf8")),
+      basename(benchmarkSourceFile),
+    );
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    if (error instanceof SyntaxError) throw new Error("本机对标数据源配置已损坏，请删除后重新配置");
+    throw error;
+  }
+}
+
+async function writeBenchmarkSourceCredential(credential) {
+  await mkdir(dirname(benchmarkSourceFile), { recursive: true });
+  const temporary = `${benchmarkSourceFile}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify({
+    provider: "dajiala",
+    apiKey: credential.apiKey,
+    verifycode: credential.verifycode || "",
+    balance: credential.balance,
+    checkedAt: credential.checkedAt,
+  }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(temporary, benchmarkSourceFile);
+  await chmod(benchmarkSourceFile, 0o600).catch(() => undefined);
+}
+
+async function benchmarkDajialaFetch(endpointValue, body, multipart = false) {
+  const endpoint = benchmarkExternalEndpoint(endpointValue, "对标数据源地址");
+  const requestBody = multipart ? (() => {
+    const form = new FormData();
+    Object.entries(body).forEach(([key, value]) => form.set(key, String(value ?? "")));
+    return form;
+  })() : JSON.stringify(body);
+  const providerResponse = await fetchWithTimeout(endpoint, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      ...(multipart ? {} : { "Content-Type": "application/json" }),
+    },
+    body: requestBody,
+  }, 45_000);
+  const providerText = await providerResponse.text();
+  let payload;
+  try {
+    payload = JSON.parse(providerText);
+  } catch {
+    throw new Error(`对标数据源返回异常（HTTP ${providerResponse.status}）`);
+  }
+  const code = Number(payload?.code);
+  if (code === 20001) {
+    const error = new Error("对标数据接口余额不足，请充值后重试");
+    error.statusCode = 402;
+    throw error;
+  }
+  if (!providerResponse.ok || (Number.isFinite(code) && code !== 0)) {
+    const messages = {
+      101: "视频号账号标识无效，请重新用该账号的视频分享链接识别",
+      102: "历史分页游标已失效，请重置分页后重新刷新",
+      103: "视频号作品列表暂时获取失败，请稍后再试",
+      105: "对标数据源不支持当前请求类型",
+      50000: "对标数据源暂时异常，请稍后再试",
+      [-2]: "该视频无法播放或已不可访问",
+    };
+    const providerError = benchmarkText(payload?.msg || payload?.message);
+    const friendlyProviderError = /key|verifycode|密钥|验证码/i.test(providerError)
+      ? "访问密钥或验证码不正确，请回到大家啦数据后台核对"
+      : providerError;
+    const error = new Error(
+      messages[code] || friendlyProviderError || `对标数据源请求失败（HTTP ${providerResponse.status}）`,
+    );
+    error.statusCode = providerResponse.status >= 400 ? providerResponse.status : 502;
+    throw error;
+  }
+  return payload;
+}
+
+async function testBenchmarkSourceCredential(credential) {
+  const payload = await benchmarkDajialaFetch(benchmarkDajialaBalanceEndpoint, {
+    key: credential.apiKey,
+    verifycode: credential.verifycode || "",
+  });
+  const balance = Number(payload?.remain_money);
+  if (!Number.isFinite(balance)) throw new Error("数据源已响应，但没有返回可识别的余额");
+  return { balance, checkedAt: new Date().toISOString() };
+}
+
+async function saveBenchmarkSource(input) {
+  const apiKey = String(input?.apiKey || "").trim();
+  if (!apiKey) throw new Error("请粘贴对标数据访问密钥（API Key）");
+  if (apiKey.length > 1000) throw new Error("API Key 长度异常");
+  const credential = {
+    apiKey,
+    verifycode: String(input?.verifycode || "").trim().slice(0, 1000),
+  };
+  const tested = await testBenchmarkSourceCredential(credential);
+  await writeBenchmarkSourceCredential({ ...credential, ...tested });
+  return tested;
+}
+
+async function benchmarkAccountSyncStatus() {
+  const direct = await findBenchmarkSourceCredential();
+  if (direct) {
+    return {
+      configured: true,
+      provider: benchmarkExternalEndpoint(benchmarkDajialaEndpoint, "对标数据源地址").hostname,
+      mode: "direct",
+      source: direct.source,
+      balance: direct.balance,
+      checkedAt: direct.checkedAt,
+      canDelete: direct.persisted,
+      requiresOriginalAccount: false,
+      mayConsumeCredits: true,
+    };
+  }
+  if (benchmarkAccountEmail && benchmarkAccountFingerprint) {
+    return {
+      configured: true,
+      provider: benchmarkProviderUrl("/").hostname,
+      mode: "storybound-proxy",
+      source: "环境变量",
+      balance: null,
+      checkedAt: null,
+      canDelete: false,
+      requiresOriginalAccount: true,
+      mayConsumeCredits: true,
+    };
+  }
+  return {
+    configured: false,
+    provider: "dajiala.com",
+    mode: "unconfigured",
+    source: null,
+    balance: null,
+    checkedAt: null,
+    canDelete: false,
+    requiresOriginalAccount: false,
+    mayConsumeCredits: true,
+  };
+}
+
 function benchmarkText(value, fallback = "") {
   return String(value ?? fallback).trim().slice(0, 10_000);
 }
@@ -1974,6 +2403,25 @@ function benchmarkText(value, fallback = "") {
 function benchmarkCount(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function benchmarkEpoch(value) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric > 10_000_000_000 ? Math.floor(numeric / 1000) : numeric;
+  const parsed = Date.parse(String(value || "").trim().replace(" ", "T"));
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+}
+
+function benchmarkMediaExtension(value, fallback = "mp4") {
+  const normalized = benchmarkText(value).toLowerCase().replace(/^\./, "");
+  return /^[a-z0-9]{2,8}$/.test(normalized) ? normalized : fallback;
+}
+
+function benchmarkMediaIsExpired(value) {
+  const text = benchmarkText(value);
+  if (!text) return false;
+  const timestamp = Date.parse(text.replace(" ", "T"));
+  return Number.isFinite(timestamp) && timestamp <= Date.now() + 60_000;
 }
 
 async function parseBenchmarkVideo(input) {
@@ -2029,9 +2477,30 @@ async function parseBenchmarkVideo(input) {
 }
 
 async function benchmarkAccountRequest(pathname, body) {
+  const directCredential = await findBenchmarkSourceCredential();
+  if (directCredential) {
+    if (pathname === "/v1/dajiala/feed-info") {
+      return benchmarkDajialaFetch(benchmarkDajialaEndpoint, {
+        feed_info: body.feed_info,
+        key: directCredential.apiKey,
+        type: "12",
+        verifycode: directCredential.verifycode || "",
+      });
+    }
+    if (pathname === "/v1/dajiala/feed-list") {
+      return benchmarkDajialaFetch(benchmarkDajialaEndpoint, {
+        v2_name: body.v2_name,
+        key: directCredential.apiKey,
+        verifycode: directCredential.verifycode || "",
+        type: "1",
+        last_buffer: body.last_buffer || "",
+      }, true);
+    }
+    throw new Error("未知账号同步请求");
+  }
   if (!benchmarkAccountEmail || !benchmarkAccountFingerprint) {
     const error = new Error(
-      "请先到「账号管理」绑定邮箱账户后再使用对标监控",
+      "对标账号自动拉取尚未激活：请到「系统设置 → 对标数据」保存并测试访问密钥",
     );
     error.statusCode = 503;
     throw error;
@@ -2124,25 +2593,54 @@ async function fetchBenchmarkWorks(input) {
       comments: benchmarkCount(work?.comment_count),
       favorites: benchmarkCount(work?.fav_count),
       duration: benchmarkCount(work?.video_play_len),
-      publishTime: benchmarkCount(work?.publish_time),
+      publishTime: benchmarkEpoch(work?.publish_time),
     })),
   };
 }
 
 async function handleBenchmarkApi(request, response, pathname) {
+  if (pathname === "/api/benchmark/library" && request.method === "GET") {
+    try {
+      sendJson(response, 200, { library: await readBenchmarkLibrary() });
+    } catch (error) {
+      sendJson(response, 500, { error: providerMessage(error, "读取本地对标库失败") });
+    }
+    return;
+  }
   if (pathname === "/api/benchmark/status" && request.method === "GET") {
+    let accountSync;
+    try {
+      accountSync = await benchmarkAccountSyncStatus();
+    } catch (error) {
+      accountSync = {
+        configured: false,
+        provider: "dajiala.com",
+        mode: "error",
+        source: null,
+        balance: null,
+        checkedAt: null,
+        canDelete: false,
+        requiresOriginalAccount: false,
+        mayConsumeCredits: true,
+        error: providerMessage(error, "无法读取对标数据源配置"),
+      };
+    }
     sendJson(response, 200, {
       singleVideoParser: {
         available: true,
         provider: benchmarkProviderUrl("/").hostname,
       },
-      accountSync: {
-        configured: Boolean(benchmarkAccountEmail && benchmarkAccountFingerprint),
-        provider: benchmarkProviderUrl("/").hostname,
-        requiresOriginalAccount: true,
-        mayConsumeCredits: true,
-      },
+      accountSync,
     });
+    return;
+  }
+  if (pathname === "/api/benchmark/source" && request.method === "DELETE") {
+    try {
+      await rm(benchmarkSourceFile, { force: true });
+      sendJson(response, 200, { removed: true, accountSync: await benchmarkAccountSyncStatus() });
+    } catch (error) {
+      sendJson(response, 400, { error: providerMessage(error, "删除本机对标数据源失败") });
+    }
     return;
   }
   if (request.method !== "POST") {
@@ -2151,6 +2649,20 @@ async function handleBenchmarkApi(request, response, pathname) {
   }
   try {
     const body = await readJson(request);
+    if (pathname === "/api/benchmark/library") {
+      sendJson(response, 200, { library: await writeBenchmarkLibrary(body?.library) });
+      return;
+    }
+    if (pathname === "/api/benchmark/source") {
+      const tested = await saveBenchmarkSource(body);
+      sendJson(response, 200, {
+        saved: true,
+        balance: tested.balance,
+        checkedAt: tested.checkedAt,
+        accountSync: await benchmarkAccountSyncStatus(),
+      });
+      return;
+    }
     if (pathname === "/api/benchmark/parse-video") {
       sendJson(response, 200, { video: await parseBenchmarkVideo(body) });
       return;
@@ -2168,6 +2680,51 @@ async function handleBenchmarkApi(request, response, pathname) {
     sendJson(response, Number(error?.statusCode) || 400, {
       error: providerMessage(error, "对标数据请求失败"),
     });
+  }
+}
+
+async function transcribeBenchmarkLibraryWork(input) {
+  const workId = benchmarkText(input?.workId);
+  if (!workId) throw new Error("缺少需要转写的作品 ID");
+  const library = await readBenchmarkLibrary();
+  const work = library.works.find((item) => item.id === workId);
+  if (!work) throw new Error("对标作品不存在");
+  benchmarkSourceUrl(work.url);
+  const savedMediaUrl = benchmarkText(work.mediaUrl);
+  const canReuseSavedMedia = Boolean(savedMediaUrl) && !benchmarkMediaIsExpired(work.expiresAt);
+  const parsedVideo = canReuseSavedMedia ? null : await parseBenchmarkVideo({ url: work.url });
+  const video = parsedVideo || { mediaUrl: savedMediaUrl, format: benchmarkMediaExtension(work.format) };
+  const asrRoot = join(storyboundDataRoot, "asr");
+  await mkdir(asrRoot, { recursive: true });
+  const inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(`benchmark.${benchmarkMediaExtension(video.format)}`)}`);
+  try {
+    await downloadRemoteMedia(video.mediaUrl, inputFile);
+    const text = await runAsrFile(inputFile);
+    const nextLibrary = {
+      ...library,
+      accounts: library.accounts.map((item) => item.id === work.accountId && parsedVideo?.authorName
+        ? { ...item, name: parsedVideo.authorName, avatar: parsedVideo.authorAvatar || item.avatar }
+        : item),
+      works: library.works.map((item) => item.id === workId ? {
+        ...item,
+        transcript: text,
+        mediaUrl: parsedVideo?.mediaUrl || item.mediaUrl,
+        title: item.title || parsedVideo?.title || "未命名视频",
+        publishTime: item.publishTime || (parsedVideo?.publishTime ? new Date(parsedVideo.publishTime * 1000).toISOString() : ""),
+        notes: item.notes || parsedVideo?.description || "",
+        description: parsedVideo?.description || item.description,
+        coverUrl: parsedVideo?.coverUrl || item.coverUrl,
+        quality: parsedVideo?.quality || item.quality,
+        format: parsedVideo?.format || item.format,
+        codec: parsedVideo?.codec || item.codec,
+        plays: parsedVideo?.plays || item.plays,
+        expiresAt: parsedVideo?.expiresAt || item.expiresAt,
+      } : item),
+    };
+    await writeBenchmarkLibrary(nextLibrary);
+    return text;
+  } finally {
+    await rm(inputFile, { force: true }).catch(() => undefined);
   }
 }
 
@@ -2353,7 +2910,7 @@ async function handleAsrApi(request, response, pathname) {
     });
     return;
   }
-  if (!["/api/asr/transcribe", "/api/asr/transcribe-benchmark"].includes(pathname)) {
+  if (!["/api/asr/transcribe", "/api/asr/transcribe-benchmark", "/api/asr/transcribe-benchmark-work"].includes(pathname)) {
     sendJson(response, 404, { error: "未知 ASR 接口" });
     return;
   }
@@ -2370,11 +2927,23 @@ async function handleAsrApi(request, response, pathname) {
   let inputFile = "";
   try {
     const body = await readJson(request);
+    if (pathname === "/api/asr/transcribe-benchmark-work") {
+      sendJson(response, 200, { text: await transcribeBenchmarkLibraryWork(body) });
+      return;
+    }
     const asrRoot = join(storyboundDataRoot, "asr");
     await mkdir(asrRoot, { recursive: true });
     if (pathname === "/api/asr/transcribe-benchmark") {
-      const video = await parseBenchmarkVideo({ url: body.url });
-      inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(`benchmark.${video.format || "mp4"}`)}`);
+      benchmarkSourceUrl(body.url);
+      const savedMediaUrl = benchmarkText(body.mediaUrl);
+      const canReuseSavedMedia = Boolean(savedMediaUrl) && !benchmarkMediaIsExpired(body.expiresAt);
+      const video = canReuseSavedMedia
+        ? {
+            mediaUrl: savedMediaUrl,
+            format: benchmarkMediaExtension(body.format),
+          }
+        : await parseBenchmarkVideo({ url: body.url });
+      inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(`benchmark.${benchmarkMediaExtension(video.format)}`)}`);
       await downloadRemoteMedia(video.mediaUrl, inputFile);
     } else {
       const buffer = Buffer.from(String(body.base64 || ""), "base64");

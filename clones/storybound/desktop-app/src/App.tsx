@@ -16,10 +16,10 @@ import { PlaygroundPage } from "./components/PlaygroundPage";
 import { PromptTemplatesPage } from "./components/PromptTemplatesPage";
 import { SupportPage } from "./components/SupportPage";
 import { TaskBuilder } from "./components/TaskBuilder";
-import { TtsSettingsPage } from "./components/TtsSettingsPage";
+import { TtsSettingsPage, type SettingsSectionId } from "./components/TtsSettingsPage";
 import { VoiceLabPage } from "./components/VoiceLabPage";
 import { defaultLlmConfig } from "./data/llm-data";
-import { transcribeBenchmarkVideo, transcribeMedia } from "./lib/asr-api";
+import { transcribeBenchmarkWork, transcribeMedia } from "./lib/asr-api";
 import { fetchLlmStatus } from "./lib/llm-api";
 import { runLlmPipelineStep } from "./lib/llm-api";
 import { saveTaskHandoff } from "./lib/task-handoff";
@@ -148,6 +148,7 @@ function App() {
   const [credentialStatus, setCredentialStatus] = useState<TtsCredentialStatus>(emptyCredentialStatus);
   const [llmCredentialStatus, setLlmCredentialStatus] = useState<LlmCredentialStatus>(emptyLlmCredentialStatus);
   const [benchmarkSearch, setBenchmarkSearch] = useState("");
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId>("llm");
   const providerWasAutoSelected = useRef(false);
   const llmProviderWasAutoSelected = useRef(false);
   const handleTtsConfigChange = useCallback((next: TtsConfig) => {
@@ -161,6 +162,11 @@ function App() {
     pushRoute(page, taskId);
     setCurrentPage(page);
   }, [currentTaskId]);
+  const openSettings = useCallback((section: SettingsSectionId = "llm") => {
+    setSettingsSection(section);
+    pushRoute("settings", null);
+    setCurrentPage("settings");
+  }, []);
   const handleCreateSelect = useCallback((page: "image-task" | "html-video" | "music-mv") => {
     if (page === "image-task") setCurrentTaskId(null);
     pushRoute(page, null);
@@ -333,7 +339,7 @@ function App() {
           onTtsConfigChange={handleTtsConfigChange}
           onOpenPipeline={handleOpenPipeline}
           onQueueAdvance={handleQueueAdvance}
-          onNavigateSettings={() => setCurrentPage("settings")}
+          onNavigateSettings={() => openSettings("llm")}
         />
       ) : null}
       {currentPage === "html-video" ? <HtmlVideoPage llmConfig={llmConfig} ttsConfig={ttsConfig} /> : null}
@@ -343,7 +349,7 @@ function App() {
           config={ttsConfig}
           credentialStatus={credentialStatus}
           onChange={handleTtsConfigChange}
-          onOpenSettings={() => setCurrentPage("settings")}
+          onOpenSettings={() => openSettings("tts")}
         />
       ) : null}
       {currentPage === "playground" ? <PlaygroundPage /> : null}
@@ -357,7 +363,8 @@ function App() {
           onAiCorrect={llmCredentialStatus.available || llmConfig.apiKey.trim() ? handleBenchmarkCorrect : undefined}
           onAiAnalyze={llmCredentialStatus.available || llmConfig.apiKey.trim() ? handleBenchmarkAnalyze : undefined}
           onTranscribeMedia={(file) => transcribeMedia(file)}
-          onTranscribeSource={(url) => transcribeBenchmarkVideo(url)}
+          onTranscribeSource={(_url, work) => transcribeBenchmarkWork(work.id)}
+          onOpenSettings={() => openSettings("benchmark")}
         />
       ) : null}
       {currentPage === "book-selection" ? (
@@ -371,6 +378,7 @@ function App() {
           llmCredentialStatus={llmCredentialStatus}
           onChange={handleTtsConfigChange}
           onLlmChange={setLlmConfig}
+          initialSection={settingsSection}
         />
       ) : null}
       {currentPage === "market" ? <MarketPage /> : null}
@@ -380,7 +388,7 @@ function App() {
           kind={currentPage}
           llmStatus={llmCredentialStatus}
           ttsStatus={credentialStatus}
-          onOpenSettings={() => setCurrentPage("settings")}
+          onOpenSettings={() => openSettings("llm")}
         />
       ) : null}
       {currentPage !== "create" &&

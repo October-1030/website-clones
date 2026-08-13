@@ -9,10 +9,12 @@ import {
 } from "react";
 
 import {
+  fetchBenchmarkLibrary,
   fetchBenchmarkProviderStatus,
   fetchBenchmarkWorks,
   parseBenchmarkVideo,
   resolveBenchmarkAccount,
+  saveBenchmarkLibrary,
   type BenchmarkProviderStatus,
   type ParsedBenchmarkVideo,
   type ResolvedBenchmarkAccount,
@@ -93,10 +95,12 @@ export interface BenchmarkPageProps {
   onAiAnalyze?: (payload: BenchmarkAiPayload) => Promise<string> | string;
   onTranscribeMedia?: (file: File, work: BenchmarkWork) => Promise<string>;
   onTranscribeSource?: (url: string, work: BenchmarkWork) => Promise<string>;
+  onOpenSettings?: () => void;
 }
 
 type WorkFilter = "all" | "favorite" | "created" | "uncreated";
 type SortField = "publishTime" | "likes" | "favorites" | "comments" | "forwards" | "growth";
+type ContinuousPageLimit = 5 | 10 | 20 | 40;
 
 interface BenchmarkStore {
   version: 1;
@@ -131,8 +135,7 @@ interface LocalMediaSession {
   url: string;
 }
 
-const STORAGE_KEY = "storybound-benchmark-workbench-v1";
-const MAX_CONTINUOUS_SYNC_PAGES = 100;
+const MAX_CONTINUOUS_SYNC_PAGES = 40;
 const EMPTY_ACCOUNT_DRAFT: AccountDraft = {
   name: "",
   sourceUrl: "",
@@ -169,6 +172,20 @@ function readString(value: unknown): string {
 function readNumber(value: unknown): number {
   const number = typeof value === "number" ? value : Number(value);
   return Number.isFinite(number) ? Math.max(0, number) : 0;
+}
+
+function accountGroup(account: BenchmarkAccount): string {
+  return account.group.trim() || "未分组";
+}
+
+function refreshFreshness(lastRefreshAt: string): { label: string; stale: boolean } {
+  const refreshAt = Date.parse(lastRefreshAt);
+  if (!Number.isFinite(refreshAt) || refreshAt <= 0) return { label: "从未刷新", stale: true };
+  const minutes = Math.max(0, Math.floor((Date.now() - refreshAt) / 60_000));
+  if (minutes < 60) return { label: `${Math.max(1, minutes)} 分钟前更新`, stale: false };
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return { label: `${hours} 小时前更新`, stale: hours >= 3 };
+  return { label: `${Math.floor(hours / 24)} 天前更新`, stale: true };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -236,22 +253,16 @@ function normalizeWork(value: unknown, accountIds: Set<string>): BenchmarkWork |
   };
 }
 
-function readStore(): BenchmarkStore {
-  if (typeof window === "undefined") return { version: 1, accounts: [], works: [] };
-  try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "null");
-    if (!isRecord(parsed)) return { version: 1, accounts: [], works: [] };
-    const accounts = Array.isArray(parsed.accounts)
-      ? parsed.accounts.map(normalizeAccount).filter((item): item is BenchmarkAccount => item !== null)
-      : [];
-    const accountIds = new Set(accounts.map((account) => account.id));
-    const works = Array.isArray(parsed.works)
-      ? parsed.works.map((item) => normalizeWork(item, accountIds)).filter((item): item is BenchmarkWork => item !== null)
-      : [];
-    return { version: 1, accounts, works };
-  } catch {
-    return { version: 1, accounts: [], works: [] };
-  }
+function normalizeStore(value: unknown): BenchmarkStore {
+  if (!isRecord(value)) return { version: 1, accounts: [], works: [] };
+  const accounts = Array.isArray(value.accounts)
+    ? value.accounts.map(normalizeAccount).filter((item): item is BenchmarkAccount => item !== null)
+    : [];
+  const accountIds = new Set(accounts.map((account) => account.id));
+  const works = Array.isArray(value.works)
+    ? value.works.map((item) => normalizeWork(item, accountIds)).filter((item): item is BenchmarkWork => item !== null)
+    : [];
+  return { version: 1, accounts, works };
 }
 
 function formatCounter(value: number): string {
@@ -401,8 +412,11 @@ export function BenchmarkPage({
   onAiAnalyze,
   onTranscribeMedia,
   onTranscribeSource,
+  onOpenSettings,
 }: BenchmarkPageProps) {
-  const [store, setStore] = useState<BenchmarkStore>(readStore);
+  const [store, setStore] = useState<BenchmarkStore>({ version: 1, accounts: [], works: [] });
+  const [libraryReady, setLibraryReady] = useState(false);
+  const [libraryError, setLibraryError] = useState("");
   const [query, setQuery] = useState(initialSearch);
   const deferredQuery = useDeferredValue(query.trim().toLocaleLowerCase("zh-CN"));
   const [selectedAccountId, setSelectedAccountId] = useState("all");
@@ -422,12 +436,44 @@ export function BenchmarkPage({
   const [parsedVideo, setParsedVideo] = useState<ParsedBenchmarkVideo | null>(null);
   const [providerStatus, setProviderStatus] = useState<BenchmarkProviderStatus | null>(null);
   const [asrStatus, setAsrStatus] = useState<AsrStatus | null>(null);
+  const [selectedAccountIds, setSelectedAccountIds] = useState<Set<string>>(() => new Set());
+  const [selectedGroup, setSelectedGroup] = useState("");
+  const [batchSelectionMode, setBatchSelectionMode] = useState(false);
+  const [batchRefreshOpen, setBatchRefreshOpen] = useState(false);
+  const [refreshConfirmAccountId, setRefreshConfirmAccountId] = useState("");
+  const [refreshConfirmError, setRefreshConfirmError] = useState("");
+  const [continuousLimit, setContinuousLimit] = useState<ContinuousPageLimit>(5);
+  const [continuousLoaded, setContinuousLoaded] = useState(0);
+  const [continuousWorks, setContinuousWorks] = useState(0);
   const localMediaRef = useRef(localMedia);
   const continuousSyncTokenRef = useRef("");
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
-  }, [store]);
+    let active = true;
+    void fetchBenchmarkLibrary()
+      .then((library) => {
+        if (!active) return;
+        setStore(normalizeStore(library));
+        setLibraryError("");
+        setLibraryReady(true);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setLibraryError(error instanceof Error ? error.message : "读取本机对标库失败");
+        setLibraryReady(true);
+      });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!libraryReady || libraryError) return;
+    const timer = window.setTimeout(() => {
+      void saveBenchmarkLibrary(store).catch((error: unknown) => {
+        setLibraryError(error instanceof Error ? error.message : "保存本机对标库失败");
+      });
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [libraryError, libraryReady, store]);
 
   useEffect(() => {
     setQuery(initialSearch);
@@ -459,7 +505,7 @@ export function BenchmarkPage({
     [store.accounts],
   );
   const filteredAccounts = useMemo(() => {
-    const accounts = deferredQuery
+    const searchedAccounts = deferredQuery
       ? store.accounts.filter((account) =>
           [account.name, account.group, account.track, account.notes]
             .join(" ")
@@ -467,10 +513,27 @@ export function BenchmarkPage({
             .includes(deferredQuery),
         )
       : store.accounts;
+    const accounts = selectedGroup
+      ? searchedAccounts.filter((account) => accountGroup(account) === selectedGroup)
+      : searchedAccounts;
     return [...accounts].sort((left, right) =>
       Number(right.favorite) - Number(left.favorite) || left.name.localeCompare(right.name, "zh-CN"),
     );
-  }, [deferredQuery, store.accounts]);
+  }, [deferredQuery, selectedGroup, store.accounts]);
+  const groupedAccounts = useMemo(() => {
+    const grouped = new Map<string, BenchmarkAccount[]>();
+    for (const account of filteredAccounts) {
+      const group = accountGroup(account);
+      const accounts = grouped.get(group) || [];
+      accounts.push(account);
+      grouped.set(group, accounts);
+    }
+    return [...grouped.entries()].sort(([left], [right]) => {
+      if (left === "未分组") return 1;
+      if (right === "未分组") return -1;
+      return left.localeCompare(right, "zh-CN");
+    });
+  }, [filteredAccounts]);
   const visibleWorks = useMemo(() => {
     const filtered = store.works.filter((work) => {
       if (selectedAccountId !== "all" && work.accountId !== selectedAccountId) return false;
@@ -495,6 +558,7 @@ export function BenchmarkPage({
   const selectedAccountWorkCount = selectedAccount
     ? store.works.filter((work) => work.accountId === selectedAccount.id).length
     : 0;
+  const selectedBatchAccounts = store.accounts.filter((account) => selectedAccountIds.has(account.id));
   const selectedWorkAccount = selectedWork
     ? store.accounts.find((account) => account.id === selectedWork.accountId) ?? null
     : null;
@@ -709,7 +773,9 @@ export function BenchmarkPage({
     const selectedAccount = selectedAccountId === "all"
       ? undefined
       : store.accounts.find((account) => account.id === selectedAccountId);
-    const account = namedAccount || selectedAccount;
+    // A parser-supplied author is authoritative. Only fall back to the selected
+    // account when the source genuinely has no author metadata.
+    const account = namedAccount || (parsedVideo.authorName ? undefined : selectedAccount);
     const accountId = account?.id || createId("account");
     const workId = store.works.find((work) => work.url === parsedVideo.sourceUrl)?.id || createId("work");
     const now = new Date().toISOString();
@@ -774,7 +840,20 @@ export function BenchmarkPage({
             )
           : [nextAccount, ...current.accounts],
         works: hasWork
-          ? current.works.map((item) => item.id === workId ? { ...item, ...nextWork } : item)
+          ? current.works.map((item) => item.id === workId
+            ? {
+                ...item,
+                ...nextWork,
+                favorite: item.favorite,
+                created: item.created,
+                transcript: item.transcript,
+                analysis: item.analysis,
+                localMediaName: item.localMediaName,
+                localMediaType: item.localMediaType,
+                localMediaSize: item.localMediaSize,
+                createdAt: item.createdAt || nextWork.createdAt,
+              }
+            : item)
           : [nextWork, ...current.works],
       };
     });
@@ -787,17 +866,12 @@ export function BenchmarkPage({
   };
 
   const refreshAccount = async (account: BenchmarkAccount): Promise<void> => {
-    if (!providerStatus?.accountSync.configured) {
-      setNotice("自动刷新尚未配置。原版账号列表接口需要绑定邮箱、设备指纹并可能扣除积分；单视频解析仍可直接使用。");
-      return;
-    }
     if (!account.remoteId && !account.sourceUrl) {
-      setNotice("此账号没有远端 ID 或视频号分享链接，无法识别并刷新。");
+      setRefreshConfirmError("此账号没有远端 ID 或视频号分享链接，无法识别并刷新。");
       return;
     }
-    if (!window.confirm(`刷新“${account.name}”的最新 15 条作品将调用配置的账号数据源，并可能扣除原站积分。是否继续？`)) return;
     setBusyAction(`refresh-${account.id}`);
-    setNotice("");
+    setRefreshConfirmError("");
     try {
       const resolved = account.remoteId
         ? { remoteId: account.remoteId, name: account.name, sourceUrl: account.sourceUrl, objectId: "" }
@@ -806,27 +880,33 @@ export function BenchmarkPage({
       const refreshedAt = new Date().toISOString();
       setStore((current) => mergeSyncedPage(current, account.id, resolved, result, refreshedAt, true));
       setSelectedAccountId(account.id);
+      setRefreshConfirmAccountId("");
       setNotice(
         `已同步最新 ${result.works.length} 条作品${result.cost ? `，数据源报告消耗 ${result.cost} 积分` : ""}`
         + `${result.continueFlag === 1 ? "；还有历史作品，可继续加载。" : "；已到作品末页。"}`,
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "账号刷新失败。");
+      setRefreshConfirmError(error instanceof Error ? error.message : "账号刷新失败。");
     } finally {
       setBusyAction("");
     }
   };
 
-  const loadMoreAccount = async (account: BenchmarkAccount): Promise<void> => {
-    if (!providerStatus?.accountSync.configured) {
-      setNotice("账号作品同步未配置，请先在原客户端绑定邮箱，并为本地服务配置当前设备凭据。");
+  const openRefreshConfirmation = (account: BenchmarkAccount): void => {
+    if (!account.remoteId && !account.sourceUrl) {
+      setNotice("此账号没有远端 ID 或视频号分享链接，无法识别并刷新。");
       return;
     }
+    setRefreshConfirmError("");
+    setRefreshConfirmAccountId(account.id);
+  };
+
+  const loadMoreAccount = async (account: BenchmarkAccount): Promise<void> => {
     if (!account.remoteId || !account.lastBuffer || account.continueFlag !== 1) {
       setNotice("当前账号没有可继续加载的历史页，请先刷新最新作品。");
       return;
     }
-    if (!window.confirm(`加载“${account.name}”下一页历史作品（最多 15 条）可能扣除一次原站积分。是否继续？`)) return;
+    if (!window.confirm(`加载“${account.name}”下一页历史作品（最多 15 条）可能产生一次数据接口费用。是否继续？`)) return;
     setBusyAction(`load-more-${account.id}`);
     setNotice("");
     try {
@@ -856,10 +936,6 @@ export function BenchmarkPage({
   };
 
   const syncAllHistory = async (account: BenchmarkAccount): Promise<void> => {
-    if (!providerStatus?.accountSync.configured) {
-      setNotice("账号作品同步未配置，请先在原客户端绑定邮箱，并为本地服务配置当前设备凭据。");
-      return;
-    }
     if (!account.remoteId && !account.sourceUrl) {
       setNotice("此账号没有远端 ID 或视频号分享链接，无法识别并同步。");
       return;
@@ -869,12 +945,14 @@ export function BenchmarkPage({
       return;
     }
     if (!window.confirm(
-      `连续加载“${account.name}”的全部历史作品会逐页请求，每页最多 15 条、每页都可能扣除原站积分。可在运行时停止，是否继续？`,
+      `连续加载“${account.name}”会逐页请求，最多 ${continuousLimit === MAX_CONTINUOUS_SYNC_PAGES ? "40 页（原版单次上限）" : `${continuousLimit} 页`}；每页最多 15 条并可能产生数据接口费用。可在运行时停止，是否继续？`,
     )) return;
 
     const token = createId("continuous-sync");
     continuousSyncTokenRef.current = token;
     setBusyAction(`sync-all-${account.id}`);
+    setContinuousLoaded(0);
+    setContinuousWorks(0);
     setNotice("正在准备连续加载历史作品…");
     let pagesLoaded = 0;
     let worksLoaded = 0;
@@ -889,7 +967,7 @@ export function BenchmarkPage({
       let resetPageDepth = account.pageDepth === 0;
       let continueFlag = account.pageDepth === 0 ? 1 : account.continueFlag;
 
-      while (continueFlag === 1 && pagesLoaded < MAX_CONTINUOUS_SYNC_PAGES) {
+      while (continueFlag === 1 && pagesLoaded < continuousLimit) {
         const result = await fetchBenchmarkWorks(resolved.remoteId, cursor);
         setStore((current) =>
           mergeSyncedPage(current, account.id, resolved, result, new Date().toISOString(), resetPageDepth));
@@ -897,6 +975,8 @@ export function BenchmarkPage({
         pagesLoaded += 1;
         worksLoaded += result.works.length;
         creditsReported += result.cost;
+        setContinuousLoaded(pagesLoaded);
+        setContinuousWorks(worksLoaded);
 
         if (continuousSyncTokenRef.current !== token) {
           stopped = true;
@@ -911,13 +991,13 @@ export function BenchmarkPage({
         setNotice(`连续加载中：已完成 ${pagesLoaded} 页、返回 ${worksLoaded} 条作品…`);
       }
 
-      const reachedSafetyLimit = pagesLoaded >= MAX_CONTINUOUS_SYNC_PAGES && continueFlag === 1;
+      const reachedLimit = pagesLoaded >= continuousLimit && continueFlag === 1;
       setNotice(
         stopped
           ? `已停止连续加载；本次完成 ${pagesLoaded} 页、返回 ${worksLoaded} 条作品。`
           : `连续加载完成：${pagesLoaded} 页、返回 ${worksLoaded} 条作品`
             + `${creditsReported ? `，数据源共报告消耗 ${creditsReported} 积分` : ""}`
-            + `${reachedSafetyLimit ? `；已到 ${MAX_CONTINUOUS_SYNC_PAGES} 页安全上限，可再次继续。` : "。"}`,
+            + `${reachedLimit ? `；已达到本次 ${continuousLimit === MAX_CONTINUOUS_SYNC_PAGES ? "安全上限" : "页数"}，可再次继续。` : "。"}`,
       );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "连续加载历史作品失败。");
@@ -925,6 +1005,71 @@ export function BenchmarkPage({
       if (continuousSyncTokenRef.current === token) continuousSyncTokenRef.current = "";
       setBusyAction("");
     }
+  };
+
+  const toggleSelectedAccount = (accountId: string): void => {
+    setSelectedAccountIds((current) => {
+      const next = new Set(current);
+      if (next.has(accountId)) next.delete(accountId);
+      else next.add(accountId);
+      return next;
+    });
+  };
+
+  const refreshSelectedAccounts = async (): Promise<void> => {
+    const accounts = selectedBatchAccounts.filter((account) => account.remoteId);
+    if (accounts.length === 0) {
+      setNotice("请先选择至少一个已识别的视频号账号。");
+      return;
+    }
+    if (!window.confirm(`批量刷新 ${accounts.length} 个账号会逐个拉取最新 15 条作品，数据源可能按账号计费。是否继续？`)) return;
+    setBusyAction("batch-refresh");
+    setNotice(`正在批量刷新 0/${accounts.length}…`);
+    let success = 0;
+    let failed = 0;
+    let costs = 0;
+    try {
+      for (let index = 0; index < accounts.length; index += 1) {
+        const account = accounts[index];
+        try {
+          const result = await fetchBenchmarkWorks(account.remoteId);
+          setStore((current) => mergeSyncedPage(
+            current,
+            account.id,
+            { remoteId: account.remoteId, name: account.name, sourceUrl: account.sourceUrl, objectId: "" },
+            result,
+            new Date().toISOString(),
+            true,
+          ));
+          success += 1;
+          costs += result.cost;
+        } catch {
+          failed += 1;
+        }
+        setNotice(`正在批量刷新 ${index + 1}/${accounts.length}：${account.name}`);
+      }
+      setNotice(`批量刷新完成：成功 ${success} 个${failed ? `，失败 ${failed} 个` : ""}${costs ? `；数据源报告消耗 ${costs} 积分` : ""}。`);
+    } finally {
+      setBusyAction("");
+      setBatchRefreshOpen(false);
+      setSelectedAccountIds(new Set());
+    }
+  };
+
+  const exitBatchSelectionMode = (): void => {
+    setBatchSelectionMode(false);
+    setBatchRefreshOpen(false);
+    setSelectedAccountIds(new Set());
+  };
+
+  const resetAccountPaging = (account: BenchmarkAccount): void => {
+    setStore((current) => ({
+      ...current,
+      accounts: current.accounts.map((item) => item.id === account.id
+        ? { ...item, lastBuffer: "", continueFlag: 0, pageDepth: 0 }
+        : item),
+    }));
+    setNotice(`已重置“${account.name}”的翻页进度；本地已保存作品不会删除。`);
   };
 
   const deleteWork = (work: BenchmarkWork): void => {
@@ -1016,7 +1161,9 @@ export function BenchmarkPage({
       return;
     }
     setBusyAction("transcribe-source");
-    setNotice("正在下载无水印媒体并进行本地转写，首次加载模型可能需要一些时间……");
+    setNotice(selectedWork.mediaUrl
+      ? "正在使用已解析的媒体直链下载并转写，不会重复调用解析接口……"
+      : "正在解析视频号链接、下载媒体并进行本地转写，首次加载模型可能需要一些时间……");
     try {
       const transcript = await onTranscribeSource(selectedWork.url, selectedWork);
       if (!transcript.trim()) throw new Error("转写服务未返回文本");
@@ -1093,6 +1240,9 @@ export function BenchmarkPage({
             <span className={providerStatus?.accountSync.configured ? "is-ready" : "is-limited"}>
               账号作品同步：{providerStatus?.accountSync.configured ? "已就绪" : "未配置"}
             </span>
+            {!providerStatus?.accountSync.configured && onOpenSettings ? (
+              <button className="benchmark-provider-status__action" type="button" onClick={onOpenSettings}>去激活</button>
+            ) : null}
             <span className={asrStatus?.available ? "is-ready" : "is-limited"}>
               本地转写：{asrStatus?.available
                 ? `${asrStatus.model || asrStatus.provider}${asrStatus.device ? ` · ${asrStatus.device}` : ""}`
@@ -1105,6 +1255,13 @@ export function BenchmarkPage({
           <strong>{store.works.length}</strong><span>作品</span>
         </div>
       </header>
+
+      {libraryError ? (
+        <div className="benchmark-notice is-error" role="alert">
+          <span>本机对标库未能保存：{libraryError}</span>
+          <button type="button" onClick={() => setLibraryError("")} aria-label="关闭提示">×</button>
+        </div>
+      ) : null}
 
       {notice ? (
         <div className="benchmark-notice" role="status">
@@ -1162,6 +1319,14 @@ export function BenchmarkPage({
 
       <div className="benchmark-layout">
         <aside className="benchmark-account-rail">
+          <div className="benchmark-platform-tabs" role="tablist" aria-label="对标平台">
+            <button className="is-selected" type="button" role="tab" aria-selected="true">视频号</button>
+            <button type="button" role="tab" aria-selected="false" disabled title="原版此平台尚未开放">抖音（即将支持）</button>
+          </div>
+          <div className="benchmark-account-rail__head">
+            <span>监控账号</span>
+            <strong>{store.accounts.length}</strong>
+          </div>
           <div className="benchmark-account-rail__tools">
             <label className="benchmark-search">
               <span aria-hidden="true">⌕</span>
@@ -1173,6 +1338,25 @@ export function BenchmarkPage({
               />
             </label>
             <button className="benchmark-primary" type="button" onClick={openNewAccountForm}>＋ 添加账号</button>
+            <label className="benchmark-account-group-filter">
+              <span>分组</span>
+              <select value={selectedGroup} onChange={(event) => setSelectedGroup(event.target.value)}>
+                <option value="">全部分组</option>
+                <option value="未分组">未分组</option>
+                {groups.map((group) => <option key={group} value={group}>{group}</option>)}
+              </select>
+            </label>
+            <button
+              className={batchSelectionMode ? "benchmark-account-batch-toggle is-selected" : "benchmark-account-batch-toggle"}
+              type="button"
+              disabled={store.accounts.length === 0}
+              onClick={() => {
+                if (batchSelectionMode) exitBatchSelectionMode();
+                else setBatchSelectionMode(true);
+              }}
+            >
+              {batchSelectionMode ? "退出批量选择" : "批量刷新…"}
+            </button>
           </div>
 
           {showAccountForm ? (
@@ -1232,6 +1416,35 @@ export function BenchmarkPage({
           <datalist id="benchmark-groups">{groups.map((group) => <option key={group} value={group} />)}</datalist>
           <datalist id="benchmark-tracks">{tracks.map((track) => <option key={track} value={track} />)}</datalist>
 
+          {batchSelectionMode ? (
+            <section className="benchmark-batch-panel" aria-label="批量刷新账号">
+              <div>
+                <strong>已选择 {selectedBatchAccounts.length} 个账号</strong>
+                <span>原版逐个拉取各账号最新 15 条，不会后台自动刷新。</span>
+              </div>
+              <button
+                className="benchmark-primary"
+                type="button"
+                disabled={selectedBatchAccounts.length === 0 || Boolean(busyAction)}
+                onClick={() => setBatchRefreshOpen(true)}
+              >
+                刷新所选
+              </button>
+              {batchRefreshOpen ? (
+                <div className="benchmark-batch-confirm" role="dialog" aria-modal="true" aria-label="确认批量刷新">
+                  <p>
+                    将依次刷新 {selectedBatchAccounts.length} 个视频号账号。每个账号最多请求最新 15 条，
+                    只有已合法配置原版账号凭据时才会调用数据源。
+                  </p>
+                  <div>
+                    <button type="button" onClick={() => setBatchRefreshOpen(false)}>取消</button>
+                    <button className="benchmark-primary" type="button" onClick={() => void refreshSelectedAccounts()}>确认刷新</button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
+
           <nav className="benchmark-account-list" aria-label="对标账号">
             <button
               className={selectedAccountId === "all" ? "is-selected" : ""}
@@ -1241,42 +1454,56 @@ export function BenchmarkPage({
               <span className="benchmark-account-avatar">全</span>
               <span><strong>全部账号</strong><small>{store.works.length} 个作品</small></span>
             </button>
-            {filteredAccounts.map((account) => {
-              const workCount = store.works.filter((work) => work.accountId === account.id).length;
-              return (
-                <article className={selectedAccountId === account.id ? "is-selected" : ""} key={account.id}>
-                  <button className="benchmark-account-main" type="button" onClick={() => setSelectedAccountId(account.id)}>
-                    <span className="benchmark-account-avatar">{account.name.slice(0, 1)}</span>
-                    <span>
-                      <strong>{account.name}</strong>
-                      <small>
-                        {account.remoteId
-                          ? `${[account.group, account.track].filter(Boolean).join(" · ") || "未分组"} · ${workCount}`
-                          : `未识别 · 不可刷新 · ${workCount}`}
-                      </small>
-                    </span>
-                    {account.favorite ? <em title="已收藏">★</em> : null}
-                  </button>
-                  <div className="benchmark-account-actions">
-                    <button
-                      type="button"
-                      disabled={!providerStatus?.accountSync.configured || !account.remoteId || Boolean(busyAction)}
-                      onClick={() => void refreshAccount(account)}
-                      title={!account.remoteId
-                        ? "旧本地记录没有远端账号 ID，请删除后使用视频号分享链接重新识别"
-                        : providerStatus?.accountSync.configured
-                          ? "同步最新一页（最多 15 条）"
-                          : "原客户端尚未绑定账号数据源"}
-                    >
-                      {busyAction === `refresh-${account.id}` ? "刷新中" : "刷新最新"}
-                    </button>
-                    <button type="button" onClick={() => setStore((current) => ({ ...current, accounts: current.accounts.map((item) => item.id === account.id ? { ...item, favorite: !item.favorite } : item) }))}>{account.favorite ? "取消收藏" : "收藏"}</button>
-                    <button type="button" onClick={() => openRenameAccountForm(account)}>重命名</button>
-                    <button className="is-danger" type="button" onClick={() => deleteAccount(account)}>删除</button>
-                  </div>
-                </article>
-              );
-            })}
+            {groupedAccounts.map(([group, accounts]) => (
+              <div className="benchmark-account-group" key={group}>
+                <span className="benchmark-account-group__label">{group}</span>
+                {accounts.map((account) => {
+                  const workCount = store.works.filter((work) => work.accountId === account.id).length;
+                  return (
+                    <article className={selectedAccountId === account.id ? "is-selected" : ""} key={account.id}>
+                      <div className="benchmark-account-row">
+                        {batchSelectionMode ? (
+                          <label className="benchmark-account-check" title={`选择 ${account.name}`}>
+                            <input
+                              type="checkbox"
+                              checked={selectedAccountIds.has(account.id)}
+                              onChange={() => toggleSelectedAccount(account.id)}
+                            />
+                          </label>
+                        ) : null}
+                        <button className="benchmark-account-main" type="button" onClick={() => setSelectedAccountId(account.id)}>
+                          <span className="benchmark-account-avatar">{account.name.slice(0, 1)}</span>
+                          <span>
+                            <strong>{account.name}</strong>
+                            <small>
+                              {account.remoteId
+                                ? `${[account.track].filter(Boolean).join(" · ") || "视频号"} · ${workCount} 作品 · ${refreshFreshness(account.lastRefreshAt).label}`
+                                : `未识别 · 不可刷新 · ${workCount} 作品`}
+                            </small>
+                          </span>
+                          {account.favorite ? <em title="已收藏">★</em> : null}
+                        </button>
+                      </div>
+                      <div className="benchmark-account-actions">
+                        <button
+                          type="button"
+                          disabled={(!account.remoteId && !account.sourceUrl) || Boolean(busyAction)}
+                          onClick={() => openRefreshConfirmation(account)}
+                          title={!account.remoteId && !account.sourceUrl
+                            ? "此记录缺少视频号分享链接，无法识别账号"
+                            : "同步最新一页（最多 15 条）"}
+                        >
+                          {busyAction === `refresh-${account.id}` ? "刷新中" : "刷新最新"}
+                        </button>
+                        <button type="button" onClick={() => setStore((current) => ({ ...current, accounts: current.accounts.map((item) => item.id === account.id ? { ...item, favorite: !item.favorite } : item) }))}>{account.favorite ? "取消收藏" : "收藏"}</button>
+                        <button type="button" onClick={() => openRenameAccountForm(account)}>编辑</button>
+                        <button className="is-danger" type="button" onClick={() => deleteAccount(account)}>删除</button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
           {deferredQuery && filteredAccounts.length === 0 ? (
             <div className="benchmark-rail-empty">
@@ -1334,16 +1561,15 @@ export function BenchmarkPage({
                 <button
                   className="benchmark-primary"
                   type="button"
-                  disabled={!providerStatus?.accountSync.configured || Boolean(busyAction)}
-                  onClick={() => void refreshAccount(selectedAccount)}
+                  disabled={Boolean(busyAction)}
+                  onClick={() => openRefreshConfirmation(selectedAccount)}
                 >
                   {busyAction === `refresh-${selectedAccount.id}` ? "刷新中…" : "刷新最新 15 条"}
                 </button>
                 <button
                   type="button"
                   disabled={
-                    !providerStatus?.accountSync.configured
-                    || selectedAccount.continueFlag !== 1
+                    selectedAccount.continueFlag !== 1
                     || !selectedAccount.lastBuffer
                     || Boolean(busyAction)
                   }
@@ -1351,13 +1577,25 @@ export function BenchmarkPage({
                 >
                   {busyAction === `load-more-${selectedAccount.id}` ? "加载中…" : "加载更多 15 条"}
                 </button>
+                <label className="benchmark-sync-page-limit">
+                  <span>连续加载</span>
+                  <select
+                    value={continuousLimit}
+                    disabled={Boolean(busyAction)}
+                    onChange={(event) => setContinuousLimit(Number(event.target.value) as ContinuousPageLimit)}
+                  >
+                    <option value={5}>5 页</option>
+                    <option value={10}>10 页</option>
+                    <option value={20}>20 页</option>
+                    <option value={40}>全部历史（最多 40 页）</option>
+                  </select>
+                </label>
                 <button
                   type="button"
                   disabled={
                     busyAction === `sync-all-${selectedAccount.id}`
                       ? false
-                      : !providerStatus?.accountSync.configured
-                        || Boolean(busyAction)
+                      : Boolean(busyAction)
                         || (selectedAccount.pageDepth > 0 && selectedAccount.continueFlag !== 1)
                   }
                   onClick={() => {
@@ -1370,12 +1608,21 @@ export function BenchmarkPage({
                 >
                   {busyAction === `sync-all-${selectedAccount.id}` ? "停止连续加载" : "连续加载全部历史"}
                 </button>
+                <button
+                  type="button"
+                  disabled={selectedAccount.pageDepth === 0 || Boolean(busyAction)}
+                  onClick={() => resetAccountPaging(selectedAccount)}
+                  title="只重置分页游标，不会删除已保存的作品"
+                >
+                  重置分页
+                </button>
               </div>
-              {!providerStatus?.accountSync.configured ? (
-                <p>当前未配置原版账号凭据，因此不能识别账号或自动拉取作品。单视频解析仍可使用；MiniMax API 不负责账号作品同步。</p>
-              ) : (
-                <p>账号同步调用原版兼容数据源并可能按页扣积分；每次操作前都会再次确认。</p>
-              )}
+              {busyAction === `sync-all-${selectedAccount.id}` ? (
+                <div className="benchmark-sync-progress" role="status">
+                  正在连续加载：已完成 {continuousLoaded} 页，返回 {continuousWorks} 条作品。可随时点击“停止连续加载”。
+                </div>
+              ) : null}
+              <p>账号识别、刷新和历史分页均由点击触发；每页最多 15 条，数据源可能按账号或按页计费。</p>
             </section>
           ) : null}
 
@@ -1463,7 +1710,7 @@ export function BenchmarkPage({
                 <div>
                   <span>作品资料与转写</span>
                   <h2>{selectedWork.title}</h2>
-                  <p>{selectedWorkAccount?.name ?? "未知账号"} · 数据保存在本机 localStorage</p>
+                  <p>{selectedWorkAccount?.name ?? "未知账号"} · 数据保存在此电脑的共享对标库</p>
                 </div>
                 <button type="button" onClick={() => setSelectedWorkId("")} aria-label="关闭作品详情">×</button>
               </header>
@@ -1536,6 +1783,63 @@ export function BenchmarkPage({
               ) : null}
             </section>
           ) : null}
+
+          {refreshConfirmAccountId ? (() => {
+            const account = store.accounts.find((item) => item.id === refreshConfirmAccountId);
+            if (!account) return null;
+            const refreshing = busyAction === `refresh-${account.id}`;
+            return (
+              <div
+                className="benchmark-refresh-overlay"
+                role="presentation"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget && !refreshing) {
+                    setRefreshConfirmAccountId("");
+                    setRefreshConfirmError("");
+                  }
+                }}
+              >
+                <section
+                  className="benchmark-refresh-dialog"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="benchmark-refresh-title"
+                >
+                  <header>
+                    <h2 id="benchmark-refresh-title">刷新“{account.name}”</h2>
+                    <p>拉取最新作品，按作品合并更新（互动数据刷新、不重复、保留已提取的文案/视频）</p>
+                  </header>
+                  <div className="benchmark-refresh-dialog__body">
+                    <p>本次刷新将请求一次最新 15 条；数据接口可能产生费用。</p>
+                    {!account.remoteId ? (
+                      <small>此旧记录尚无远端账号 ID，确认后会先用保存的视频分享链接重新识别账号。</small>
+                    ) : null}
+                    {refreshConfirmError ? <div className="benchmark-refresh-dialog__error" role="alert">{refreshConfirmError}</div> : null}
+                  </div>
+                  <footer>
+                    <button
+                      type="button"
+                      disabled={refreshing}
+                      onClick={() => {
+                        setRefreshConfirmAccountId("");
+                        setRefreshConfirmError("");
+                      }}
+                    >
+                      取消
+                    </button>
+                    <button
+                      className="benchmark-primary"
+                      type="button"
+                      disabled={refreshing}
+                      onClick={() => void refreshAccount(account)}
+                    >
+                      {refreshing ? "拉取中…" : "确认刷新"}
+                    </button>
+                  </footer>
+                </section>
+              </div>
+            );
+          })() : null}
         </section>
       </div>
     </main>
