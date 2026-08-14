@@ -745,6 +745,14 @@ function isYuYourenTask(task) {
   return /于右任/u.test(String(task?.title || task?.artifacts?.rewrite?.title || ""));
 }
 
+function taskReferenceSubject(task) {
+  const rawTitle = String(task?.artifacts?.rewrite?.title || task?.title || "当前人物")
+    .replace(/[《》]/gu, "")
+    .split(/[：:·•（(]/u)[0]
+    .trim();
+  return rawTitle || "当前人物";
+}
+
 function compactReferencePrompt(item, shotId, task, aspectRatio) {
   const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
   const text = String(shot?.text || item?.prompt || "");
@@ -759,17 +767,13 @@ function compactReferencePrompt(item, shotId, task, aspectRatio) {
       "Never Western, European, white, or mixed-race. Never a generic old man. NOT a portrait, headshot, close-up, studio pose, or face filling the frame. No readable text, watermark, modern clothes, modern architecture, or illustration.",
     ].join(" ");
   }
-  const era = referenceEra(text, shotId);
-  const lateLife = era.includes("晚年") || Number(shotId) === 6 || Number(shotId) === 7;
+  const subject = taskReferenceSubject(task);
+  const sourcePrompt = String(item?.prompt || "").trim();
   return [
-    `Black-and-white, realistic archival documentary photography, ${aspectRatio} vertical frame, Republican-era China, restrained film grain.`,
-    `Identity: ${era}. The supplied image is the authentic primary portrait of the same historical person, Yu Youren; preserve its exact high bald forehead, straight heavy eyebrow line, hooded eyes, long narrow Chinese face, long bridge nose, sparse cheek beard, and thin central white beard. He must be East Asian Chinese, never Western, European, white, or mixed-race.`,
-    lateLife
-      ? "CRITICAL late-life feature: his sparse white beard is very long, narrow, naturally split into strands, and reaches his chest. It must be visibly clear in this action shot; never replace it with a short round beard."
-      : "Age may be historically younger, but retain the same forehead, brow line, long facial structure, and East Asian Chinese identity from the reference sheet.",
-    `Scene and action: ${referenceActionScene(text, shotId)}.`,
-    "COMPOSITION HARD RULE: medium environmental action shot, camera 2 to 3 metres away, seated or standing three-quarter figure visible, face is 22 to 30 percent of the frame, and the room, street, or landscape remains visibly present. Match the reference person rather than a generic elderly man.",
-    "NOT a portrait, NOT a headshot, NOT a close-up, NOT a face filling the frame. No readable text, no watermark, no modern clothes, no modern architecture, no illustration.",
+    `严格人物参考：所附图片是“${subject}”在本任务中的唯一身份参考。必须保持参考图中的真实脸型、五官比例、发型与族裔特征，不得套用其他任务、其他历史人物或泛化老人形象。`,
+    sourcePrompt,
+    `画面人物必须仍可辨认为“${subject}”，同时严格执行本镜的年龄、服装、地点、动作、时代、景别和画面风格；参考图只约束身份，不得把参考图背景复制进本镜。`,
+    "禁止添加参考图和本镜文字未要求的长白胡须或其他历史人物特征；不得生成西方人脸，不得改成不同人物。",
   ].join(" ");
 }
 
