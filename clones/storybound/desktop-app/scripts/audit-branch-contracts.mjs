@@ -54,10 +54,11 @@ async function check(name, run) {
   }
 }
 
-const [promptLibraryText, appData, appSource, createForm, builderModel, taskBuilder, draftBuilder, serverSource, stockSource, runningHubSource] = await Promise.all([
+const [promptLibraryText, appData, appSource, createPage, createForm, builderModel, taskBuilder, draftBuilder, serverSource, stockSource, runningHubSource] = await Promise.all([
   text("original-prompt-library.json"),
   text("src/data/app-data.ts"),
   text("src/App.tsx"),
+  text("src/components/CreatePage.tsx"),
   text("src/components/TaskCreateForm.tsx"),
   text("src/components/task-builder-model.ts"),
   text("src/components/TaskBuilder.tsx"),
@@ -76,6 +77,24 @@ await check("8 个赛道与原版提示词库一致", () => {
     assert.ok(track.metadataPrompt?.length > 300, `${track.name} 缺少元数据提示词`);
     assert.ok(track.imagePrompt?.length > 300, `${track.name} 缺少绘图提示词`);
   }
+});
+
+await check("绘本故事入口与专用运行分支完整", () => {
+  const pictureBook = promptLibrary.tracks.find((item) => item.id === "picture-book");
+  assert.equal(pictureBook?.name, "绘本故事");
+  assert.equal(pictureBook?.defaultStyleId, "pixar-3d");
+  assert.equal(pictureBook?.needsCharacterCard, true);
+  assert.match(pictureBook?.description || "", /儿童绘本.*睡前故事/u);
+  assert.match(pictureBook?.rewritePrompt || "", /儿童（3-10 岁）/u);
+  assert.match(pictureBook?.metadataPrompt || "", /#亲子阅读/u);
+  assert.match(pictureBook?.imagePrompt || "", /严禁写实儿童影像/u);
+  assert.ok(createPage.includes('"绘本故事"'), "创作首页没有展示绘本故事入口");
+  includesAll(serverSource, [
+    "buildPictureBookReferencePlan",
+    "compactPictureBookProviderPrompt",
+    "pictureBookComposition",
+    "绘本主角参考纪律",
+  ], "绘本故事后端分支");
 });
 
 await check("13 套画风与原版提示词库一致", () => {

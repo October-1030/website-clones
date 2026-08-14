@@ -13,6 +13,7 @@ import { buildJianyingDraft } from "./server/draft-builder.mjs";
 import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
 import { metadataIssue, rewriteStructureContract, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
+import { buildPictureBookReferencePlan, compactPictureBookProviderPrompt, isPictureBookTrack, pictureBookComposition } from "./server/picture-book-policy.mjs";
 import { generateRunningHubVideos, runningHubModels, testRunningHubConnection } from "./server/runninghub.mjs";
 import { saveStockSelections, searchCommonsMedia } from "./server/stock-materials.mjs";
 import { createTaskStore, resolveStoryboundDataRoot } from "./server/task-store.mjs";
@@ -882,6 +883,9 @@ function buildReferencePlan(shots, providedPrompts, track) {
     shots.forEach((shot) => plan.set(shot.id, false));
     return plan;
   }
+  if (isPictureBookTrack(track)) {
+    return buildPictureBookReferencePlan(shots, providedPrompts);
+  }
   // A character reference anchors identity; it should not turn a narrative
   // into a sequence of portraits.  Prefer environment, object, and action
   // coverage unless the protagonist is materially present in the shot.
@@ -1012,12 +1016,14 @@ async function generateMinimaxImages(body) {
     // A prompt sent to image-01 must preserve the scene and composition.  In
     // particular, do not prepend a second full identity essay here: that could
     // consume the 1500-character provider limit before the action is reached.
-    const providerPrompt = (useSubjectReference
-      ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
-      : isCharacterAction
-        ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
-      : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio)
-    );
+    const providerPrompt = isPictureBookTrack(track)
+      ? compactPictureBookProviderPrompt({ item, shotId, task: generationTask, aspectRatio, useReference: useSubjectReference })
+      : (useSubjectReference
+        ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
+        : isCharacterAction
+          ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
+          : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio)
+      );
     const prompt = (body.coverBackgroundOnly && shotId >= 9000
       ? cleanCoverBackgroundPrompt(providerPrompt)
       : providerPrompt).slice(0, 1500);
@@ -1383,7 +1389,7 @@ async function probeMediaDuration(file) {
   return undefined;
 }
 
-function normalizeCharacterCard(value) {
+function normalizeCharacterCard(value, track) {
   if (!value || typeof value !== "object") return undefined;
   const card = {
     name: clampString(value.name || value.characterName || value.character),
@@ -1394,17 +1400,24 @@ function normalizeCharacterCard(value) {
     clothing: clampString(value.clothing || value.costume || value.outfit),
   };
   if (!Object.values(card).some(Boolean)) return undefined;
+  const pictureBook = isPictureBookTrack(track);
   const feminine = /女/u.test(`${card.gender}${card.identity}`);
   const masculine = /男/u.test(`${card.gender}${card.identity}`);
-  if (!card.age) card.age = "青年至中年";
-  if (!card.appearance) {
+  if (!card.age) card.age = pictureBook ? "儿童绘本角色" : "青年至中年";
+  if (!card.appearance && pictureBook) {
+    card.appearance = "圆润可爱、表情友好；种类、颜色、体型和标志性特征在全部分镜中保持一致";
+  } else if (!card.appearance) {
     card.appearance = feminine
       ? "中长深色头发，椭圆脸，表情克制内敛，眼神含蓄深邃"
       : masculine
         ? "短深色头发，轮廓自然，表情克制内敛，眼神含蓄深邃"
         : "深色头发，五官自然，表情克制内敛，眼神含蓄深邃";
   }
-  if (!card.clothing) card.clothing = "深色素雅服装；跨分镜保持同一脸型、发型、服装与年龄";
+  if (!card.clothing) {
+    card.clothing = pictureBook
+      ? "固定服饰与标志性配件全程一致；不得生成写实儿童肖像"
+      : "深色素雅服装；跨分镜保持同一脸型、发型、服装与年龄";
+  }
   return card;
 }
 
@@ -1483,7 +1496,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
           }));
         }).slice(0, 60).map((shot, index) => ({ ...shot, id: index + 1 })),
         characterCard: track?.needsCharacterCard
-          ? normalizeCharacterCard(payload.characterCard || payload.character_card || payload.character)
+          ? normalizeCharacterCard(payload.characterCard || payload.character_card || payload.character, track)
           : undefined,
       },
     };
@@ -1492,6 +1505,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
   const suppliedPrompts = payload.prompts || payload.sentences || payload.images;
   const prompts = Array.isArray(suppliedPrompts) ? suppliedPrompts : [];
   const referencePlan = buildReferencePlan(shots, prompts, track);
+  const pictureBook = isPictureBookTrack(track);
   return {
     step: "prompts",
     data: {
@@ -1503,9 +1517,11 @@ function normalizePipelineResult(step, payload, context, artifacts) {
         const useReference = referencePlan.get(shot.id) ?? shotUsesCharacterReference(shot, provided, track);
         const fixedCharacter = useReference ? characterCardPrompt(artifacts.storyboard?.characterCard) : "";
         const fallbackCore = `${shot.visual}，${shot.emotion}`;
-        const suppliedCore = useReference
-          ? removeCameraCliches(clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore))
-          : environmentSceneForShot(shot);
+        const suppliedCore = pictureBook
+          ? clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore)
+          : useReference
+            ? removeCameraCliches(clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore))
+            : environmentSceneForShot(shot);
         const narrativeCue = clampString(shot.text).replace(/\s+/g, " ").slice(0, 100);
         const semanticCore = narrativeCue && !suppliedCore.includes(narrativeCue.slice(0, 12))
           ? `${suppliedCore}。本镜叙事内容（仅用于转化成画面，禁止在图中生成文字）：${narrativeCue}`
@@ -1513,7 +1529,10 @@ function normalizePipelineResult(step, payload, context, artifacts) {
         const characterCore = fixedCharacter && !semanticCore.includes(fixedCharacter.slice(0, 12))
           ? `固定主角设定：${fixedCharacter}。当前画面：${semanticCore}`
           : semanticCore;
-        const corePrompt = `${characterCore}。镜头构图硬约束：${cameraComposition(index, useReference)}`;
+        const composition = pictureBook
+          ? pictureBookComposition(index, useReference)
+          : cameraComposition(index, useReference);
+        const corePrompt = `${characterCore}。镜头构图硬约束：${composition}`;
         const prefixMarker = clampString(style?.prefix).slice(0, 14);
         const negativePrompt = clampString(provided.negativePrompt || provided.negative_prompt, style?.negativePrompt);
         const positivePrompt = prefixMarker && corePrompt.includes(prefixMarker)
@@ -2002,7 +2021,7 @@ async function runLlmPipeline(body) {
           `当前只提取跨分镜人物一致性卡，严格返回 JSON：${JSON.stringify({ characterCard: { name: "", identity: "", age: "", gender: "", appearance: "", clothing: "" } })}`,
           { ...base, shots },
         ), 0.3, "人物一致性卡", { attempts: 1, timeoutMs: 90000 });
-        characterCard = cardPayload.characterCard || cardPayload.character_card;
+        characterCard = normalizeCharacterCard(cardPayload.characterCard || cardPayload.character_card, track);
       } catch (error) {
         console.warn(`人物一致性卡生成失败，继续使用逐镜语义提示：${providerMessage(error, "未知错误")}`);
       }
@@ -2011,8 +2030,10 @@ async function runLlmPipeline(body) {
   }
 
   let promptPayload = { prompts: [] };
-  const referenceDiscipline = track?.needsCharacterCard
-    ? `\n人物参考图纪律（与原客户端 use_reference 契约一致）：\n- 每条 prompt 必须返回 useReference 布尔值。\n- 只有主角本人实际出现在画面中时才为 true；纯环境、建筑、街景、道具、文件、唱片、胶片、空镜和配角独立镜头必须为 false。\n- 人物故事应同时包含 true 和 false，禁止整批全为 true。\n- 不得连续 3 镜使用面部近景或大头特写；整体尽量按近景/中景/全景约 3:4:3 分布。\n- 没有人物的句子优先设计可讲故事的时代场景或关键物件，不要为了使用参考图强塞主角。`
+  const referenceDiscipline = isPictureBookTrack(track)
+    ? `\n绘本主角参考纪律（与原客户端 character + force 契约一致）：\n- 每条 prompt 必须返回 useReference 布尔值。\n- 固定主角或固定配角实际出现时为 true；纯环境、关键物件和没有角色的空镜为 false。\n- 角色出现时必须保持种类、颜色、体型、服饰和标志特征一致；不得替换为真实儿童或历史人物。\n- 不得为了凑空镜比例移除字幕中实际出现的角色；景别按特写/中景/全景交替。`
+    : track?.needsCharacterCard
+      ? `\n人物参考图纪律（与原客户端 use_reference 契约一致）：\n- 每条 prompt 必须返回 useReference 布尔值。\n- 只有主角本人实际出现在画面中时才为 true；纯环境、建筑、街景、道具、文件、唱片、胶片、空镜和配角独立镜头必须为 false。\n- 人物故事应同时包含 true 和 false，禁止整批全为 true。\n- 不得连续 3 镜使用面部近景或大头特写；整体尽量按近景/中景/全景约 3:4:3 分布。\n- 没有人物的句子优先设计可讲故事的时代场景或关键物件，不要为了使用参考图强塞主角。`
     : "\n每条 prompt 必须返回 useReference: false。";
   try {
     promptPayload = await callLlmJson(config, pipelineMessages(
