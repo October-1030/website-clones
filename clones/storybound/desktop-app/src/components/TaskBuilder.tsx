@@ -644,7 +644,6 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         maxImages: 1,
         track: activeTask.track,
         visualStyle: activeTask.visualStyle,
-        coverBackgroundOnly: true,
         provider: activeTask.options.imageProvider,
         force,
       }, signal);

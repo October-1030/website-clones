@@ -33,7 +33,6 @@ export interface ImageGenerationRequest {
   maxImages: number;
   track: string;
   visualStyle: string;
-  coverBackgroundOnly?: boolean;
   provider?: ImageProviderId;
   force?: boolean;
 }

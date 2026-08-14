@@ -10,7 +10,6 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { buildJianyingDraft } from "./server/draft-builder.mjs";
-import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
 import { metadataIssue, rewriteStructureContract, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
 import { generateRunningHubVideos, runningHubModels, testRunningHubConnection } from "./server/runninghub.mjs";
@@ -753,26 +752,16 @@ function taskReferenceSubject(task) {
   return rawTitle || "当前人物";
 }
 
-function compactReferencePrompt(item, shotId, task, aspectRatio, coverBackgroundOnly = false) {
+function compactReferencePrompt(item, shotId, task, aspectRatio) {
   const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
   const text = String(shot?.text || item?.prompt || "");
   const sourcePrompt = String(item?.prompt || "").trim();
   if (Number(shotId) >= 9000) {
-    const subject = taskReferenceSubject(task);
-    const title = String(task?.artifacts?.rewrite?.title || task?.title || subject).trim();
-    const subtitles = Array.isArray(task?.artifacts?.rewrite?.subtitle)
-      ? task.artifacts.rewrite.subtitle.map((line) => String(line || "").trim()).filter(Boolean).slice(0, 2)
-      : [];
-    const titled = !coverBackgroundOnly && (task?.options?.coverMode === "titled"
-      || (Number(shotId) > 9001 && task?.options?.secondCoverMode === "titled"));
-    return [
-      `专业人物故事短视频封面，${aspectRatio}竖版，高对比电影海报质感。${sourcePrompt.slice(0, 620)}`,
-      `所附图片是“${subject}”在本任务中的唯一人物身份参考；封面人物必须保持同一张脸、同一族裔和真实五官，不得套用其他任务人物，不得添加参考图中没有的长白胡须，不得生成西方人脸。`,
-      titled
-        ? `封面文字必须逐字准确：主标题「${title}」；副标题${subtitles.map((line) => `「${line}」`).join("、")}。主标题用超大号粗体中文横排，副标题分行置于其下；文字完整清晰、无错字、无漏字、无额外文字。`
-        : "封面不得出现任何文字、字母、数字、水印或标志。",
-      "人物与文字分区清楚，人物面部不得被文字遮挡，手机信息流缩略图仍须清晰可读。",
-    ].join(" ");
+    // Original Storybound 1.17.0 sends the selected cover template's complete
+    // prompt directly to the image provider. The reference image is supplied
+    // separately via subject_reference; replacing this prompt with a local
+    // layout recipe would bypass the original cover-template workflow.
+    return sourcePrompt;
   }
   if (isYuYourenTask(task)) {
     const era = referenceEra(text, shotId);
@@ -960,51 +949,18 @@ async function generateMinimaxImages(body) {
     const separator = saved.url.includes("?") ? "&" : "?";
     return `${saved.url}${separator}v=${forcedAssetVersion}`;
   }
-  function coverBackgroundPrompt(value, shotId) {
-    if (!body.coverBackgroundOnly || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return value;
-    const marker = /[，。；]?(?:整体按电影海报式排版|极简排版|情感海报排版|冲击式排版|国风题字排版|人物传奇式排版)[:：][\s\S]*$/u;
-    const visualPrompt = String(value).replace(marker, "").replace(/。画面中避免出现[:：][\s\S]*$/u, "").trim();
-    return `${visualPrompt}，只生成干净的封面视觉底图，中部构图简洁并预留标题区；画面中不得出现任何文字、字母、数字、水印、标志、招牌或乱码`;
-  }
-  async function finalizeCover(saved, shotId) {
-    if (!saved || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return saved;
-    try {
-      const [width, height] = aspectRatio === "3:4"
-        ? [1080, 1440]
-        : aspectRatio === "4:3"
-          ? [1440, 1080]
-          : aspectRatio === "16:9"
-            ? [1920, 1080]
-            : aspectRatio === "1:1"
-              ? [1080, 1080]
-              : [1080, 1920];
-      const rendered = await renderTitledCover({
-        sourcePath: saved.path,
-        title: generationTask.artifacts?.rewrite?.title || generationTask.title,
-        subtitles: generationTask.artifacts?.rewrite?.subtitle || [],
-        width,
-        height,
-      });
-      return rendered ? { ...saved, bytes: rendered.bytes, width: rendered.width, height: rendered.height, sourceBackupPath: rendered.backupPath, textComposited: true, textRenderer: "local-compositor" } : saved;
-    } catch (error) {
-      console.warn("[cover] 精确标题合成失败，保留 AI 原图:", error);
-      return saved;
-    }
-  }
   const images = await mapLimit(selectedPrompts, 3, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
     const useSubjectReference = Boolean(subjectReference) && promptUsesReference(item, shotId, generationTask, track);
     const isCharacterAction = item?.characterAction === true;
-    const basePrompt = coverBackgroundPrompt(String(item.prompt || "").trim(), shotId);
-    const generationItem = basePrompt === item.prompt ? item : { ...item, prompt: basePrompt };
     // A prompt sent to image-01 must preserve the scene and composition.  In
     // particular, do not prepend a second full identity essay here: that could
     // consume the 1500-character provider limit before the action is reached.
     const prompt = (useSubjectReference
-      ? compactReferencePrompt(generationItem, shotId, generationTask, aspectRatio, Boolean(body.coverBackgroundOnly))
+      ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
       : isCharacterAction
-        ? compactChineseActionPrompt(generationItem, shotId, generationTask, aspectRatio)
-      : compactEnvironmentPrompt(generationItem, shotId, generationTask, aspectRatio)
+        ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
+      : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio)
     ).slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
     // A failed/aborted browser run may already have written some images before
@@ -1053,10 +1009,9 @@ async function generateMinimaxImages(body) {
         const base64 = payload.data?.image_base64?.[0];
         const imageUrl = payload.data?.image_urls?.[0];
         if (typeof base64 === "string" && base64) {
-          let saved = body.taskId
+          const saved = body.taskId
             ? await taskStore.saveBuffer(body.taskId, "images", `${shotId}.jpg`, Buffer.from(base64, "base64"))
             : null;
-          saved = await finalizeCover(saved, shotId);
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
@@ -1066,20 +1021,14 @@ async function generateMinimaxImages(body) {
             url: generatedAssetUrl(saved, `data:image/jpeg;base64,${base64}`),
             path: saved?.path,
             bytes: saved?.bytes || Math.round(base64.length * 0.75),
-            width: saved?.width,
-            height: saved?.height,
-            sourceBackupPath: saved?.sourceBackupPath,
-            textComposited: saved?.textComposited,
-            textRenderer: saved?.textRenderer,
             provider: "minimax",
             status: "ready",
           };
         }
         if (typeof imageUrl === "string" && imageUrl) {
-          let saved = body.taskId
+          const saved = body.taskId
             ? await taskStore.saveRemoteAsset(body.taskId, "images", `${shotId}.jpg`, imageUrl)
             : null;
-          saved = await finalizeCover(saved, shotId);
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
@@ -1089,11 +1038,6 @@ async function generateMinimaxImages(body) {
             url: generatedAssetUrl(saved, imageUrl),
             path: saved?.path,
             bytes: saved?.bytes,
-            width: saved?.width,
-            height: saved?.height,
-            sourceBackupPath: saved?.sourceBackupPath,
-            textComposited: saved?.textComposited,
-            textRenderer: saved?.textRenderer,
             provider: "minimax",
             status: "ready",
           };
@@ -1196,14 +1140,6 @@ async function generateCompatibleImages(body) {
         url = saved?.url || image.url;
       } else {
         throw new Error("图片 Provider 未返回 b64_json 或 url");
-      }
-      if (saved && shotId >= 9000 && generationTask?.options?.coverMode === "titled") {
-        const rendered = await renderTitledCover({
-          sourcePath: saved.path,
-          title: generationTask.artifacts?.rewrite?.title || generationTask.title,
-          subtitles: generationTask.artifacts?.rewrite?.subtitle || [],
-        }).catch(() => null);
-        if (rendered) saved = { ...saved, bytes: rendered.bytes };
       }
       return {
         id: payload.id || `compatible-image-${Date.now()}-${index}`,
