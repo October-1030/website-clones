@@ -341,7 +341,6 @@ export function MusicMvPage({ ttsConfig = defaultTtsConfig }: MusicMvPageProps) 
         maxImages: 1,
         track: "音乐 MV",
         visualStyle,
-        coverBackgroundOnly: true,
       }, controller.signal);
       const generated = result.images[0];
       if (!generated?.path || generated.status !== "ready") throw new Error(generated?.error || "MiniMax 封面生成失败");

@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { createReadStream, existsSync } from "node:fs";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import { basename, dirname, extname, join, normalize, resolve } from "node:path";
@@ -13,6 +13,14 @@ import { buildJianyingDraft } from "./server/draft-builder.mjs";
 import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
 import { metadataIssue, rewriteStructureContract, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
+import { buildPictureBookReferencePlan, compactPictureBookProviderPrompt, isPictureBookTrack, pictureBookComposition } from "./server/picture-book-policy.mjs";
+import {
+  compactTrackProviderPrompt,
+  isCharacterStoryTrack,
+  isProductReferenceTrack,
+  referenceDisciplineForTrack,
+  referencePlanMode,
+} from "./server/track-image-policy.mjs";
 import { generateRunningHubVideos, runningHubModels, testRunningHubConnection } from "./server/runninghub.mjs";
 import { saveStockSelections, searchCommonsMedia } from "./server/stock-materials.mjs";
 import { createTaskStore, resolveStoryboundDataRoot } from "./server/task-store.mjs";
@@ -21,6 +29,8 @@ const root = dirname(fileURLToPath(import.meta.url));
 const taskStore = createTaskStore(root);
 const storyboundDataRoot = resolveStoryboundDataRoot(root);
 await taskStore.ensureRoot();
+const benchmarkLibraryFile = join(storyboundDataRoot, "benchmark-library.json");
+const benchmarkSourceFile = join(storyboundDataRoot, "benchmark-source.json");
 const originalPromptLibrary = JSON.parse(
   await readFile(join(root, "original-prompt-library.json"), "utf8"),
 );
@@ -90,6 +100,15 @@ const benchmarkProviderBase = String(
 ).trim().replace(/\/+$/, "");
 const benchmarkAccountEmail = String(process.env.STORYBOUND_BENCHMARK_EMAIL || "").trim();
 const benchmarkAccountFingerprint = String(process.env.STORYBOUND_BENCHMARK_FINGERPRINT || "").trim();
+const benchmarkDajialaEndpoint = String(
+  process.env.STORYBOUND_DAJIALA_API_URL || "https://www.dajiala.com/fbmain/monitor/v3/wxvideo",
+).trim();
+const benchmarkDajialaBalanceEndpoint = String(
+  process.env.STORYBOUND_DAJIALA_BALANCE_URL || "https://www.dajiala.com/fbmain/monitor/v3/get_remain_money",
+).trim();
+const benchmarkJustOneBase = String(
+  process.env.STORYBOUND_JUSTONE_API_BASE_URL || "https://api.justoneapi.com",
+).trim().replace(/\/+$/, "");
 
 function parseMinimaxApiKey(contents) {
   const lines = String(contents || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -291,6 +310,89 @@ async function readJson(request) {
   }
   if (chunks.length === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+}
+
+function benchmarkLibraryEmpty() {
+  return { version: 1, accounts: [], works: [] };
+}
+
+function benchmarkLibraryText(value, maximum = 20_000) {
+  return String(value ?? "").trim().slice(0, maximum);
+}
+
+function benchmarkLibraryNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function benchmarkLibraryId(value, prefix) {
+  const candidate = benchmarkLibraryText(value, 120);
+  if (/^[A-Za-z0-9][A-Za-z0-9_-]{3,119}$/.test(candidate)) return candidate;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function normalizeBenchmarkLibrary(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return benchmarkLibraryEmpty();
+  const rawAccounts = Array.isArray(value.accounts) ? value.accounts : [];
+  const accounts = rawAccounts.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const name = benchmarkLibraryText(raw.name, 200);
+    if (!name) return [];
+    return [{
+      id: benchmarkLibraryId(raw.id, "account"),
+      name,
+      sourceUrl: benchmarkLibraryText(raw.sourceUrl),
+      group: benchmarkLibraryText(raw.group, 200),
+      track: benchmarkLibraryText(raw.track, 200),
+      notes: benchmarkLibraryText(raw.notes),
+      favorite: raw.favorite === true,
+      avatar: benchmarkLibraryText(raw.avatar),
+      remoteId: benchmarkLibraryText(raw.remoteId, 500),
+      lastBuffer: benchmarkLibraryText(raw.lastBuffer, 20_000),
+      continueFlag: benchmarkLibraryNumber(raw.continueFlag),
+      pageDepth: benchmarkLibraryNumber(raw.pageDepth),
+      lastRefreshAt: benchmarkLibraryText(raw.lastRefreshAt, 100),
+      createdAt: benchmarkLibraryText(raw.createdAt, 100) || new Date().toISOString(),
+    }];
+  });
+  const accountIds = new Set(accounts.map((account) => account.id));
+  const rawWorks = Array.isArray(value.works) ? value.works : [];
+  const works = rawWorks.flatMap((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const accountId = benchmarkLibraryText(raw.accountId, 120);
+    const title = benchmarkLibraryText(raw.title);
+    if (!accountIds.has(accountId) || !title) return [];
+    return [{
+      id: benchmarkLibraryId(raw.id, "work"), accountId, url: benchmarkLibraryText(raw.url), mediaUrl: benchmarkLibraryText(raw.mediaUrl), title,
+      publishTime: benchmarkLibraryText(raw.publishTime, 100), likes: benchmarkLibraryNumber(raw.likes), favorites: benchmarkLibraryNumber(raw.favorites),
+      comments: benchmarkLibraryNumber(raw.comments), forwards: benchmarkLibraryNumber(raw.forwards), growth: benchmarkLibraryNumber(raw.growth),
+      notes: benchmarkLibraryText(raw.notes), favorite: raw.favorite === true, created: raw.created === true, transcript: benchmarkLibraryText(raw.transcript),
+      analysis: benchmarkLibraryText(raw.analysis), localMediaName: benchmarkLibraryText(raw.localMediaName, 500), localMediaType: benchmarkLibraryText(raw.localMediaType, 200),
+      localMediaSize: benchmarkLibraryNumber(raw.localMediaSize), remoteWorkId: benchmarkLibraryText(raw.remoteWorkId, 500), description: benchmarkLibraryText(raw.description),
+      coverUrl: benchmarkLibraryText(raw.coverUrl), quality: benchmarkLibraryText(raw.quality, 200), format: benchmarkLibraryText(raw.format, 100),
+      codec: benchmarkLibraryText(raw.codec, 100), plays: benchmarkLibraryNumber(raw.plays), expiresAt: benchmarkLibraryText(raw.expiresAt, 100),
+      duration: benchmarkLibraryNumber(raw.duration), decodeKey: benchmarkLibraryText(raw.decodeKey, 1000), createdAt: benchmarkLibraryText(raw.createdAt, 100) || new Date().toISOString(),
+    }];
+  });
+  return { version: 1, accounts, works };
+}
+
+async function readBenchmarkLibrary() {
+  try {
+    return normalizeBenchmarkLibrary(JSON.parse(await readFile(benchmarkLibraryFile, "utf8")));
+  } catch (error) {
+    if (error?.code === "ENOENT") return benchmarkLibraryEmpty();
+    throw error;
+  }
+}
+
+async function writeBenchmarkLibrary(value) {
+  const library = normalizeBenchmarkLibrary(value);
+  await mkdir(dirname(benchmarkLibraryFile), { recursive: true });
+  const temporary = `${benchmarkLibraryFile}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(library, null, 2)}\n`, "utf8");
+  await rename(temporary, benchmarkLibraryFile);
+  return library;
 }
 
 function splitText(input, maxLength) {
@@ -563,7 +665,21 @@ function originalTrack(value) {
   )) || originalPromptLibrary.tracks.find((track) => track.id === "general");
 }
 
-function originalStyle(value, track) {
+function originalStyle(value, track, override = null) {
+  if (
+    override
+    && typeof override === "object"
+    && String(override.name || "").trim() === String(value || "").trim()
+    && String(override.prefix || "").trim()
+  ) {
+    return {
+      id: `custom:${String(override.name).trim()}`,
+      name: String(override.name).trim(),
+      prefix: String(override.prefix).trim(),
+      suffix: String(override.suffix || "").trim(),
+      negativePrompt: String(override.negativePrompt || "").trim(),
+    };
+  }
   const normalized = String(value || "").trim().toLowerCase();
   return originalPromptLibrary.styles.find((style) => (
     style.id.toLowerCase() === normalized || style.name === value
@@ -588,6 +704,174 @@ function promptUsesReference(item, shotId, task, track) {
   return shotUsesCharacterReference(storyboardShot, item, track);
 }
 
+function taskCharacterReferences(task, track) {
+  const savedKind = task?.options?.referenceKind;
+  if (savedKind && savedKind !== track?.referenceKind) return [];
+  const references = Array.isArray(task?.options?.characterReferenceImages)
+    ? task.options.characterReferenceImages
+    : task?.options?.referenceImage ? [task.options.referenceImage] : [];
+  return references.filter((reference) => reference && typeof reference === "object");
+}
+
+function referenceEra(text, shotId) {
+  const source = String(text || "");
+  const id = Number(shotId) || 0;
+  // Historical biographical stories often start with a late-life hook and then
+  // return to the subject's youth.  Shot position is therefore a more reliable
+  // guardrail than a date mentioned in a neighbouring narration line.
+  if (id >= 11 && id <= 19) return "青年时期的于右任，二十多岁的中国青年，黑发、短须";
+  if (id >= 20 && id <= 36) return "中年时期的于右任，鬓角开始发白的中国文人";
+  if (id >= 37) return "晚年时期的于右任，银白头发与长须的中国老人";
+  if (/(?:1900|190[1-9]|191[0-4]|青年|清末|学生装|马褂)/u.test(source)) return "青年时期，二十多岁的于右任，黑发、短须";
+  if (/(?:191[5-9]|192\d|193[0-6]|中年|民国初年)/u.test(source)) return "中年时期的于右任，鬓角开始发白";
+  return "晚年时期的于右任，银白头发与长须";
+}
+
+function referenceScene(text) {
+  const source = String(text || "");
+  if (/(?:袜子|布鞋|家徒四壁|破洞)/u.test(source)) return "简朴居室，旧布鞋与破袜子作为叙事道具";
+  if (/(?:对联|草书|书体|书法|写字|毛笔|砚)/u.test(source)) return "民国书房，毛笔、砚台、空白宣纸与书案；纸上不得出现可读文字";
+  if (/(?:旧书|石碑|庙门)/u.test(source)) return "秦岭山脚的旧庙门前，散落旧书与无文字石碑";
+  if (/(?:追捕|僧袍|秦岭|深山)/u.test(source)) return "夜色中的秦岭山道，人物小比例走入山中";
+  if (/(?:报|查禁|印刷|洋牢|暗杀)/u.test(source)) return "民国早期报馆，铅字印刷机、散落报纸与昏暗窗光；报纸不得出现可读文字";
+  if (/(?:交通部|俸禄|义学|学校)/u.test(source)) return "民国时期办公室或乡村义学，信封、课桌和旧木窗构成时代环境";
+  if (/(?:抗战|重庆|前线|捐)/u.test(source)) return "抗战时期重庆的简朴草堂，书案、募捐箱与远处山城环境";
+  if (/(?:台湾|故乡|大陆|高山|淡水河)/u.test(source)) return "台湾晚年居所的窗边或高山远景，人物望向远方";
+  return "符合民国年代的简朴室内与时代道具，环境承担叙事";
+}
+
+function referenceActionScene(text, shotId) {
+  const source = String(text || "");
+  const id = Number(shotId) || 0;
+  const scenes = {
+    6: "an elderly Chinese scholar in his humble home, examining worn cloth socks beside a small wooden table",
+    7: "Yu Youren writing a couplet with a brush at a Chongqing desk, with a lamp, inkstone, and simple room around him",
+    11: "a young Chinese scholar at a desk in Shaanxi, surrounded by old books and a temple window",
+    13: "a young Chinese man tearing old books and carving a blank stone stele outside a mountain temple",
+    14: "a young Chinese man in plain monk clothing walking away on a Qinling mountain path at night",
+    16: "a young Chinese street scribe writing a family letter at a roadside wooden stall in old Shanghai",
+    19: "a Chinese newspaper founder working beside a hand-operated printing press and scattered blank newspapers",
+    20: "a middle-aged Chinese official in a Republican-era office, sorting letters and school-funding envelopes",
+    23: "a middle-aged Chinese calligrapher standing at a long desk, composing cursive calligraphy with brush and inkstone",
+    24: "a middle-aged Chinese calligrapher handing a wrapped blank scroll case to an unseen visitor at an office doorway; every writing surface is hidden",
+    27: "a middle-aged Chinese scholar placing his padded coat over a child outside a modest office in winter",
+    28: "an older Chinese scholar arriving at a simple Chongqing thatched cottage with two travel cases",
+    30: "an older Chinese scholar placing fundraising money into a donation box in a Chongqing thatched cottage",
+    40: "an elderly Chinese scholar standing full-length beside a window, looking west toward the distant river and mountains",
+    42: "an elderly Chinese scholar seated in a modest bedroom, speaking quietly beside two old travel cases",
+  };
+  if (scenes[id]) return scenes[id];
+  if (/(?:写字|书法|草书|对联|毛笔)/u.test(source)) return "a Chinese scholar writing with a brush at a desk, surrounded by period objects";
+  return "a Chinese historical figure performing the visible action described by the narration in a period environment";
+}
+
+function isYuYourenTask(task) {
+  return /于右任/u.test(String(task?.title || task?.artifacts?.rewrite?.title || ""));
+}
+
+function taskReferenceSubject(task) {
+  const rawTitle = String(task?.artifacts?.rewrite?.title || task?.title || "当前人物")
+    .replace(/[《》]/gu, "")
+    .split(/[：:·•（(]/u)[0]
+    .trim();
+  return rawTitle || "当前人物";
+}
+
+function compactReferencePrompt(item, shotId, task, aspectRatio) {
+  const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
+  const text = String(shot?.text || item?.prompt || "");
+  const sourcePrompt = String(item?.prompt || "").trim();
+  if (Number(shotId) >= 9000) {
+    // Original Storybound 1.17.0 sends the selected cover template's complete
+    // prompt directly to the image provider. The reference image is supplied
+    // separately via subject_reference; replacing this prompt with a local
+    // layout recipe would bypass the original cover-template workflow.
+    return sourcePrompt;
+  }
+  if (isYuYourenTask(task)) {
+    const era = referenceEra(text, shotId);
+    const lateLife = era.includes("晚年") || Number(shotId) === 6 || Number(shotId) === 7;
+    return [
+      `Vertical ${aspectRatio}, black-and-white archival documentary photograph in Republican-era China, restrained film grain.`,
+      `SCENE FIRST: ${referenceActionScene(text, shotId)}.`,
+      "COMPOSITION: environmental action shot, camera 3 to 5 metres away; show a three-quarter or full figure and the period room, street, or landscape. Environment and objects occupy at least 65 percent of the frame; the face occupies less than 20 percent.",
+      `PERSON: the same East Asian Chinese man in the supplied authentic Yu Youren portrait, ${era}. Keep the high bald forehead, extremely heavy straight eyebrows, hooded eyes, long narrow Chinese face, long bridge nose, and sparse side beard.${lateLife ? " His thin white central beard is long and reaches his chest." : " He is historically younger, but the same facial structure must remain recognisable."}`,
+      "Never Western, European, white, or mixed-race. Never a generic old man. NOT a portrait, headshot, close-up, studio pose, or face filling the frame. No readable text, watermark, modern clothes, modern architecture, or illustration.",
+    ].join(" ");
+  }
+  const subject = taskReferenceSubject(task);
+  return [
+    `严格人物参考：所附图片是“${subject}”在本任务中的唯一身份参考。必须保持参考图中的真实脸型、五官比例、发型与族裔特征，不得套用其他任务、其他历史人物或泛化老人形象。`,
+    sourcePrompt,
+    `画面人物必须仍可辨认为“${subject}”，同时严格执行本镜的年龄、服装、地点、动作、时代、景别和画面风格；参考图只约束身份，不得把参考图背景复制进本镜。`,
+    "禁止添加参考图和本镜文字未要求的长白胡须或其他历史人物特征；不得生成西方人脸，不得改成不同人物。",
+  ].join(" ");
+}
+
+function cleanCoverBackgroundPrompt(value) {
+  const marker = /[，。；]?(?:整体按电影海报式排版|极简排版|情感海报排版|冲击式排版|国风题字排版|人物传奇式排版)[:：][\s\S]*$/u;
+  const visualPrompt = String(value || "")
+    .replace(marker, "")
+    .replace(/^文字冲击海报构图法：[\s\S]*?适合观点、悬念、反转类内容[，。]?/u, "高对比、强冲击的人物故事海报底图，背景低饱和或压暗，中央预留简洁视觉区，")
+    .replace(/。画面中避免出现[:：][\s\S]*$/u, "")
+    .trim();
+  return `${visualPrompt}，只生成干净的封面视觉底图，按所选海报构图预留清晰标题区；画面中绝对不得出现任何文字、字母、数字、印章、水印、标志、招牌或乱码`;
+}
+
+function coverCanvasSize(aspectRatio) {
+  if (aspectRatio === "3:4") return { width: 1080, height: 1440 };
+  if (aspectRatio === "9:16") return { width: 1080, height: 1920 };
+  if (aspectRatio === "4:3") return { width: 1440, height: 1080 };
+  if (aspectRatio === "16:9") return { width: 1920, height: 1080 };
+  return { width: 1080, height: 1080 };
+}
+
+function compactChineseActionPrompt(item, shotId, task, aspectRatio) {
+  const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
+  const text = String(shot?.text || item?.prompt || "");
+  return [
+    `Black-and-white, realistic archival documentary photography, ${aspectRatio} vertical frame, Republican-era China, restrained film grain.`,
+    `A historically plausible East Asian Chinese man, never Western, European, white, or mixed-race. Scene and action: ${referenceActionScene(text, shotId)}.`,
+    "COMPOSITION HARD RULE: cinematic environmental action shot, camera 4 to 8 metres away; show the full figure or three-quarter figure and the period room, street, or landscape. The face is small and never fills the frame.",
+    "NOT a portrait, NOT a headshot, NOT a close-up. No readable text, no watermark, no books, no posters, no exposed scrolls or papers, no modern clothes, no modern architecture, no illustration.",
+  ].join(" ");
+}
+
+function compactEnvironmentPrompt(item, shotId, task, aspectRatio) {
+  const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
+  const text = String(shot?.text || item?.prompt || "");
+  const explicitScene = String(item?.environmentScene || "").trim();
+  const objectScene = explicitScene || (/(?:出殡|吊唁|街头|民众)/u.test(text)
+    ? "空荡的1964年台北旧街，雨后路面、花圈、空置木椅与关闭的旧店门"
+    : /(?:保险箱|金条|美钞)/u.test(text)
+      ? "简朴旧宅中打开的空保险箱、旧木柜和一盏台灯"
+      : /(?:布鞋|家书|袜子|棺材)/u.test(text)
+        ? "旧木桌上的磨烂布鞋、破袜子、泛黄家书和墨瓶"
+        : /(?:庙|石碑|旧书)/u.test(text)
+          ? "荒废庙门前的无字石碑、散落旧书和风吹落叶"
+          : /(?:上海|逃出来)/u.test(text)
+            ? "民国上海雨夜的空街、电车轨道、关闭的店铺和路灯"
+            : /(?:摆摊|写信|诉状)/u.test(text)
+              ? "路边空写字摊、毛笔、砚台、信封和低矮木桌"
+              : /(?:报纸|排版|发行|查禁)/u.test(text)
+                ? "空无一人的民国报馆，铅字印刷机、卷纸、散落空白报纸"
+                : /(?:学校|义学|读书)/u.test(text)
+                  ? "陕西乡村义学的空教室、木课桌、书本和窗光"
+                  : /(?:嘉陵江|草堂|对联)/u.test(text)
+                    ? "嘉陵江边一间空茅草屋、书案、毛笔、砚台和山雾"
+                    : /(?:战士|前线|字帖)/u.test(text)
+                      ? "空旷战地中的旧行囊、一本合拢字帖、褪色军毯与泥地"
+                      : /(?:望大陆|高山|故乡)/u.test(text)
+                        ? "空无一人的高山远景、云雾、石阶和远方山脉"
+                        : referenceScene(text));
+  return [
+    `Black-and-white archival still-life photography, ${aspectRatio} vertical composition, Republican-era to 1960s China, film grain, documentary light.`,
+    `The only subjects are ${objectScene}.`,
+    "ABSOLUTELY EMPTY SCENE: no people, no faces, no human figures, no hands, no body parts, no silhouettes, no portraits, no statues, no reflections of people.",
+    "Only objects, architecture, or landscape. Do not show books, papers, signs, posters, steles, newspapers, calligraphy, or letters. No readable text, no watermark, no modern elements, no illustration.",
+  ].join(" ");
+}
+
 function shotUsesCharacterReference(shot, provided, track) {
   if (!track?.needsCharacterCard) return false;
   if (typeof provided?.useReference === "boolean") return provided.useReference;
@@ -596,6 +880,23 @@ function shotUsesCharacterReference(shot, provided, track) {
   const environmentOnly = /(?:纯环境|空镜|无人物|不出现人物|建筑空景|街景空景|物件空镜)/u.test(visual);
   if (environmentOnly) return false;
   return /(?:主角|人物|男孩|女孩|男人|女人|老人|少年|少女|母亲|父亲|李香兰|山口淑子)/u.test(visual);
+}
+
+function shotUsesProductReference(shot, provided, track) {
+  if (!isProductReferenceTrack(track)) return false;
+  if (typeof provided?.useReference === "boolean") return provided.useReference;
+  if (typeof provided?.use_reference === "boolean") return provided.use_reference;
+  const visual = String(shot?.visual || provided?.prompt || provided?.desc_prompt || "");
+  if (/(?:纯环境|空镜|无产品|不出现产品|不出现器物|人物独立镜头)/u.test(visual)) return false;
+  if (track?.id === "ecommerce") return /(?:产品|商品|包装|瓶|盒|罐|主推|器具|设备|工具|使用|展示)/u.test(visual);
+  if (track?.id === "health-book") return /(?:书|食材|药材|茶|汤|杯|壶|锅|器具|产品|包装|瓶|罐)/u.test(visual);
+  return /(?:器物|文物|书法|碑|鼎|香炉|瓷|陶|玉|纹样|服饰|建筑构件|产品)/u.test(visual);
+}
+
+function shotUsesTrackReference(shot, provided, track) {
+  return isProductReferenceTrack(track)
+    ? shotUsesProductReference(shot, provided, track)
+    : shotUsesCharacterReference(shot, provided, track);
 }
 
 const environmentNarrativePattern = /(?:法庭|审判|国籍|身份材料|护照|文件|报纸|学校|广播|银幕|电影公司|电影系统|满映|摄影机|胶片|唱片|影院|舞厅|霓虹|城市|上海|东北|九一八|伪满洲国|战争|侵略|宣传|舞台|名字|身份|参议院|议员|历史|时代|旋律|歌曲)/u;
@@ -618,11 +919,25 @@ function environmentScore(shot, provided, index) {
 
 function buildReferencePlan(shots, providedPrompts, track) {
   const plan = new Map();
-  if (!track?.needsCharacterCard) {
+  const mode = referencePlanMode(track);
+  if (mode === "none") {
     shots.forEach((shot) => plan.set(shot.id, false));
     return plan;
   }
-  const targetEnvironmentCount = Math.max(6, Math.min(22, Math.round(shots.length * 0.28)));
+  if (mode === "picture-book") {
+    return buildPictureBookReferencePlan(shots, providedPrompts);
+  }
+  if (mode === "per-shot") {
+    shots.forEach((shot, index) => {
+      const provided = providedPrompts.find((item) => Number(item.shotId || item.id) === Number(shot.id)) || providedPrompts[index] || {};
+      plan.set(shot.id, shotUsesTrackReference(shot, provided, track));
+    });
+    return plan;
+  }
+  // A character reference anchors identity; it should not turn a narrative
+  // into a sequence of portraits.  Prefer environment, object, and action
+  // coverage unless the protagonist is materially present in the shot.
+  const targetEnvironmentCount = Math.max(6, Math.min(shots.length - 1, Math.round(shots.length * 0.62)));
   const ranked = shots.map((shot, index) => {
     const provided = providedPrompts.find((item) => Number(item.shotId || item.id) === Number(shot.id)) || providedPrompts[index] || {};
     return { id: shot.id, index, score: environmentScore(shot, provided, index) };
@@ -659,6 +974,56 @@ function cameraComposition(index, useReference) {
   return "远景或全景，环境占画面60%以上，人物只作为场景中的叙事主体";
 }
 
+function generalTrackComposition(index, useReference, track) {
+  const slot = index % 10;
+  if (isProductReferenceTrack(track) && useReference) {
+    if ([1, 5, 8].includes(slot)) return "产品或器物细节近景，保留使用环境线索，不得只剩无法辨认的局部";
+    if ([2, 4, 7, 9].includes(slot)) return "中景展示核心产品或器物与真实使用场景，主体清晰但不遮满画面";
+    return "环境建立镜头，核心产品或器物仍可辨认，场景与道具共同承担叙事";
+  }
+  if ([1, 5, 8].includes(slot)) return "叙事近景，主体清晰并保留必要环境线索，避免连续大头特写";
+  if ([2, 4, 7, 9].includes(slot)) return "中景，完整展示本镜动作、主体关系与场景信息";
+  return "远景或建立镜头，以当前字幕语义决定人物、产品、器物或环境的画面占比";
+}
+
+async function finalizeTitledCoverAsset({ saved, shotId, body, generationTask, aspectRatio }) {
+  if (!saved?.path || !body.coverBackgroundOnly || shotId < 9000 || !generationTask) return saved;
+  const mode = shotId === 9001
+    ? generationTask.options?.coverMode
+    : generationTask.options?.secondCoverMode;
+  if (mode !== "titled") return saved;
+  const title = String(generationTask.artifacts?.rewrite?.title || generationTask.title || "").trim();
+  const subtitles = Array.isArray(generationTask.artifacts?.rewrite?.subtitle)
+    ? generationTask.artifacts.rewrite.subtitle.map((line) => String(line || "").trim()).filter(Boolean).slice(0, 2)
+    : [];
+  if (!title || subtitles.length === 0) throw new Error("封面精确排字失败：缺少主标题或副标题");
+  const size = coverCanvasSize(aspectRatio);
+  try {
+    const rendered = await renderTitledCover({
+      sourcePath: saved.path,
+      title,
+      subtitles,
+      width: size.width,
+      height: size.height,
+      templateId: String(body.coverTemplateId || generationTask.options?.coverTemplateId || "cinematic-poster"),
+    });
+    if (!rendered) throw new Error("排字器未返回封面文件");
+    return {
+      ...saved,
+      bytes: rendered.bytes,
+      width: rendered.width,
+      height: rendered.height,
+      sourceBackupPath: rendered.backupPath,
+      textComposited: true,
+      textRenderer: rendered.textRenderer,
+    };
+  } catch (error) {
+    const failure = new Error(`封面精确排字失败：${error instanceof Error ? error.message : "未知错误"}`);
+    failure.code = "COVER_TEXT_RENDER_FAILED";
+    throw failure;
+  }
+}
+
 async function generateMinimaxImages(body) {
   const prompts = Array.isArray(body.prompts) ? body.prompts : [];
   if (prompts.length === 0) throw new Error("缺少绘图 prompt");
@@ -671,53 +1036,72 @@ async function generateMinimaxImages(body) {
     ? body.aspectRatio
     : "9:16";
   const track = originalTrack(body.track);
-  const style = originalStyle(body.visualStyle, track);
   let subjectReference = null;
   let generationTask = null;
   if (body.taskId) {
     generationTask = await taskStore.readTask(body.taskId);
     const integrityIssue = taskRewriteIntegrityIssue(generationTask);
     if (integrityIssue) throw new Error(`Step 2 完整性校验未通过：${integrityIssue}`);
-    const reference = generationTask?.options?.referenceImage;
-    if (reference?.path && existsSync(reference.path)) {
+    const references = taskCharacterReferences(generationTask, track);
+    // MiniMax documents subject_reference with an externally reachable image URL.
+    // Prefer the vetted source URL when one was saved with the task; local uploads
+    // retain the data-URL fallback so offline user assets still work.
+    const entries = await Promise.all(references.slice(0, 3).map(async (reference) => {
+      if (typeof reference?.sourceUrl === "string" && /^https:\/\//u.test(reference.sourceUrl)) {
+        return { type: "character", image_file: reference.sourceUrl };
+      }
+      if (!reference?.path || !existsSync(reference.path)) return null;
       const extension = extname(reference.path).toLowerCase();
       const mime = extension === ".png" ? "image/png" : "image/jpeg";
       const encoded = (await readFile(reference.path)).toString("base64");
-      if (encoded.length < 14 * 1024 * 1024) {
-        subjectReference = [{ type: "character", image_file: `data:${mime};base64,${encoded}` }];
-      }
-    }
+      return encoded.length < 14 * 1024 * 1024 ? { type: "character", image_file: `data:${mime};base64,${encoded}` } : null;
+    }));
+    // image-01 currently accepts exactly one image_reference.  The task may
+    // preserve several historical sources, but only a prepared contact sheet
+    // can be sent as the one provider reference.
+    subjectReference = entries.filter(Boolean).slice(0, 1);
   }
+  const style = originalStyle(
+    body.visualStyle,
+    track,
+    body.visualStyleOverride || generationTask?.options?.visualStyleOverride,
+  );
   const selectedPrompts = prompts.slice(0, maxImages);
-  function coverBackgroundPrompt(value, shotId) {
-    if (!body.coverBackgroundOnly || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return value;
-    const marker = /[，。；]?(?:整体按电影海报式排版|极简排版|情感海报排版|冲击式排版|国风题字排版|人物传奇式排版)[:：][\s\S]*$/u;
-    const visualPrompt = String(value).replace(marker, "").replace(/。画面中避免出现[:：][\s\S]*$/u, "").trim();
-    return `${visualPrompt}，只生成干净的封面视觉底图，中部构图简洁并预留标题区；画面中不得出现任何文字、字母、数字、水印、标志、招牌或乱码`;
-  }
-  async function finalizeCover(saved, shotId) {
-    if (!saved || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return saved;
-    try {
-      const rendered = await renderTitledCover({
-        sourcePath: saved.path,
-        title: generationTask.artifacts?.rewrite?.title || generationTask.title,
-        subtitles: generationTask.artifacts?.rewrite?.subtitle || [],
-      });
-      return rendered ? { ...saved, bytes: rendered.bytes, width: rendered.width, height: rendered.height, sourceBackupPath: rendered.backupPath, textComposited: true } : saved;
-    } catch (error) {
-      console.warn("[cover] 精确标题合成失败，保留 AI 原图:", error);
-      return saved;
-    }
+  const forcedAssetVersion = body.force ? Date.now() : 0;
+  function generatedAssetUrl(saved, fallback) {
+    if (!saved?.url) return fallback;
+    if (!forcedAssetVersion) return saved.url;
+    const separator = saved.url.includes("?") ? "&" : "?";
+    return `${saved.url}${separator}v=${forcedAssetVersion}`;
   }
   const images = await mapLimit(selectedPrompts, 3, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
-    const useSubjectReference = Boolean(subjectReference) && promptUsesReference(item, shotId, generationTask, track);
-    const prompt = coverBackgroundPrompt(String(item.prompt || "").trim(), shotId).slice(0, 1500);
+    const useSubjectReference = Boolean(subjectReference)
+      && !isProductReferenceTrack(track)
+      && promptUsesReference(item, shotId, generationTask, track);
+    const isCharacterAction = item?.characterAction === true;
+    // A prompt sent to image-01 must preserve the scene and composition.  In
+    // particular, do not prepend a second full identity essay here: that could
+    // consume the 1500-character provider limit before the action is reached.
+    const providerPrompt = isPictureBookTrack(track)
+      ? compactPictureBookProviderPrompt({ item, shotId, task: generationTask, aspectRatio, useReference: useSubjectReference })
+      : isCharacterStoryTrack(track)
+        ? (useSubjectReference
+          ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
+          : isCharacterAction
+            ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
+            : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio))
+        : compactTrackProviderPrompt({ item, shotId, task: generationTask, track, useReference: useSubjectReference });
+    const prompt = (body.coverBackgroundOnly && shotId >= 9000
+      ? cleanCoverBackgroundPrompt(providerPrompt)
+      : providerPrompt).slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
     // A failed/aborted browser run may already have written some images before
     // task.json was updated. Reuse those files so retrying is a true checkpoint
     // resume and never spends API credits on the same shot twice.
-    if (body.taskId && !body.force) {
+    const existingRecord = generationTask?.media?.coverImages?.find((image) => Number(image.shotId) === shotId);
+    const resumableCover = !body.coverBackgroundOnly || existingRecord?.textComposited === true;
+    if (body.taskId && !body.force && resumableCover) {
       const existingPath = taskStore.resolveTaskFile(body.taskId, "images", `${shotId}.jpg`);
       if (existingPath && existsSync(existingPath)) {
         const existingStat = await stat(existingPath);
@@ -751,7 +1135,9 @@ async function generateMinimaxImages(body) {
           aspect_ratio: aspectRatio,
           response_format: "base64",
           n: 1,
-          prompt_optimizer: true,
+          // Optimising an identity-constrained prompt can dilute the supplied
+          // person reference. Preserve the exact facial/ethnicity constraints.
+          prompt_optimizer: false,
           ...(useSubjectReference ? { subject_reference: subjectReference } : {}),
           aigc_watermark: false,
         }, 180000);
@@ -761,16 +1147,21 @@ async function generateMinimaxImages(body) {
           let saved = body.taskId
             ? await taskStore.saveBuffer(body.taskId, "images", `${shotId}.jpg`, Buffer.from(base64, "base64"))
             : null;
-          saved = await finalizeCover(saved, shotId);
+          saved = await finalizeTitledCoverAsset({ saved, shotId, body, generationTask, aspectRatio });
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
             prompt: activePrompt,
             useReference: useSubjectReference,
             retryLevel: attempt,
-            url: saved?.url || `data:image/jpeg;base64,${base64}`,
+            url: generatedAssetUrl(saved, `data:image/jpeg;base64,${base64}`),
             path: saved?.path,
             bytes: saved?.bytes || Math.round(base64.length * 0.75),
+            width: saved?.width,
+            height: saved?.height,
+            sourceBackupPath: saved?.sourceBackupPath,
+            textComposited: saved?.textComposited,
+            textRenderer: saved?.textRenderer,
             provider: "minimax",
             status: "ready",
           };
@@ -779,16 +1170,21 @@ async function generateMinimaxImages(body) {
           let saved = body.taskId
             ? await taskStore.saveRemoteAsset(body.taskId, "images", `${shotId}.jpg`, imageUrl)
             : null;
-          saved = await finalizeCover(saved, shotId);
+          saved = await finalizeTitledCoverAsset({ saved, shotId, body, generationTask, aspectRatio });
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
             prompt: activePrompt,
             useReference: useSubjectReference,
             retryLevel: attempt,
-            url: saved?.url || imageUrl,
+            url: generatedAssetUrl(saved, imageUrl),
             path: saved?.path,
             bytes: saved?.bytes,
+            width: saved?.width,
+            height: saved?.height,
+            sourceBackupPath: saved?.sourceBackupPath,
+            textComposited: saved?.textComposited,
+            textRenderer: saved?.textRenderer,
             provider: "minimax",
             status: "ready",
           };
@@ -796,6 +1192,7 @@ async function generateMinimaxImages(body) {
         throw new Error("MiniMax 未返回图片数据");
       } catch (error) {
         lastError = error;
+        if (error?.code === "COVER_TEXT_RENDER_FAILED") break;
       }
     }
     return {
@@ -848,7 +1245,9 @@ async function generateCompatibleImages(body) {
   const generationTask = body.taskId ? await taskStore.readTask(body.taskId) : null;
   const track = originalTrack(body.track);
   let referenceDataUrl = null;
-  const reference = generationTask?.options?.referenceImage;
+  const referenceKindMatches = !generationTask?.options?.referenceKind
+    || generationTask.options.referenceKind === track?.referenceKind;
+  const reference = referenceKindMatches ? generationTask?.options?.referenceImage : null;
   if (config.supportsReference && reference?.path && existsSync(reference.path)) {
     const extension = extname(reference.path).toLowerCase();
     const mime = extension === ".png" ? "image/png" : "image/jpeg";
@@ -858,7 +1257,10 @@ async function generateCompatibleImages(body) {
   const concurrency = Math.max(1, Math.min(10, Number(config.concurrency) || 2));
   const images = await mapLimit(selectedPrompts, concurrency, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
-    const prompt = String(item.prompt || "").trim().slice(0, 4000);
+    const rawPrompt = String(item.prompt || "").trim();
+    const prompt = (body.coverBackgroundOnly && shotId >= 9000
+      ? cleanCoverBackgroundPrompt(rawPrompt)
+      : rawPrompt).slice(0, 4000);
     const useReference = Boolean(referenceDataUrl) && promptUsesReference(item, shotId, generationTask, track);
     try {
       const response = await fetchWithTimeout(endpoint, {
@@ -892,14 +1294,14 @@ async function generateCompatibleImages(body) {
       } else {
         throw new Error("图片 Provider 未返回 b64_json 或 url");
       }
-      if (saved && shotId >= 9000 && generationTask?.options?.coverMode === "titled") {
-        const rendered = await renderTitledCover({
-          sourcePath: saved.path,
-          title: generationTask.artifacts?.rewrite?.title || generationTask.title,
-          subtitles: generationTask.artifacts?.rewrite?.subtitle || [],
-        }).catch(() => null);
-        if (rendered) saved = { ...saved, bytes: rendered.bytes };
-      }
+      saved = await finalizeTitledCoverAsset({
+        saved,
+        shotId,
+        body,
+        generationTask,
+        aspectRatio: body.aspectRatio || "9:16",
+      });
+      if (saved?.url) url = saved.url;
       return {
         id: payload.id || `compatible-image-${Date.now()}-${index}`,
         shotId,
@@ -907,6 +1309,11 @@ async function generateCompatibleImages(body) {
         url,
         path: saved?.path,
         bytes: saved?.bytes,
+        width: saved?.width,
+        height: saved?.height,
+        sourceBackupPath: saved?.sourceBackupPath,
+        textComposited: saved?.textComposited,
+        textRenderer: saved?.textRenderer,
         retryLevel: 0,
         useReference,
         provider,
@@ -1068,7 +1475,7 @@ async function probeMediaDuration(file) {
   return undefined;
 }
 
-function normalizeCharacterCard(value) {
+function normalizeCharacterCard(value, track) {
   if (!value || typeof value !== "object") return undefined;
   const card = {
     name: clampString(value.name || value.characterName || value.character),
@@ -1079,17 +1486,24 @@ function normalizeCharacterCard(value) {
     clothing: clampString(value.clothing || value.costume || value.outfit),
   };
   if (!Object.values(card).some(Boolean)) return undefined;
+  const pictureBook = isPictureBookTrack(track);
   const feminine = /女/u.test(`${card.gender}${card.identity}`);
   const masculine = /男/u.test(`${card.gender}${card.identity}`);
-  if (!card.age) card.age = "青年至中年";
-  if (!card.appearance) {
+  if (!card.age) card.age = pictureBook ? "儿童绘本角色" : "青年至中年";
+  if (!card.appearance && pictureBook) {
+    card.appearance = "圆润可爱、表情友好；种类、颜色、体型和标志性特征在全部分镜中保持一致";
+  } else if (!card.appearance) {
     card.appearance = feminine
       ? "中长深色头发，椭圆脸，表情克制内敛，眼神含蓄深邃"
       : masculine
         ? "短深色头发，轮廓自然，表情克制内敛，眼神含蓄深邃"
         : "深色头发，五官自然，表情克制内敛，眼神含蓄深邃";
   }
-  if (!card.clothing) card.clothing = "深色素雅服装；跨分镜保持同一脸型、发型、服装与年龄";
+  if (!card.clothing) {
+    card.clothing = pictureBook
+      ? "固定服饰与标志性配件全程一致；不得生成写实儿童肖像"
+      : "深色素雅服装；跨分镜保持同一脸型、发型、服装与年龄";
+  }
   return card;
 }
 
@@ -1103,7 +1517,7 @@ function characterCardPrompt(card) {
 
 function normalizePipelineResult(step, payload, context, artifacts) {
   const track = originalTrack(context.track);
-  const style = originalStyle(context.visualStyle, track);
+  const style = originalStyle(context.visualStyle, track, context.visualStyleOverride);
   if (step === "precheck") {
     const cleanText = clampString(payload.cleanText || payload.cleaned_text || payload.content, context.inputText).slice(0, 10000);
     return {
@@ -1168,7 +1582,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
           }));
         }).slice(0, 60).map((shot, index) => ({ ...shot, id: index + 1 })),
         characterCard: track?.needsCharacterCard
-          ? normalizeCharacterCard(payload.characterCard || payload.character_card || payload.character)
+          ? normalizeCharacterCard(payload.characterCard || payload.character_card || payload.character, track)
           : undefined,
       },
     };
@@ -1177,6 +1591,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
   const suppliedPrompts = payload.prompts || payload.sentences || payload.images;
   const prompts = Array.isArray(suppliedPrompts) ? suppliedPrompts : [];
   const referencePlan = buildReferencePlan(shots, prompts, track);
+  const pictureBook = isPictureBookTrack(track);
   return {
     step: "prompts",
     data: {
@@ -1185,12 +1600,15 @@ function normalizePipelineResult(step, payload, context, artifacts) {
       styleId: style?.id || "realistic",
       prompts: shots.map((shot, index) => {
         const provided = prompts.find((item) => Number(item.shotId || item.id) === shot.id) || prompts[index] || {};
-        const useReference = referencePlan.get(shot.id) ?? shotUsesCharacterReference(shot, provided, track);
+        const useReference = referencePlan.get(shot.id) ?? shotUsesTrackReference(shot, provided, track);
         const fixedCharacter = useReference ? characterCardPrompt(artifacts.storyboard?.characterCard) : "";
         const fallbackCore = `${shot.visual}，${shot.emotion}`;
-        const suppliedCore = useReference
-          ? removeCameraCliches(clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore))
-          : environmentSceneForShot(shot);
+        const supplied = clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore);
+        const suppliedCore = pictureBook
+          ? supplied
+          : isCharacterStoryTrack(track)
+            ? useReference ? removeCameraCliches(supplied) : environmentSceneForShot(shot)
+            : supplied;
         const narrativeCue = clampString(shot.text).replace(/\s+/g, " ").slice(0, 100);
         const semanticCore = narrativeCue && !suppliedCore.includes(narrativeCue.slice(0, 12))
           ? `${suppliedCore}。本镜叙事内容（仅用于转化成画面，禁止在图中生成文字）：${narrativeCue}`
@@ -1198,7 +1616,12 @@ function normalizePipelineResult(step, payload, context, artifacts) {
         const characterCore = fixedCharacter && !semanticCore.includes(fixedCharacter.slice(0, 12))
           ? `固定主角设定：${fixedCharacter}。当前画面：${semanticCore}`
           : semanticCore;
-        const corePrompt = `${characterCore}。镜头构图硬约束：${cameraComposition(index, useReference)}`;
+        const composition = pictureBook
+          ? pictureBookComposition(index, useReference)
+          : isCharacterStoryTrack(track)
+            ? cameraComposition(index, useReference)
+            : generalTrackComposition(index, useReference, track);
+        const corePrompt = `${characterCore}。镜头构图硬约束：${composition}`;
         const prefixMarker = clampString(style?.prefix).slice(0, 14);
         const negativePrompt = clampString(provided.negativePrompt || provided.negative_prompt, style?.negativePrompt);
         const positivePrompt = prefixMarker && corePrompt.includes(prefixMarker)
@@ -1218,7 +1641,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
 
 function pipelineContextPayload(context, artifacts) {
   const track = originalTrack(context.track);
-  const style = originalStyle(context.visualStyle, track);
+  const style = originalStyle(context.visualStyle, track, context.visualStyleOverride);
   const sourceText = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
   return {
     title: context.title,
@@ -1422,7 +1845,7 @@ function stockQueryVariants(plan) {
   append(plan.exactSubject);
   for (const value of [plan.queryEn, plan.queryZh]) {
     append(value);
-    if (!/^[\x00-\x7F]+$/.test(String(value || ""))) continue;
+    if (![...String(value || "")].every((character) => character.codePointAt(0) <= 0x7f)) continue;
     const words = String(value).trim().split(/\s+/).filter(Boolean);
     for (let length = words.length - 1; length >= Math.min(3, words.length); length -= 1) {
       append(words.slice(0, length).join(" "));
@@ -1687,7 +2110,7 @@ async function runLlmPipeline(body) {
           `当前只提取跨分镜人物一致性卡，严格返回 JSON：${JSON.stringify({ characterCard: { name: "", identity: "", age: "", gender: "", appearance: "", clothing: "" } })}`,
           { ...base, shots },
         ), 0.3, "人物一致性卡", { attempts: 1, timeoutMs: 90000 });
-        characterCard = cardPayload.characterCard || cardPayload.character_card;
+        characterCard = normalizeCharacterCard(cardPayload.characterCard || cardPayload.character_card, track);
       } catch (error) {
         console.warn(`人物一致性卡生成失败，继续使用逐镜语义提示：${providerMessage(error, "未知错误")}`);
       }
@@ -1696,9 +2119,7 @@ async function runLlmPipeline(body) {
   }
 
   let promptPayload = { prompts: [] };
-  const referenceDiscipline = track?.needsCharacterCard
-    ? `\n人物参考图纪律（与原客户端 use_reference 契约一致）：\n- 每条 prompt 必须返回 useReference 布尔值。\n- 只有主角本人实际出现在画面中时才为 true；纯环境、建筑、街景、道具、文件、唱片、胶片、空镜和配角独立镜头必须为 false。\n- 人物故事应同时包含 true 和 false，禁止整批全为 true。\n- 不得连续 3 镜使用面部近景或大头特写；整体尽量按近景/中景/全景约 3:4:3 分布。\n- 没有人物的句子优先设计可讲故事的时代场景或关键物件，不要为了使用参考图强塞主角。`
-    : "\n每条 prompt 必须返回 useReference: false。";
+  const referenceDiscipline = referenceDisciplineForTrack(track);
   try {
     promptPayload = await callLlmJson(config, pipelineMessages(
       [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt, context.ttsMode === "continuous" ? tutorialImagePrompt : "", originalPromptLibrary.producerAgentPrompt],
@@ -1944,6 +2365,10 @@ function benchmarkSourceUrl(value) {
     throw new Error("视频号视频分享链接格式不正确");
   }
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("视频号视频分享链接必须使用 HTTP 或 HTTPS");
+  const hostname = url.hostname.toLowerCase();
+  if (hostname !== "weixin.qq.com" && hostname !== "channels.weixin.qq.com") {
+    throw new Error("对标监控目前仅支持视频号分享链接；抖音账号同步在原版中仍为“即将支持”");
+  }
   return url.toString();
 }
 
@@ -1959,6 +2384,196 @@ function benchmarkProviderUrl(pathname) {
   return new URL(pathname, `${base.toString().replace(/\/+$/, "")}/`);
 }
 
+function benchmarkExternalEndpoint(value, label) {
+  let endpoint;
+  try {
+    endpoint = new URL(value);
+  } catch {
+    throw new Error(`${label}配置无效`);
+  }
+  const isLoopback = ["localhost", "127.0.0.1", "::1"].includes(endpoint.hostname);
+  if (endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && isLoopback)) {
+    throw new Error(`${label}必须使用 HTTPS；本机回环测试服务可使用 HTTP`);
+  }
+  return endpoint;
+}
+
+function normalizeBenchmarkSourceCredential(value, source) {
+  const apiKey = String(value?.apiKey || value?.key || "").trim();
+  if (!apiKey) return null;
+  const provider = value?.provider === "justone" ? "justone" : "dajiala";
+  return {
+    provider,
+    apiKey,
+    verifycode: String(value?.verifycode || "").trim(),
+    source,
+    balance: Number.isFinite(Number(value?.balance)) ? Number(value.balance) : null,
+    checkedAt: String(value?.checkedAt || "").trim() || null,
+    persisted: source === basename(benchmarkSourceFile),
+  };
+}
+
+async function findBenchmarkSourceCredential() {
+  const justOneEnvironment = normalizeBenchmarkSourceCredential({
+    provider: "justone",
+    apiKey: process.env.STORYBOUND_JUSTONE_API_TOKEN || process.env.JUSTONE_API_TOKEN,
+  }, "环境变量");
+  if (justOneEnvironment) return justOneEnvironment;
+  const environment = normalizeBenchmarkSourceCredential({
+    provider: "dajiala",
+    apiKey: process.env.STORYBOUND_DAJIALA_API_KEY || process.env.DAJIALA_API_KEY,
+    verifycode: process.env.STORYBOUND_DAJIALA_VERIFYCODE || process.env.DAJIALA_VERIFYCODE,
+  }, "环境变量");
+  if (environment) return environment;
+  try {
+    return normalizeBenchmarkSourceCredential(
+      JSON.parse(await readFile(benchmarkSourceFile, "utf8")),
+      basename(benchmarkSourceFile),
+    );
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    if (error instanceof SyntaxError) throw new Error("本机对标数据源配置已损坏，请删除后重新配置");
+    throw error;
+  }
+}
+
+async function writeBenchmarkSourceCredential(credential) {
+  await mkdir(dirname(benchmarkSourceFile), { recursive: true });
+  const temporary = `${benchmarkSourceFile}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify({
+    provider: credential.provider,
+    apiKey: credential.apiKey,
+    verifycode: credential.verifycode || "",
+    balance: credential.balance,
+    checkedAt: credential.checkedAt,
+  }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await rename(temporary, benchmarkSourceFile);
+  await chmod(benchmarkSourceFile, 0o600).catch(() => undefined);
+}
+
+async function benchmarkDajialaFetch(endpointValue, body, multipart = false) {
+  const endpoint = benchmarkExternalEndpoint(endpointValue, "对标数据源地址");
+  const requestBody = multipart ? (() => {
+    const form = new FormData();
+    Object.entries(body).forEach(([key, value]) => form.set(key, String(value ?? "")));
+    return form;
+  })() : JSON.stringify(body);
+  const providerResponse = await fetchWithTimeout(endpoint, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      ...(multipart ? {} : { "Content-Type": "application/json" }),
+    },
+    body: requestBody,
+  }, 45_000);
+  const providerText = await providerResponse.text();
+  let payload;
+  try {
+    payload = JSON.parse(providerText);
+  } catch {
+    throw new Error(`对标数据源返回异常（HTTP ${providerResponse.status}）`);
+  }
+  const code = Number(payload?.code);
+  if (code === 20001) {
+    const error = new Error("对标数据接口余额不足，请充值后重试");
+    error.statusCode = 402;
+    throw error;
+  }
+  if (!providerResponse.ok || (Number.isFinite(code) && code !== 0)) {
+    const messages = {
+      101: "视频号账号标识无效，请重新用该账号的视频分享链接识别",
+      102: "历史分页游标已失效，请重置分页后重新刷新",
+      103: "视频号作品列表暂时获取失败，请稍后再试",
+      105: "对标数据源不支持当前请求类型",
+      50000: "对标数据源暂时异常，请稍后再试",
+      [-2]: "该视频无法播放或已不可访问",
+    };
+    const providerError = benchmarkText(payload?.msg || payload?.message);
+    const friendlyProviderError = /key|verifycode|密钥|验证码/i.test(providerError)
+      ? "访问密钥或验证码不正确，请回到大家啦数据后台核对"
+      : providerError;
+    const error = new Error(
+      messages[code] || friendlyProviderError || `对标数据源请求失败（HTTP ${providerResponse.status}）`,
+    );
+    error.statusCode = providerResponse.status >= 400 ? providerResponse.status : 502;
+    throw error;
+  }
+  return payload;
+}
+
+async function testBenchmarkSourceCredential(credential) {
+  const payload = await benchmarkDajialaFetch(benchmarkDajialaBalanceEndpoint, {
+    key: credential.apiKey,
+    verifycode: credential.verifycode || "",
+  });
+  const balance = Number(payload?.remain_money);
+  if (!Number.isFinite(balance)) throw new Error("数据源已响应，但没有返回可识别的余额");
+  return { balance, checkedAt: new Date().toISOString() };
+}
+
+async function saveBenchmarkSource(input) {
+  const apiKey = String(input?.apiKey || "").trim();
+  if (!apiKey) throw new Error("请粘贴对标数据访问密钥（API Key）");
+  if (apiKey.length > 1000) throw new Error("API Key 长度异常");
+  const provider = input?.provider === "justone" ? "justone" : "dajiala";
+  const credential = {
+    provider,
+    apiKey,
+    verifycode: String(input?.verifycode || "").trim().slice(0, 1000),
+  };
+  if (provider === "justone") {
+    await writeBenchmarkSourceCredential({ ...credential, balance: null, checkedAt: new Date().toISOString() });
+    return { balance: null, checkedAt: new Date().toISOString() };
+  }
+  const tested = await testBenchmarkSourceCredential(credential);
+  await writeBenchmarkSourceCredential({ ...credential, ...tested });
+  return tested;
+}
+
+async function benchmarkAccountSyncStatus() {
+  const direct = await findBenchmarkSourceCredential();
+  if (direct) {
+    return {
+      configured: true,
+      provider: direct.provider === "justone"
+        ? benchmarkExternalEndpoint(benchmarkJustOneBase, "对标数据源地址").hostname
+        : benchmarkExternalEndpoint(benchmarkDajialaEndpoint, "对标数据源地址").hostname,
+      mode: direct.provider === "justone" ? "justone" : "direct",
+      source: direct.source,
+      balance: direct.balance,
+      checkedAt: direct.checkedAt,
+      canDelete: direct.persisted,
+      requiresOriginalAccount: false,
+      mayConsumeCredits: true,
+    };
+  }
+  if (benchmarkAccountEmail && benchmarkAccountFingerprint) {
+    return {
+      configured: true,
+      provider: benchmarkProviderUrl("/").hostname,
+      mode: "storybound-proxy",
+      source: "环境变量",
+      balance: null,
+      checkedAt: null,
+      canDelete: false,
+      requiresOriginalAccount: true,
+      mayConsumeCredits: true,
+    };
+  }
+  return {
+    configured: false,
+    provider: "justoneapi.com / dajiala.com",
+    mode: "unconfigured",
+    source: null,
+    balance: null,
+    checkedAt: null,
+    canDelete: false,
+    requiresOriginalAccount: false,
+    mayConsumeCredits: true,
+    ready: false,
+  };
+}
+
 function benchmarkText(value, fallback = "") {
   return String(value ?? fallback).trim().slice(0, 10_000);
 }
@@ -1966,6 +2581,25 @@ function benchmarkText(value, fallback = "") {
 function benchmarkCount(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+function benchmarkEpoch(value) {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric > 10_000_000_000 ? Math.floor(numeric / 1000) : numeric;
+  const parsed = Date.parse(String(value || "").trim().replace(" ", "T"));
+  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+}
+
+function benchmarkMediaExtension(value, fallback = "mp4") {
+  const normalized = benchmarkText(value).toLowerCase().replace(/^\./, "");
+  return /^[a-z0-9]{2,8}$/.test(normalized) ? normalized : fallback;
+}
+
+function benchmarkMediaIsExpired(value) {
+  const text = benchmarkText(value);
+  if (!text) return false;
+  const timestamp = Date.parse(text.replace(" ", "T"));
+  return Number.isFinite(timestamp) && timestamp <= Date.now() + 60_000;
 }
 
 async function parseBenchmarkVideo(input) {
@@ -2021,9 +2655,33 @@ async function parseBenchmarkVideo(input) {
 }
 
 async function benchmarkAccountRequest(pathname, body) {
+  const directCredential = await findBenchmarkSourceCredential();
+  if (directCredential) {
+    if (directCredential.provider === "justone") {
+      return benchmarkJustOneRequest(pathname, body, directCredential);
+    }
+    if (pathname === "/v1/dajiala/feed-info") {
+      return benchmarkDajialaFetch(benchmarkDajialaEndpoint, {
+        feed_info: body.feed_info,
+        key: directCredential.apiKey,
+        type: "12",
+        verifycode: directCredential.verifycode || "",
+      });
+    }
+    if (pathname === "/v1/dajiala/feed-list") {
+      return benchmarkDajialaFetch(benchmarkDajialaEndpoint, {
+        v2_name: body.v2_name,
+        key: directCredential.apiKey,
+        verifycode: directCredential.verifycode || "",
+        type: "1",
+        last_buffer: body.last_buffer || "",
+      }, true);
+    }
+    throw new Error("未知账号同步请求");
+  }
   if (!benchmarkAccountEmail || !benchmarkAccountFingerprint) {
     const error = new Error(
-      "请先到「账号管理」绑定邮箱账户后再使用对标监控",
+      "对标账号自动拉取尚未激活：请到「系统设置 → 对标数据」保存并测试访问密钥",
     );
     error.statusCode = 503;
     throw error;
@@ -2075,6 +2733,160 @@ async function benchmarkAccountRequest(pathname, body) {
   return payload;
 }
 
+async function benchmarkJustOneFetch(pathname, options = {}) {
+  const base = benchmarkExternalEndpoint(benchmarkJustOneBase, "Just One API 地址");
+  const endpoint = new URL(pathname, `${base.toString().replace(/\/+$/, "")}/`);
+  const providerResponse = await fetchWithTimeout(endpoint, {
+    method: options.method || "GET",
+    headers: { Accept: "application/json", ...(options.headers || {}) },
+    body: options.body,
+  }, 120_000);
+  const providerText = await providerResponse.text();
+  let payload;
+  try {
+    payload = JSON.parse(providerText);
+  } catch {
+    throw new Error(`Just One API 返回异常（HTTP ${providerResponse.status}）`);
+  }
+  const code = Number(payload?.code);
+  if (!providerResponse.ok || code !== 0) {
+    const messages = {
+      100: "Just One API Token 无效或未激活",
+      301: "视频号数据采集失败，请稍后重试",
+      302: "视频号数据接口触发速率限制",
+      303: "视频号数据接口今日配额已用完",
+      400: "视频号数据接口参数无效",
+      600: "当前 Token 没有视频号数据权限",
+      601: "Just One API 余额不足",
+      602: "当前 Token 的预算上限已用完",
+    };
+    const error = new Error(messages[code] || benchmarkText(payload?.message || payload?.msg, `Just One API 请求失败（HTTP ${providerResponse.status}）`));
+    error.statusCode = [601, 602].includes(code) ? 402 : providerResponse.status >= 400 ? providerResponse.status : 502;
+    throw error;
+  }
+  return payload;
+}
+
+function benchmarkFindRemoteAccount(value) {
+  const queue = [value];
+  const seen = new Set();
+  let fallback = null;
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const remoteId = benchmarkText(current.v2Name || current.v2_name || current.username || current.userName);
+    const name = benchmarkText(current.nickname || current.nickName || current.name);
+    if (remoteId.endsWith("@finder")) return { remoteId, name, raw: current };
+    if (!fallback && remoteId) fallback = { remoteId, name, raw: current };
+    Object.values(current).forEach((item) => {
+      if (item && typeof item === "object") queue.push(item);
+    });
+  }
+  return fallback;
+}
+
+function benchmarkFindWorkArray(value) {
+  const queue = [value];
+  const seen = new Set();
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    if (Array.isArray(current)) {
+      if (current.some((item) => item && typeof item === "object" && (
+        item.objectId || item.object_id || item.id || item.feedId || item.objectDesc || item.title
+      ))) return current;
+      current.forEach((item) => queue.push(item));
+      continue;
+    }
+    for (const key of ["object", "objects", "items", "list", "feeds", "videos", "objectList", "feedList"]) {
+      if (Array.isArray(current[key])) return current[key];
+    }
+    Object.values(current).forEach((item) => {
+      if (item && typeof item === "object") queue.push(item);
+    });
+  }
+  return [];
+}
+
+function benchmarkFindPagination(value) {
+  const queue = [value];
+  const seen = new Set();
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object" || seen.has(current)) continue;
+    seen.add(current);
+    const lastBuffer = benchmarkText(current.last_buffer || current.lastBuffer || current.next_buffer || current.nextBuffer);
+    const explicit = Number(current.continue_flag ?? current.continueFlag);
+    if (lastBuffer || Number.isFinite(explicit)) {
+      return { lastBuffer, continueFlag: Number.isFinite(explicit) ? explicit : lastBuffer ? 1 : 0 };
+    }
+    Object.values(current).forEach((item) => {
+      if (item && typeof item === "object") queue.push(item);
+    });
+  }
+  return { lastBuffer: "", continueFlag: 0 };
+}
+
+async function benchmarkJustOneRequest(pathname, body, credential) {
+  if (pathname === "/v1/dajiala/feed-info") {
+    const parsed = await parseBenchmarkVideo({ url: body.feed_info });
+    const keyword = parsed.authorName;
+    if (!keyword) throw new Error("单条视频已解析，但没有取得可搜索的作者名称");
+    const endpoint = new URL("/api/weixin-channels/search-account/v3", `${benchmarkJustOneBase}/`);
+    endpoint.searchParams.set("token", credential.apiKey);
+    endpoint.searchParams.set("keyword", keyword);
+    const payload = await benchmarkJustOneFetch(`${endpoint.pathname}${endpoint.search}`);
+    const account = benchmarkFindRemoteAccount(payload?.data);
+    if (!account?.remoteId) throw new Error(`已识别作者“${keyword}”，但独立数据源没有返回账号唯一标识`);
+    return { code: 0, data: { v2_name: account.remoteId, nickname: account.name || keyword, object_id: "" } };
+  }
+  if (pathname === "/v1/dajiala/feed-list") {
+    const endpoint = new URL("/api/weixin-channels/get-account-videos/v1", `${benchmarkJustOneBase}/`);
+    const form = new URLSearchParams({
+      token: credential.apiKey,
+      v2Name: benchmarkText(body.v2_name),
+      last_buffer: benchmarkText(body.last_buffer),
+    });
+    const payload = await benchmarkJustOneFetch(endpoint.pathname, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    });
+    const data = payload?.data && typeof payload.data === "object" ? payload.data : {};
+    const account = benchmarkFindRemoteAccount(data);
+    const rawWorks = benchmarkFindWorkArray(data);
+    const pagination = benchmarkFindPagination(data);
+    return {
+      code: 0,
+      contact: {
+        username: account?.remoteId || body.v2_name,
+        nickname: account?.name || "",
+        head_url: benchmarkText(account?.raw?.headUrl || account?.raw?.head_url || account?.raw?.avatar),
+      },
+      object: rawWorks.map((work) => ({
+        object_id: benchmarkText(work.object_id || work.objectId || work.id || work.feedId),
+        title: benchmarkText(work.title || work.description || work.desc || work?.objectDesc?.description, "未命名视频"),
+        cover_url: benchmarkText(work.cover_url || work.coverUrl || work.cover || work?.objectDesc?.media?.[0]?.coverUrl),
+        download_url: benchmarkText(work.download_url || work.downloadUrl || work.mediaUrl || work.videoUrl || work?.objectDesc?.media?.[0]?.url),
+        decode_key: benchmarkText(work.decode_key || work.decodeKey || work?.objectDesc?.media?.[0]?.decodeKey),
+        openurl: benchmarkText(work.openurl || work.openUrl || work.sourceUrl || work.url),
+        forward_count: benchmarkCount(work.forward_count || work.forwardCount),
+        like_count: benchmarkCount(work.like_count || work.likeCount),
+        comment_count: benchmarkCount(work.comment_count || work.commentCount),
+        fav_count: benchmarkCount(work.fav_count || work.favCount || work.favoriteCount),
+        video_play_len: benchmarkCount(work.video_play_len || work.videoPlayLen || work.duration),
+        publish_time: work.publish_time || work.publishTime || work.createtime || work.createTime,
+      })),
+      last_buffer: pagination.lastBuffer,
+      continue_flag: pagination.continueFlag,
+      cost: 0,
+    };
+  }
+  throw new Error("未知 Just One API 账号同步请求");
+}
+
 async function resolveBenchmarkAccount(input) {
   const sourceUrl = benchmarkSourceUrl(input?.url);
   const payload = await benchmarkAccountRequest("/v1/dajiala/feed-info", { feed_info: sourceUrl });
@@ -2116,25 +2928,124 @@ async function fetchBenchmarkWorks(input) {
       comments: benchmarkCount(work?.comment_count),
       favorites: benchmarkCount(work?.fav_count),
       duration: benchmarkCount(work?.video_play_len),
-      publishTime: benchmarkCount(work?.publish_time),
+      publishTime: benchmarkEpoch(work?.publish_time),
     })),
   };
 }
 
+function mergeBenchmarkSyncedPage(library, accountId, resolved, result, refreshedAt, resetPageDepth) {
+  const accountWorks = library.works.filter((work) => work.accountId === accountId);
+  const byRemoteId = new Map(accountWorks.filter((work) => work.remoteWorkId).map((work) => [work.remoteWorkId, work]));
+  const byUrl = new Map(accountWorks.filter((work) => work.url).map((work) => [work.url, work]));
+  const syncedWorks = result.works.map((remoteWork) => {
+    const existing = byRemoteId.get(remoteWork.remoteWorkId) || byUrl.get(remoteWork.sourceUrl);
+    return {
+      id: existing?.id || `work-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      accountId,
+      url: remoteWork.sourceUrl,
+      mediaUrl: remoteWork.mediaUrl,
+      title: remoteWork.title,
+      publishTime: remoteWork.publishTime ? new Date(remoteWork.publishTime * 1000).toISOString() : "",
+      likes: remoteWork.likes,
+      favorites: remoteWork.favorites,
+      comments: remoteWork.comments,
+      forwards: remoteWork.forwards,
+      growth: existing?.growth || 0,
+      notes: existing?.notes || "",
+      favorite: existing?.favorite || false,
+      created: existing?.created || false,
+      transcript: existing?.transcript || "",
+      analysis: existing?.analysis || "",
+      localMediaName: existing?.localMediaName || "",
+      localMediaType: existing?.localMediaType || "",
+      localMediaSize: existing?.localMediaSize || 0,
+      remoteWorkId: remoteWork.remoteWorkId,
+      description: existing?.description || "",
+      coverUrl: remoteWork.coverUrl,
+      quality: existing?.quality || "",
+      format: existing?.format || "mp4",
+      codec: existing?.codec || "",
+      plays: existing?.plays || 0,
+      expiresAt: existing?.expiresAt || "",
+      duration: remoteWork.duration,
+      decodeKey: remoteWork.decodeKey,
+      createdAt: existing?.createdAt || refreshedAt,
+    };
+  });
+  const syncedIds = new Set(syncedWorks.map((work) => work.id));
+  return {
+    ...library,
+    accounts: library.accounts.map((account) => account.id === accountId ? {
+      ...account,
+      name: result.accountName || resolved.name || account.name,
+      avatar: result.avatar || account.avatar,
+      remoteId: result.remoteId || resolved.remoteId,
+      lastBuffer: result.lastBuffer,
+      continueFlag: result.continueFlag,
+      pageDepth: resetPageDepth ? 1 : account.pageDepth + 1,
+      lastRefreshAt: refreshedAt,
+    } : account),
+    works: [...syncedWorks, ...library.works.filter((work) => !syncedIds.has(work.id))],
+  };
+}
+
+async function refreshSavedBenchmarkAccount(input) {
+  const accountId = benchmarkText(input?.accountId);
+  if (!accountId) throw new Error("缺少需要刷新的本地账号 ID");
+  const library = await readBenchmarkLibrary();
+  const account = library.accounts.find((item) => item.id === accountId);
+  if (!account) throw new Error("本地对标账号不存在");
+  const resolved = account.remoteId
+    ? { remoteId: account.remoteId, name: account.name, sourceUrl: account.sourceUrl, objectId: "" }
+    : await resolveBenchmarkAccount({ url: account.sourceUrl });
+  const result = await fetchBenchmarkWorks({ remoteId: resolved.remoteId });
+  const nextLibrary = mergeBenchmarkSyncedPage(library, account.id, resolved, result, new Date().toISOString(), true);
+  return { library: await writeBenchmarkLibrary(nextLibrary), account: resolved, result };
+}
+
 async function handleBenchmarkApi(request, response, pathname) {
+  if (pathname === "/api/benchmark/library" && request.method === "GET") {
+    try {
+      sendJson(response, 200, { library: await readBenchmarkLibrary() });
+    } catch (error) {
+      sendJson(response, 500, { error: providerMessage(error, "读取本地对标库失败") });
+    }
+    return;
+  }
   if (pathname === "/api/benchmark/status" && request.method === "GET") {
+    let accountSync;
+    try {
+      accountSync = await benchmarkAccountSyncStatus();
+    } catch (error) {
+      accountSync = {
+        configured: false,
+        provider: "dajiala.com",
+        mode: "error",
+        source: null,
+        balance: null,
+        checkedAt: null,
+        canDelete: false,
+        requiresOriginalAccount: false,
+        mayConsumeCredits: true,
+        error: providerMessage(error, "无法读取对标数据源配置"),
+      };
+    }
     sendJson(response, 200, {
       singleVideoParser: {
         available: true,
         provider: benchmarkProviderUrl("/").hostname,
       },
-      accountSync: {
-        configured: Boolean(benchmarkAccountEmail && benchmarkAccountFingerprint),
-        provider: benchmarkProviderUrl("/").hostname,
-        requiresOriginalAccount: true,
-        mayConsumeCredits: true,
-      },
+      accountSync,
     });
+    return;
+  }
+  if (pathname === "/api/benchmark/source" && request.method === "DELETE") {
+    try {
+      await rm(benchmarkSourceFile, { force: true });
+      sendJson(response, 200, { removed: true, accountSync: await benchmarkAccountSyncStatus() });
+    } catch (error) {
+      sendJson(response, 400, { error: providerMessage(error, "删除本机对标数据源失败") });
+    }
     return;
   }
   if (request.method !== "POST") {
@@ -2143,6 +3054,20 @@ async function handleBenchmarkApi(request, response, pathname) {
   }
   try {
     const body = await readJson(request);
+    if (pathname === "/api/benchmark/library") {
+      sendJson(response, 200, { library: await writeBenchmarkLibrary(body?.library) });
+      return;
+    }
+    if (pathname === "/api/benchmark/source") {
+      const tested = await saveBenchmarkSource(body);
+      sendJson(response, 200, {
+        saved: true,
+        balance: tested.balance,
+        checkedAt: tested.checkedAt,
+        accountSync: await benchmarkAccountSyncStatus(),
+      });
+      return;
+    }
     if (pathname === "/api/benchmark/parse-video") {
       sendJson(response, 200, { video: await parseBenchmarkVideo(body) });
       return;
@@ -2155,11 +3080,60 @@ async function handleBenchmarkApi(request, response, pathname) {
       sendJson(response, 200, { result: await fetchBenchmarkWorks(body) });
       return;
     }
+    if (pathname === "/api/benchmark/refresh-saved-account") {
+      sendJson(response, 200, await refreshSavedBenchmarkAccount(body));
+      return;
+    }
     sendJson(response, 404, { error: "未知对标监控接口" });
   } catch (error) {
     sendJson(response, Number(error?.statusCode) || 400, {
       error: providerMessage(error, "对标数据请求失败"),
     });
+  }
+}
+
+async function transcribeBenchmarkLibraryWork(input) {
+  const workId = benchmarkText(input?.workId);
+  if (!workId) throw new Error("缺少需要转写的作品 ID");
+  const library = await readBenchmarkLibrary();
+  const work = library.works.find((item) => item.id === workId);
+  if (!work) throw new Error("对标作品不存在");
+  const savedMediaUrl = benchmarkText(work.mediaUrl);
+  if (!savedMediaUrl) benchmarkSourceUrl(work.url);
+  const canReuseSavedMedia = Boolean(savedMediaUrl) && !benchmarkMediaIsExpired(work.expiresAt);
+  const parsedVideo = canReuseSavedMedia ? null : await parseBenchmarkVideo({ url: work.url });
+  const video = parsedVideo || { mediaUrl: savedMediaUrl, format: benchmarkMediaExtension(work.format) };
+  const asrRoot = join(storyboundDataRoot, "asr");
+  await mkdir(asrRoot, { recursive: true });
+  const inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(`benchmark.${benchmarkMediaExtension(video.format)}`)}`);
+  try {
+    await downloadRemoteMedia(video.mediaUrl, inputFile);
+    const text = await runAsrFile(inputFile);
+    const nextLibrary = {
+      ...library,
+      accounts: library.accounts.map((item) => item.id === work.accountId && parsedVideo?.authorName
+        ? { ...item, name: parsedVideo.authorName, avatar: parsedVideo.authorAvatar || item.avatar }
+        : item),
+      works: library.works.map((item) => item.id === workId ? {
+        ...item,
+        transcript: text,
+        mediaUrl: parsedVideo?.mediaUrl || item.mediaUrl,
+        title: item.title || parsedVideo?.title || "未命名视频",
+        publishTime: item.publishTime || (parsedVideo?.publishTime ? new Date(parsedVideo.publishTime * 1000).toISOString() : ""),
+        notes: item.notes || parsedVideo?.description || "",
+        description: parsedVideo?.description || item.description,
+        coverUrl: parsedVideo?.coverUrl || item.coverUrl,
+        quality: parsedVideo?.quality || item.quality,
+        format: parsedVideo?.format || item.format,
+        codec: parsedVideo?.codec || item.codec,
+        plays: parsedVideo?.plays || item.plays,
+        expiresAt: parsedVideo?.expiresAt || item.expiresAt,
+      } : item),
+    };
+    await writeBenchmarkLibrary(nextLibrary);
+    return text;
+  } finally {
+    await rm(inputFile, { force: true }).catch(() => undefined);
   }
 }
 
@@ -2345,7 +3319,7 @@ async function handleAsrApi(request, response, pathname) {
     });
     return;
   }
-  if (!["/api/asr/transcribe", "/api/asr/transcribe-benchmark"].includes(pathname)) {
+  if (!["/api/asr/transcribe", "/api/asr/transcribe-benchmark", "/api/asr/transcribe-benchmark-work"].includes(pathname)) {
     sendJson(response, 404, { error: "未知 ASR 接口" });
     return;
   }
@@ -2362,11 +3336,23 @@ async function handleAsrApi(request, response, pathname) {
   let inputFile = "";
   try {
     const body = await readJson(request);
+    if (pathname === "/api/asr/transcribe-benchmark-work") {
+      sendJson(response, 200, { text: await transcribeBenchmarkLibraryWork(body) });
+      return;
+    }
     const asrRoot = join(storyboundDataRoot, "asr");
     await mkdir(asrRoot, { recursive: true });
     if (pathname === "/api/asr/transcribe-benchmark") {
-      const video = await parseBenchmarkVideo({ url: body.url });
-      inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(`benchmark.${video.format || "mp4"}`)}`);
+      benchmarkSourceUrl(body.url);
+      const savedMediaUrl = benchmarkText(body.mediaUrl);
+      const canReuseSavedMedia = Boolean(savedMediaUrl) && !benchmarkMediaIsExpired(body.expiresAt);
+      const video = canReuseSavedMedia
+        ? {
+            mediaUrl: savedMediaUrl,
+            format: benchmarkMediaExtension(body.format),
+          }
+        : await parseBenchmarkVideo({ url: body.url });
+      inputFile = join(asrRoot, `${Date.now()}-${safeUploadName(`benchmark.${benchmarkMediaExtension(video.format)}`)}`);
       await downloadRemoteMedia(video.mediaUrl, inputFile);
     } else {
       const buffer = Buffer.from(String(body.base64 || ""), "base64");

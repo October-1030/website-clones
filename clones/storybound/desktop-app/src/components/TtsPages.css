@@ -446,6 +446,11 @@ select.settings-input { cursor: pointer; }
 .settings-credential-banner.missing { color: var(--warning); border-color: color-mix(in oklch, var(--warning) 28%, var(--border)); background: color-mix(in oklch, var(--warning) 7%, transparent); }
 .settings-unavailable-banner { color: var(--warning); border-color: color-mix(in oklch, var(--warning) 28%, var(--border)); background: color-mix(in oklch, var(--warning) 7%, transparent); }
 
+.settings-benchmark-actions { flex-wrap: wrap; }
+.settings-external-link { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+.settings-danger-button { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 28%, var(--border)); }
+.settings-provider-note > strong { color: var(--text); }
+
 .image-provider-tabs-v17 {
   display: flex;
   gap: 4px;

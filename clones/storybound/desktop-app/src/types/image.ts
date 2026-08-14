@@ -1,4 +1,4 @@
-import type { ImagePrompt } from "./llm";
+import type { ImagePrompt, VisualStyleOverride } from "./llm";
 
 export type ImageProviderId = "jimeng" | "all-purpose" | "minimax" | "openai-compatible";
 
@@ -23,6 +23,9 @@ export interface GeneratedImage {
   matchReason?: string;
   matchConfidence?: number;
   provider?: ImageProviderId | string;
+  sourceBackupPath?: string;
+  textComposited?: boolean;
+  textRenderer?: string;
 }
 
 export interface ImageGenerationRequest {
@@ -33,9 +36,11 @@ export interface ImageGenerationRequest {
   maxImages: number;
   track: string;
   visualStyle: string;
-  coverBackgroundOnly?: boolean;
+  visualStyleOverride?: VisualStyleOverride | null;
   provider?: ImageProviderId;
   force?: boolean;
+  coverBackgroundOnly?: boolean;
+  coverTemplateId?: string;
 }
 
 export interface ImageGenerationResponse {

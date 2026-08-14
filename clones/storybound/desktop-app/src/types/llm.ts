@@ -28,6 +28,7 @@ export interface PipelineContext {
   track: string;
   videoForm: string;
   visualStyle: string;
+  visualStyleOverride?: VisualStyleOverride | null;
   aspectRatio: "16:9" | "9:16" | "1:1" | "4:3" | "3:4";
   sourceMode?: "paste" | "ai";
   rewriteIntensity?: string;
@@ -44,6 +45,13 @@ export interface PipelineContext {
   ttsMode?: "original-segmented" | "continuous";
   promptTemplateId?: string;
   promptTemplateOverride?: PromptTemplateOverride | null;
+}
+
+export interface VisualStyleOverride {
+  name: string;
+  prefix: string;
+  suffix?: string;
+  negativePrompt?: string;
 }
 
 export interface PromptTemplateOverride {

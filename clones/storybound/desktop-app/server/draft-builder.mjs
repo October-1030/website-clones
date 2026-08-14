@@ -27,6 +27,25 @@ const ffmpegCandidates = [
   "ffmpeg",
 ].filter(Boolean);
 
+async function availableFfmpegCandidates() {
+  const candidates = [...ffmpegCandidates];
+  // Windows package managers do not always add ffmpeg to the Node process PATH.
+  // Ask the OS for the resolved executable so long BGM tracks are rendered,
+  // rather than silently falling back to one short, unlooped source file.
+  if (process.platform === "win32") {
+    try {
+      const { stdout } = await execFileAsync("where.exe", ["ffmpeg.exe"], {
+        timeout: 5_000,
+        windowsHide: true,
+      });
+      candidates.push(...String(stdout).split(/\r?\n/u).map((item) => item.trim()).filter(Boolean));
+    } catch {
+      // The standard command candidates above still cover bundled and PATH installs.
+    }
+  }
+  return [...new Set(candidates.map((item) => String(item).trim()).filter(Boolean))];
+}
+
 const animationMetadata = {
   "缩放": ["446078", "6759078592740594184"],
   "缩放_II": ["493000", "6779083172429697544"],
@@ -563,7 +582,7 @@ async function prepareBgm(source, audioDirectory, totalDuration, fadeOutMs) {
   const args = ["-y", "-stream_loop", "-1", "-i", resolve(source), "-t", totalSeconds.toFixed(6), "-vn"];
   if (filter) args.push("-af", filter);
   args.push("-codec:a", "libmp3lame", "-q:a", "2", output);
-  for (const executable of ffmpegCandidates) {
+  for (const executable of await availableFfmpegCandidates()) {
     try {
       await execFileAsync(executable, args, { timeout: 120_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
       return { path: output, duration: totalDuration, preRendered: true };
@@ -573,6 +592,31 @@ async function prepareBgm(source, audioDirectory, totalDuration, fadeOutMs) {
   }
   const fallback = await copyAsset(source, audioDirectory, `bgm${extname(source) || ".mp3"}`);
   return { path: fallback, duration: totalDuration, preRendered: false };
+}
+
+async function normalizeCoverImage(source, output, width, height) {
+  const filter = `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`;
+  const args = ["-y", "-i", resolve(source), "-vf", filter, "-frames:v", "1", "-pix_fmt", "rgba", output];
+  for (const executable of await availableFfmpegCandidates()) {
+    try {
+      await execFileAsync(executable, args, { timeout: 60_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 });
+      return output;
+    } catch {
+      // Keep the original poster as a safe fallback if image normalization fails.
+    }
+  }
+  return source;
+}
+
+function coverCanvasSize(ratio) {
+  const sizes = {
+    "16:9": { width: 1920, height: 1080 },
+    "9:16": { width: 1080, height: 1920 },
+    "1:1": { width: 1080, height: 1080 },
+    "4:3": { width: 1440, height: 1080 },
+    "3:4": { width: 1080, height: 1440 },
+  };
+  return sizes[ratio] || sizes["3:4"];
 }
 
 function resolveTaskBgmSource(task) {
@@ -696,8 +740,62 @@ function splitSubtitleText(value, maxChars = 18) {
   return chunks;
 }
 
+function splitTailAtWordBoundary(value, minimumLength, maximumLength) {
+  const text = String(value || "").replace(/\s+/gu, "").trim();
+  const characters = [...text];
+  const totalLength = characters.length;
+  const tokens = jieba.cut(text, true).filter(Boolean);
+  let cursor = 0;
+  let selected = 0;
+
+  for (const token of tokens) {
+    cursor += subtitleLength(token);
+    const suffixLength = totalLength - cursor;
+    if (cursor >= 3 && suffixLength >= minimumLength && suffixLength <= maximumLength) selected = cursor;
+  }
+
+  const breakAt = selected || Math.max(3, totalLength - minimumLength);
+  return [characters.slice(0, breakAt).join(""), characters.slice(breakAt).join("")];
+}
+
+function rebalanceSubtitleChunks(chunks, maxChars) {
+  const output = [];
+  const minimumCueLength = 3;
+  for (const chunk of chunks) {
+    const previous = output.at(-1);
+    const chunkLength = subtitleLength(chunk);
+    if (!previous || chunkLength >= minimumCueLength) {
+      output.push(chunk);
+      continue;
+    }
+
+    const previousLength = subtitleLength(previous);
+    if (previousLength + chunkLength <= maxChars) {
+      output[output.length - 1] = `${previous}${chunk}`;
+      continue;
+    }
+
+    const [head, suffix] = splitTailAtWordBoundary(previous, minimumCueLength - chunkLength, maxChars - chunkLength);
+    if (subtitleLength(head) >= minimumCueLength && subtitleLength(suffix) + chunkLength <= maxChars) {
+      output[output.length - 1] = head;
+      output.push(`${suffix}${chunk}`);
+      continue;
+    }
+    output.push(chunk);
+  }
+  return output;
+}
+
+function subtitleSafeMaxChars(maxChars) {
+  // The client template keeps 12 as an editable layout ceiling.  Rendering at
+  // nine visible Chinese characters leaves room for font metrics and prevents
+  // Jianying from inserting an automatic one-character second row.
+  return Math.max(6, Math.min(9, Number.isFinite(Number(maxChars)) ? Math.trunc(Number(maxChars)) : 9));
+}
+
 function splitSubtitleTimeline(item, maxChars) {
-  const chunks = splitSubtitleText(item.text, maxChars);
+  const visibleMaxChars = subtitleSafeMaxChars(maxChars);
+  const chunks = rebalanceSubtitleChunks(splitSubtitleText(item.text, visibleMaxChars), visibleMaxChars);
   if (!chunks.length) return [];
   const weights = chunks.map((text) => Math.max(1, subtitleLength(text)));
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
@@ -798,15 +896,6 @@ function timelineInMicroseconds(timeline) {
   });
 }
 
-function displayWidth(value) {
-  return [...String(value || "")].reduce((sum, character) => sum + (character.codePointAt(0) < 4352 ? 0.5 : 1), 0);
-}
-
-function fittedFontSize(configuredSize, value, budget, minimum) {
-  const longestLine = Math.max(1, ...String(value || "").split("\n").map(displayWidth));
-  return Math.max(minimum, Math.min(Number(configuredSize), budget / longestLine));
-}
-
 export async function buildJianyingDraft(taskStore, task) {
   const shots = resolveShots(task);
   if (!shots.length) throw new Error("没有分镜，无法生成剪映草稿");
@@ -849,18 +938,37 @@ export async function buildJianyingDraft(taskStore, task) {
   const explicitCoverSource = coverEnabled
     ? task.media?.coverImages?.find((image) => image.status === "ready" && image.path)?.path
     : "";
-  const coverSource = explicitCoverSource || (tutorialMode ? firstImage?.path : null);
+  // The original client keeps the cover separate from storyboard #1, then
+  // writes it back as a single overlay frame at time zero. It lets Jianying
+  // pick the intended export cover without consuming the opening narration.
+  const coverSource = explicitCoverSource || null;
+  let publishingCoverSource = coverSource;
   if (coverSource) {
-    const extension = extname(coverSource) || ".jpg";
-    const coverTarget = join(projectDir, `draft_cover${extension}`);
-    await copyFile(coverSource, coverTarget);
-    draftCover = basename(coverTarget);
+    const publishSize = coverCanvasSize(task.options?.coverRatio || "3:4");
+    const publishTarget = join(projectDir, "draft_cover.png");
+    const normalized = await normalizeCoverImage(coverSource, publishTarget, publishSize.width, publishSize.height);
+    if (normalized === publishTarget) {
+      publishingCoverSource = publishTarget;
+      draftCover = basename(publishTarget);
+    } else {
+      const extension = extname(coverSource) || ".jpg";
+      const fallbackTarget = join(projectDir, `draft_cover${extension}`);
+      await copyFile(coverSource, fallbackTarget);
+      publishingCoverSource = fallbackTarget;
+      draftCover = basename(fallbackTarget);
+    }
   }
 
   const templateId = task.options?.draftTemplateId || "default-portrait-9-16";
   const templateDefinition = resolveDraftTemplate(templateId, task.options?.draftTemplateConfig);
   const template = templateDefinition.config;
   const { width, height } = template.canvas;
+  // The publishing poster may be 3:4, while the project timeline is always
+  // 9:16. Build a centered 9:16 proxy only for the single-frame Jianying
+  // overlay; retain draft_cover in its original publishing ratio.
+  const coverFrameSource = publishingCoverSource
+    ? await normalizeCoverImage(publishingCoverSource, join(projectDir, "cover_frame.png"), width, height)
+    : null;
   const imageLayout = imageGeometry(template);
   const timeline = timelineInMicroseconds(normalizedTimeline(task, shots));
   const materials = emptyMaterials();
@@ -1028,67 +1136,19 @@ export async function buildJianyingDraft(taskStore, task) {
     }
   }
 
-  const titleText = task.artifacts?.rewrite?.title || task.title;
-  const coverTextDuration = tutorialMode ? 33_334 : totalDuration;
-  const coverTextAlpha = explicitCoverSource ? 0 : undefined;
-  if (coverEnabled && template.title.visible && titleText) {
-    const material = textMaterial(titleText, textLayerOptions(template.title, {
-      fontSize: fittedFontSize(template.title.fontSize, titleText, 200, 14),
-    }));
-    materials.texts.push(material);
-    tracks.push({
-      attribute: 0,
-      flag: 0,
-      id: id(),
-      is_default_name: false,
-      name: "cover_title",
-      segments: [trackSegment(material.id, 0, coverTextDuration, "text", { x: template.title.x, y: template.title.y, alpha: coverTextAlpha ?? template.title.alpha, renderIndex: 15000 })],
-      type: "text",
-    });
-  }
-
-  const subtitleText = Array.isArray(task.artifacts?.rewrite?.subtitle)
-    ? task.artifacts.rewrite.subtitle.filter(Boolean).slice(0, 2).join("\n")
-    : "";
-  if (coverEnabled && template.subtitle.visible && subtitleText) {
-    const material = textMaterial(subtitleText, textLayerOptions(template.subtitle, {
-      fontSize: fittedFontSize(template.subtitle.fontSize, subtitleText, 168, 8),
-    }));
-    materials.texts.push(material);
-    tracks.push({
-      attribute: 0,
-      flag: 0,
-      id: id(),
-      is_default_name: false,
-      name: "cover_subtitle",
-      segments: [trackSegment(material.id, 0, coverTextDuration, "text", { x: template.subtitle.x, y: template.subtitle.y, alpha: coverTextAlpha ?? template.subtitle.alpha, renderIndex: 15000 })],
-      type: "text",
-    });
-  }
-
-  if (template.disclaimer.visible && template.disclaimer.text) {
-    const material = textMaterial(template.disclaimer.text, textLayerOptions(template.disclaimer, {
-      globalAlpha: template.disclaimer.alpha,
-    }));
-    materials.texts.push(material);
-    tracks.push({
-      attribute: 0,
-      flag: 0,
-      id: id(),
-      is_default_name: false,
-      name: "cover_disclaimer",
-      segments: [trackSegment(material.id, 0, totalDuration, "text", { x: template.disclaimer.x, y: template.disclaimer.y, alpha: template.disclaimer.alpha, renderIndex: 15000 })],
-      type: "text",
-    });
-  }
+  // Cover text is rendered into the standalone publishing poster only.
+  // Jianying treats text-segment alpha as visible in some desktop versions,
+  // so writing long-lived placeholder tracks produces persistent duplicate
+  // titles and disclaimers. Keep the draft timeline free of those tracks.
 
   if (template.caption.visible && subtitleSegments.length) {
     tracks.push({ attribute: 0, flag: 0, id: id(), is_default_name: false, name: "subtitle", segments: subtitleSegments, type: "text" });
   }
 
-  if (coverSource) {
-    const coverTarget = await copyAsset(coverSource, imageDir, `cover${extname(coverSource) || ".png"}`);
-    const coverMaterial = videoMaterial(coverTarget, 33_334, width, height);
+  if (coverFrameSource) {
+    const coverTarget = await copyAsset(coverFrameSource, imageDir, "cover_frame.png");
+    const coverFrameDuration = 33_334;
+    const coverMaterial = videoMaterial(coverTarget, coverFrameDuration, width, height);
     const speedId = id();
     materials.videos.push(coverMaterial);
     materials.speeds.push({ curve_speed: null, id: speedId, mode: 0, speed: null, type: "speed" });
@@ -1098,8 +1158,8 @@ export async function buildJianyingDraft(taskStore, task) {
       id: id(),
       is_default_name: false,
       name: "cover_frame",
-      segments: [trackSegment(coverMaterial.id, 0, 33_334, "video", {
-        sourceDuration: 33_334,
+      segments: [trackSegment(coverMaterial.id, 0, coverFrameDuration, "video", {
+        sourceDuration: coverFrameDuration,
         extraMaterialRefs: [speedId],
         renderIndex: 20_000,
       })],

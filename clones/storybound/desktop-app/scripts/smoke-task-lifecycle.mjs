@@ -149,16 +149,24 @@ try {
       strokeCount: firstCaptionStyle?.strokes?.length,
     })}`);
   }
-  const disclaimerTrack = draftInfo.tracks?.find((track) => track.name === "cover_disclaimer");
-  if (!disclaimerTrack || disclaimerTrack.segments?.[0]?.target_timerange?.duration !== draftInfo.duration) throw new Error("免责声明轨未覆盖完整时间线");
-  for (const trackName of ["cover_title", "cover_subtitle"]) {
-    const track = draftInfo.tracks?.find((item) => item.name === trackName);
-    if (!track || track.segments?.[0]?.target_timerange?.duration !== draftInfo.duration || track.segments?.[0]?.render_index !== 15000 || track.segments?.[0]?.clip?.alpha !== 0) {
-      throw new Error(`${trackName} 没有按原版覆盖完整时间线`);
-    }
+  const draftMeta = JSON.parse(await readFile(join(result.draft.projectDir, "draft_meta_info.json"), "utf8"));
+  if (draftInfo.tracks?.some((track) => ["cover_title", "cover_subtitle", "cover_disclaimer"].includes(track.name))) {
+    throw new Error("发布封面文字不应作为整条正片的可见文本轨写入");
   }
   const coverFrame = draftInfo.tracks?.find((track) => track.name === "cover_frame")?.segments?.[0];
-  if (coverFrame?.target_timerange?.duration !== 33_334 || coverFrame?.render_index !== 20_000) throw new Error("AI 封面没有写入原版一帧封面轨");
+  if (coverFrame?.target_timerange?.start !== 0 || coverFrame?.target_timerange?.duration !== 33_334 || coverFrame?.render_index !== 20_000) {
+    throw new Error("首帧封面没有作为零秒单帧叠加层写入");
+  }
+  if (!draftMeta.draft_cover || draftInfo.static_cover_image_path !== "") throw new Error("封面草稿元数据不符合原客户端首帧结构");
+  await access(join(result.draft.projectDir, draftMeta.draft_cover));
+  const publishingCover = await readFile(join(result.draft.projectDir, draftMeta.draft_cover));
+  if (publishingCover.toString("ascii", 1, 4) !== "PNG" || publishingCover.readUInt32BE(16) !== 1080 || publishingCover.readUInt32BE(20) !== 1440) {
+    throw new Error("发布封面没有按默认 3:4 导出");
+  }
+  const coverFrameMaterial = draftInfo.materials?.videos?.find((material) => material.id === coverFrame?.material_id);
+  if (!coverFrameMaterial?.path?.endsWith("cover_frame.png") || coverFrameMaterial.width !== 1080 || coverFrameMaterial.height !== 1920) {
+    throw new Error("发布封面没有转换成独立的 9:16 首帧代理图");
+  }
   if (draftInfo.materials?.canvases?.length) throw new Error("原版默认草稿不应额外写入 canvas 素材");
   const bgmTrack = draftInfo.tracks?.find((track) => track.name === "bgm");
   if (draftInfo.materials?.audio_fades?.length || bgmTrack?.segments?.length !== 1 || bgmTrack.segments[0].target_timerange.duration !== draftInfo.duration) throw new Error("BGM 未按原版预混为等长单轨");
@@ -184,7 +192,6 @@ try {
   if (!motionSegments[0]?.common_keyframes?.some((item) => item.property_type === "KFTypeScaleX") || !motionSegments[0]?.common_keyframes?.some((item) => item.property_type === "KFTypeAlpha") || !motionSegments[1]?.common_keyframes?.some((item) => item.property_type === "KFTypePositionX")) {
     throw new Error("运镜或首尾淡入淡出关键帧未按原版写入");
   }
-  if (frameDraftInfo.tracks?.some((track) => track.name === "cover_disclaimer")) throw new Error("知识卡模板应关闭免责声明");
   let oldDraftExists = true;
   try { await access(firstProjectDir); } catch { oldDraftExists = false; }
   if (oldDraftExists) throw new Error("新草稿落地后没有清理旧草稿目录");

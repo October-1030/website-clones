@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { originalDefaultStyleByTrack, pipelineSteps } from "../data/app-data";
+import { originalDefaultStyleByTrack, originalReferenceKindByTrack, pipelineSteps } from "../data/app-data";
 import { availableMinimaxVoices, volcengineVoices } from "../data/tts-data";
 import { buildCoverImagePrompt } from "../lib/cover-prompt";
 import { generateImages } from "../lib/image-api";
@@ -47,6 +47,44 @@ interface TaskVoicePreview {
 }
 
 const shortVoicePreviewText = "真正重要的不是走得多快，而是每一步都走在自己的方向上。";
+const taskRunLeaseVersion = 1;
+const taskRunLeaseHeartbeatMs = 3_000;
+const taskRunLeaseStaleMs = 15_000;
+
+interface TaskRunLease {
+  version: number;
+  owner: string;
+  heartbeatAt: number;
+}
+
+function taskRunLeaseKey(taskId: string): string {
+  return `storybound:task-run-lease:${taskId}`;
+}
+
+function readTaskRunLease(taskId: string): TaskRunLease | null {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(taskRunLeaseKey(taskId)) || "null") as Partial<TaskRunLease> | null;
+    if (!value || value.version !== taskRunLeaseVersion || typeof value.owner !== "string" || !Number.isFinite(value.heartbeatAt)) return null;
+    return value as TaskRunLease;
+  } catch {
+    return null;
+  }
+}
+
+function hasActiveTaskRunLease(taskId: string): boolean {
+  const lease = readTaskRunLease(taskId);
+  return Boolean(lease && Date.now() - lease.heartbeatAt < taskRunLeaseStaleMs);
+}
+
+function writeTaskRunLease(taskId: string, owner: string): void {
+  const lease: TaskRunLease = { version: taskRunLeaseVersion, owner, heartbeatAt: Date.now() };
+  window.localStorage.setItem(taskRunLeaseKey(taskId), JSON.stringify(lease));
+}
+
+function releaseTaskRunLease(taskId: string, owner: string): void {
+  const lease = readTaskRunLease(taskId);
+  if (lease?.owner === owner) window.localStorage.removeItem(taskRunLeaseKey(taskId));
+}
 
 function createTaskId(): string {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `storybound-${Date.now().toString(36)}`;
@@ -231,6 +269,9 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const pauseRequestedRef = useRef(false);
   const autoStartedRef = useRef<string | null>(null);
   const queuedRunRef = useRef<() => void>(() => undefined);
+  const runLeaseOwnerRef = useRef<string | null>(null);
+  const runLeaseTaskIdRef = useRef<string | null>(null);
+  const recoveryTaskIdsRef = useRef(new Set<string>());
 
   const activeTtsProvider: TtsProvider = form.videoForm === "podcast" ? "volcengine" : form.ttsProvider;
   const availableVoices = useMemo(() => activeTtsProvider === "minimax"
@@ -245,6 +286,31 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const providerReady = (provider: TtsProvider) => provider === "minimax"
     ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
     : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
+
+  const recoverInterruptedTask = useCallback(async (candidate: StoryboundTask): Promise<StoryboundTask> => {
+    if (candidate.status !== "running" || hasActiveTaskRunLease(candidate.id) || recoveryTaskIdsRef.current.has(candidate.id)) return candidate;
+    recoveryTaskIdsRef.current.add(candidate.id);
+    try {
+      const stepStatuses = [...candidate.stepStatuses];
+      if (stepStatuses[candidate.currentStep] === "running") stepStatuses[candidate.currentStep] = "paused";
+      const recovered = await updateTask(candidate.id, {
+        status: "paused",
+        runState: "paused",
+        stepStatuses,
+        error: null,
+      });
+      await appendTaskEvent(candidate.id, {
+        type: "run_interrupted",
+        step: candidate.currentStep,
+        detail: "检测到页面或网络中断，已保留现有产物并恢复为可继续状态",
+      });
+      setTask(recovered);
+      onOpenPipeline(recovered);
+      return recovered;
+    } finally {
+      recoveryTaskIdsRef.current.delete(candidate.id);
+    }
+  }, [onOpenPipeline]);
 
   const previewVoice = useCallback(async (voiceId: string, fullText?: string) => {
     if (!voiceId || previewingVoiceId || !hasTtsCredentials) return;
@@ -332,16 +398,26 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       return;
     }
     setLoading(true);
-    void getTask(taskId).then((loaded) => {
+    void getTask(taskId).then(async (loaded) => {
       if (cancelled) return;
-      setTask(loaded);
-      setForm(formFromTask(loaded, config.provider));
-      onOpenPipeline(loaded);
+      const active = await recoverInterruptedTask(loaded);
+      if (cancelled) return;
+      setTask(active);
+      setForm(formFromTask(active, config.provider));
+      onOpenPipeline(active);
     }).catch((error: unknown) => {
       if (!cancelled) window.alert(error instanceof Error ? error.message : "无法打开任务");
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [config.provider, onOpenPipeline, taskId]);
+  }, [config.provider, onOpenPipeline, recoverInterruptedTask, taskId]);
+
+  useEffect(() => {
+    if (!task || busy || task.status !== "running") return;
+    const timer = window.setInterval(() => {
+      if (!hasActiveTaskRunLease(task.id)) void recoverInterruptedTask(task);
+    }, taskRunLeaseHeartbeatMs);
+    return () => window.clearInterval(timer);
+  }, [busy, recoverInterruptedTask, task]);
 
   useEffect(() => {
     if (!task || busy) return;
@@ -351,7 +427,12 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     return () => window.clearTimeout(timer);
   }, [busy, form, task]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    if (runLeaseOwnerRef.current && runLeaseTaskIdRef.current) {
+      releaseTaskRunLease(runLeaseTaskIdRef.current, runLeaseOwnerRef.current);
+    }
+  }, []);
   useEffect(() => () => {
     voicePreviewPlayerRef.current?.pause();
     if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
@@ -414,6 +495,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       track: activeForm.track,
       videoForm: activeForm.videoForm,
       visualStyle: activeForm.visualStyle,
+      visualStyleOverride: activeForm.visualStyleOverride,
       aspectRatio: activeForm.aspectRatio,
       sourceMode: activeForm.sourceMode,
       rewriteIntensity: activeForm.rewriteIntensity,
@@ -436,7 +518,21 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }
 
   async function ensureTask(activeForm = form): Promise<StoryboundTask> {
-    if (task) return updateTask(task.id, taskPatchFromForm(activeForm));
+    if (task) {
+      const patch = taskPatchFromForm(activeForm);
+      if (task.track !== activeForm.track && patch.options) {
+        patch.options = {
+          ...patch.options,
+          referenceImage: null,
+          referenceKind: null,
+          characterReferenceImages: [],
+          referenceGuidance: null,
+          historicalPortraitMode: false,
+          historicalPortraitNotice: null,
+        };
+      }
+      return updateTask(task.id, patch);
+    }
     const created = await createTask({
       id: taskId || createTaskId(),
       ...taskPatchFromForm(activeForm),
@@ -479,7 +575,6 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }
 
   async function runLlmStep(activeTask: StoryboundTask, step: 0 | 1 | 2 | 3, signal: AbortSignal): Promise<StoryboundTask> {
-    if (!hasLlmCredentials) throw new Error("LLM 未配置，无法执行原版预审、改写、分镜和绘图提示词逻辑");
     if (step === 2 && activeTask.mode === "direct") {
       const shots = mechanicalShots(
         composeNarrationText(activeTask.inputText, form),
@@ -489,6 +584,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       if (!shots.length) throw new Error("直接出片模式没有切出有效分镜，请用空行或标点分隔文案");
       return persistState(activeTask, { artifacts: { ...activeTask.artifacts, storyboard: { shots } } });
     }
+    if (!hasLlmCredentials) throw new Error("LLM 未配置，无法执行原版预审、改写、分镜和绘图提示词逻辑");
     const stepName = (["precheck", "rewrite", "storyboard", "prompts"] as const)[step];
     const inputText = activeTask.mode === "auto"
       ? activeTask.inputText
@@ -512,6 +608,69 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       const neighbor = images.slice(0, index).reverse().find((item) => item.path) || images.slice(index + 1).find((item) => item.path);
       return neighbor ? { ...neighbor, id: `borrow-${image.shotId}-${Date.now()}`, shotId: image.shotId, prompt: image.prompt, status: "borrowed", borrowedFrom: neighbor.shotId } : image;
     });
+  }
+
+  async function generateTaskCoverImages(
+    activeTask: StoryboundTask,
+    prompts: NonNullable<StoryboundTask["artifacts"]["prompts"]>["prompts"],
+    signal?: AbortSignal,
+    force = false,
+  ): Promise<StoredImage[]> {
+    if (activeTask.options.coverMode === "local") {
+      const asset = activeTask.options.coverLocalAsset;
+      if (!asset?.path) throw new Error("封面模式选择了本地上传，但还没有选择封面图片");
+      return [{
+        id: `local-cover-${Date.now()}`,
+        shotId: 9001,
+        prompt: "本地上传封面",
+        ...asset,
+        status: "ready",
+      }];
+    }
+    if (!activeTask.options.coverMode || activeTask.options.coverMode === "off") return [];
+    const coverTitle = activeTask.artifacts.rewrite?.title || activeTask.title;
+    const coverSubtitles = activeTask.artifacts.rewrite?.subtitle || [];
+    const coverConfigs = [{
+      mode: activeTask.options.coverMode,
+      templateId: activeTask.options.coverTemplateId,
+      ratio: activeTask.options.coverRatio,
+    }, ...(activeTask.options.secondCover ? [{
+      mode: activeTask.options.secondCoverMode || "titled",
+      templateId: activeTask.options.secondCoverTemplateId || "cinematic-poster",
+      ratio: activeTask.options.secondCoverRatio || "3:4",
+    }] : [])];
+    const characterCoverPrompts = prompts.filter((prompt) => prompt.useReference === true);
+    const coverImages: StoredImage[] = [];
+    for (const [index, coverConfig] of coverConfigs.entries()) {
+      const representativePrompt = characterCoverPrompts[index % characterCoverPrompts.length]
+        || prompts[index % prompts.length];
+      const coverPrompt = buildCoverImagePrompt({
+        corePrompt: `${activeTask.visualStyle}，主题：${coverTitle}，${representativePrompt?.prompt || "高完成度短视频封面"}`,
+        title: coverTitle,
+        subtitles: coverSubtitles,
+        mode: coverConfig.mode === "titled" ? "titled" : "plain",
+        templateId: coverConfig.templateId,
+      });
+      const coverResult = await generateImages({
+        taskId: activeTask.id,
+        prompts: [{ shotId: 9001 + index, ...coverPrompt }],
+        apiKey: config.minimax.apiKey,
+        aspectRatio: coverAspectRatio(coverConfig.ratio),
+        maxImages: 1,
+        track: activeTask.track,
+        visualStyle: activeTask.visualStyle,
+        visualStyleOverride: activeTask.options.visualStyleOverride,
+        provider: activeTask.options.imageProvider,
+        force,
+        coverBackgroundOnly: coverConfig.mode === "titled",
+        coverTemplateId: coverConfig.templateId,
+      }, signal);
+      coverImages.push(...coverResult.images.map((image) => ({
+        ...image,
+        status: image.status || (image.path ? "ready" : "failed"),
+      })) as StoredImage[]);
+    }
+    return coverImages;
   }
 
   async function runImageStep(activeTask: StoryboundTask, signal: AbortSignal): Promise<StoryboundTask> {
@@ -541,49 +700,14 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     }
     let generated: StoredImage[] = [];
     if (missing.length && activeTask.options.materialSource === "ai") {
-      const result = await generateImages({ taskId: activeTask.id, prompts: missing, apiKey: config.minimax.apiKey, aspectRatio: activeTask.aspectRatio, maxImages: missing.length, track: activeTask.track, visualStyle: activeTask.visualStyle, provider: activeTask.options.imageProvider }, signal);
+      const result = await generateImages({ taskId: activeTask.id, prompts: missing, apiKey: config.minimax.apiKey, aspectRatio: activeTask.aspectRatio, maxImages: missing.length, track: activeTask.track, visualStyle: activeTask.visualStyle, visualStyleOverride: activeTask.options.visualStyleOverride, provider: activeTask.options.imageProvider }, signal);
       generated = result.images.map((image) => ({ ...image, status: image.status || (image.url ? "ready" : "failed") })) as StoredImage[];
     }
     let images = prompts.map((prompt) => existing.get(prompt.shotId) || generated.find((image) => image.shotId === prompt.shotId) || ({ id: `missing-${prompt.shotId}`, shotId: prompt.shotId, prompt: prompt.prompt, url: "", status: "failed", error: "没有匹配的本地素材" } as StoredImage));
     if (activeTask.options.autoBorrowImage) images = borrowFailedImages(images);
     const unusable = images.filter((image) => !image.path);
     if (unusable.length) throw new Error(`还有 ${unusable.length} 个分镜缺图，请上传替换、重画或使用相邻画面补位`);
-    let coverImages = activeTask.media.coverImages || [];
-    if (activeTask.options.coverMode === "local") {
-      const asset = activeTask.options.coverLocalAsset;
-      if (!asset?.path) throw new Error("封面模式选择了本地上传，但还没有选择封面图片");
-      coverImages = [{
-        id: `local-cover-${Date.now()}`,
-        shotId: 9001,
-        prompt: "本地上传封面",
-        ...asset,
-        status: "ready",
-      }];
-    } else if (activeTask.options.coverMode && activeTask.options.coverMode !== "off") {
-      const coverTitle = activeTask.artifacts.rewrite?.title || activeTask.title;
-      const coverSubtitles = activeTask.artifacts.rewrite?.subtitle || [];
-      const coverConfigs = [{
-        mode: activeTask.options.coverMode,
-        templateId: activeTask.options.coverTemplateId,
-        ratio: activeTask.options.coverRatio,
-      }, ...(activeTask.options.secondCover ? [{
-        mode: activeTask.options.secondCoverMode || "titled",
-        templateId: activeTask.options.secondCoverTemplateId || "cinematic-poster",
-        ratio: activeTask.options.secondCoverRatio || "3:4",
-      }] : [])];
-      coverImages = [];
-      for (const [index, coverConfig] of coverConfigs.entries()) {
-        const coverPrompt = buildCoverImagePrompt({
-          corePrompt: `${activeTask.visualStyle}，主题：${coverTitle}，${prompts[index % prompts.length]?.prompt || "高完成度短视频封面"}`,
-          title: coverTitle,
-          subtitles: coverSubtitles,
-          mode: coverConfig.mode === "titled" ? "titled" : "plain",
-          templateId: coverConfig.templateId,
-        });
-        const coverResult = await generateImages({ taskId: activeTask.id, prompts: [{ shotId: 9001 + index, ...coverPrompt }], apiKey: config.minimax.apiKey, aspectRatio: coverAspectRatio(coverConfig.ratio), maxImages: 1, track: activeTask.track, visualStyle: activeTask.visualStyle, coverBackgroundOnly: true, provider: activeTask.options.imageProvider }, signal);
-        coverImages.push(...coverResult.images.map((image) => ({ ...image, status: image.status || (image.path ? "ready" : "failed") })) as StoredImage[]);
-      }
-    }
+    const coverImages = await generateTaskCoverImages(activeTask, prompts, signal);
     return persistState(activeTask, { media: { ...activeTask.media, images, coverImages }, draft: null });
   }
 
@@ -746,6 +870,11 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     pauseRequestedRef.current = false;
     const controller = new AbortController();
     abortRef.current = controller;
+    const leaseOwner = createTaskId();
+    runLeaseOwnerRef.current = leaseOwner;
+    runLeaseTaskIdRef.current = initialTask.id;
+    writeTaskRunLease(initialTask.id, leaseOwner);
+    const leaseHeartbeat = window.setInterval(() => writeTaskRunLease(initialTask.id, leaseOwner), taskRunLeaseHeartbeatMs);
     let activeTask = initialTask;
     try {
       for (let step = fromStep; step < pipelineSteps.length; step += 1) {
@@ -786,6 +915,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         if (autoRun) onQueueAdvance?.(activeTask.id, "failed");
       }
     } finally {
+      window.clearInterval(leaseHeartbeat);
+      releaseTaskRunLease(initialTask.id, leaseOwner);
+      if (runLeaseOwnerRef.current === leaseOwner) runLeaseOwnerRef.current = null;
+      if (runLeaseTaskIdRef.current === initialTask.id) runLeaseTaskIdRef.current = null;
       if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
     }
@@ -904,13 +1037,39 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (!prompt) return;
     setBusy(true);
     try {
-      const result = await generateImages({ taskId: task.id, prompts: [prompt], apiKey: config.minimax.apiKey, aspectRatio: task.aspectRatio, maxImages: 1, track: task.track, visualStyle: task.visualStyle, provider: task.options.imageProvider, force: true });
+      const result = await generateImages({ taskId: task.id, prompts: [prompt], apiKey: config.minimax.apiKey, aspectRatio: task.aspectRatio, maxImages: 1, track: task.track, visualStyle: task.visualStyle, visualStyleOverride: task.options.visualStyleOverride, provider: task.options.imageProvider, force: true });
       const image = result.images[0] as StoredImage | undefined;
       if (!image?.path) throw new Error(image?.error || "重画失败");
       const images = [...task.media.images.filter((item) => item.shotId !== shotId), { ...image, status: "ready" as const }].sort((a, b) => a.shotId - b.shotId);
       const statuses = [...task.stepStatuses]; statuses[6] = "pending";
       setTask(await updateTask(task.id, { media: { ...task.media, images }, draft: null, stepStatuses: statuses }));
     } catch (error) { window.alert(error instanceof Error ? error.message : "重画失败"); } finally { setBusy(false); }
+  }
+
+  async function regenerateCovers(): Promise<void> {
+    if (!task || busy) return;
+    const prompts = task.artifacts.prompts?.prompts || [];
+    if (!prompts.length) {
+      window.alert("没有绘图提示词，请先完成 Step 4");
+      return;
+    }
+    setBusy(true);
+    try {
+      const coverImages = await generateTaskCoverImages(task, prompts, undefined, true);
+      const failed = coverImages.find((image) => !image.path || image.status === "failed");
+      if (failed) throw new Error(failed.error || "封面重画失败");
+      const statuses = [...task.stepStatuses];
+      statuses[6] = "pending";
+      setTask(await updateTask(task.id, {
+        media: { ...task.media, coverImages },
+        draft: null,
+        stepStatuses: statuses,
+      }));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "封面重画失败");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function replaceImage(shotId: number, file: File): Promise<void> {
@@ -964,7 +1123,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (!prompts.length) return;
     setBusy(true);
     try {
-      const result = await generateImages({ taskId: task.id, prompts, apiKey: config.minimax.apiKey, aspectRatio: task.aspectRatio, maxImages: prompts.length, track: task.track, visualStyle: task.visualStyle, provider: task.options.imageProvider, force: true });
+      const result = await generateImages({ taskId: task.id, prompts, apiKey: config.minimax.apiKey, aspectRatio: task.aspectRatio, maxImages: prompts.length, track: task.track, visualStyle: task.visualStyle, visualStyleOverride: task.options.visualStyleOverride, provider: task.options.imageProvider, force: true });
       const repaired = new Map(result.images.map((image) => [image.shotId, { ...image, status: image.path ? "ready" as const : "failed" as const } as StoredImage]));
       const images = task.media.images.map((image) => repaired.get(image.shotId) || image);
       const statuses = [...task.stepStatuses]; statuses[6] = "pending";
@@ -1112,7 +1271,22 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   }
 
   async function uploadReference(file: File): Promise<void> {
-    setBusy(true); try { const active = await ensureTask(); const asset = await uploadTaskAsset(active.id, file, "uploads"); setTask(await updateTask(active.id, { options: { ...active.options, referenceImage: asset } })); } finally { setBusy(false); }
+    setBusy(true);
+    try {
+      const active = await ensureTask();
+      const asset = await uploadTaskAsset(active.id, file, "uploads");
+      setTask(await updateTask(active.id, {
+        options: {
+          ...active.options,
+          referenceImage: asset,
+          referenceKind: originalReferenceKindByTrack[form.track] === "product" ? "product" : "character",
+          characterReferenceImages: [asset],
+          referenceGuidance: "只使用当前任务最新上传的参考图锁定主体；不得继承其他任务或旧参考图的人脸、年龄、胡须、服装、产品外形或时代特征。",
+          historicalPortraitMode: false,
+          historicalPortraitNotice: null,
+        },
+      }));
+    } finally { setBusy(false); }
   }
   async function uploadCover(file: File): Promise<void> {
     setBusy(true); try { const active = await ensureTask(); const asset = await uploadTaskAsset(active.id, file, "images"); setTask(await updateTask(active.id, { options: { ...active.options, coverLocalAsset: asset } })); } finally { setBusy(false); }
@@ -1149,13 +1323,13 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   if (loading) return <main className="task-builder"><div className="task-builder__inner"><div className="builder-card"><h2>正在恢复任务…</h2><p>从本地任务目录读取文案、图片、音频和断点。</p></div></div></main>;
 
   return (
-    <main className="task-builder">
+    <main className={`task-builder ${task ? "task-builder--workspace" : "task-builder--create"}`}>
       <div className="task-builder__inner">
-        <header className="task-builder__header"><span className="task-builder__header-icon">✧</span><div><h1>{task ? "任务详情与产物工作台" : "创建视频任务"}</h1><p>{task ? "所有中间产物已落盘，可编辑、局部重跑和重新打包" : "粘贴或创作文案，按原版七步流程生成剪映草稿"}</p></div></header>
+        <header className="task-builder__header"><span className="task-builder__header-icon">✧</span><div><h1>{task ? "任务详情与产物工作台" : "创建视频任务"}</h1><p>{task ? "所有中间产物已落盘，可编辑、局部重跑和重新打包" : "粘贴一段人物故事，几分钟后在剪映里打开"}</p></div></header>
         <div className={`credential-warning ${hasTtsCredentials && hasLlmCredentials ? "credential-warning--ready" : "credential-warning--partial"}`}><span className="credential-warning__icon">▽</span><div className="credential-warning__copy"><strong>{hasTtsCredentials && hasLlmCredentials ? "TTS 与 LLM 已就绪" : hasTtsCredentials ? "TTS 已就绪，还有 1 项凭证未配置" : "还有必要的本地凭据未配置"}</strong><span>{hasTtsCredentials ? `${activeTtsProvider === "minimax" ? "MiniMax" : "豆包"} 可直接配音` : "缺少 TTS 凭据"} · {hasLlmCredentials ? `原版 ${llmCredentialStatus.promptLibrary?.sourceVersion || "1.16.1"} 提示词库已接入` : "仍需 LLM API Key"}</span></div><button type="button" onClick={onNavigateSettings}>前往设置 →</button></div>
 
-        {!task || task.runState === "idle" || task.status === "draft" ? <TaskCreateForm form={form} voices={availableVoices} hasLlmCredentials={hasLlmCredentials} hasTtsCredentials={hasTtsCredentials} aiGenerating={aiGenerating} taskReady={Boolean(task)} referenceName={task?.options.referenceImage?.fileName} coverLocalName={task?.options.coverLocalAsset?.fileName} externalAudioName={task?.media.externalAudio?.fileName} bgmName={task?.media.bgm?.fileName} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} previewingVoiceMode={previewingVoiceMode} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId, text) => void previewVoice(voiceId, text)} onChange={changeForm} onGenerateCopy={() => void handleGenerateCopy()} onUploadImages={(files) => void uploadImages(files)} onUploadReference={(file) => void uploadReference(file)} onUploadCover={(file) => void uploadCover(file)} onUploadTemplateBackground={uploadTemplateBackground} onUploadExternalAudio={(file) => void uploadExternalAudio(file)} onUploadBgm={(file) => void uploadBgm(file)} /> : null}
-        {task ? <TaskWorkbench task={task} busy={busy} voices={availableVoices} configuredVoiceId={configuredVoiceId} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} previewingVoiceMode={previewingVoiceMode} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId, text) => void previewVoice(voiceId, text)} onApplyTaskVoice={(voiceId) => void applyVoiceToTask(voiceId)} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRepairPromptAlignment={(track) => void repairPromptAlignment(track)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
+        {!task || task.runState === "idle" || task.status === "draft" ? <TaskCreateForm form={form} voices={availableVoices} hasLlmCredentials={hasLlmCredentials} hasTtsCredentials={hasTtsCredentials} aiGenerating={aiGenerating} taskReady={Boolean(task)} referenceName={task?.track === form.track ? task.options.referenceImage?.fileName : undefined} coverLocalName={task?.options.coverLocalAsset?.fileName} externalAudioName={task?.media.externalAudio?.fileName} bgmName={task?.media.bgm?.fileName} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} previewingVoiceMode={previewingVoiceMode} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId, text) => void previewVoice(voiceId, text)} onChange={changeForm} onGenerateCopy={() => void handleGenerateCopy()} onUploadImages={(files) => void uploadImages(files)} onUploadReference={(file) => void uploadReference(file)} onUploadCover={(file) => void uploadCover(file)} onUploadTemplateBackground={uploadTemplateBackground} onUploadExternalAudio={(file) => void uploadExternalAudio(file)} onUploadBgm={(file) => void uploadBgm(file)} /> : null}
+        {task ? <TaskWorkbench task={task} busy={busy} voices={availableVoices} configuredVoiceId={configuredVoiceId} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} previewingVoiceMode={previewingVoiceMode} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId, text) => void previewVoice(voiceId, text)} onApplyTaskVoice={(voiceId) => void applyVoiceToTask(voiceId)} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRepairPromptAlignment={(track) => void repairPromptAlignment(track)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onRegenerateCovers={() => void regenerateCovers()} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
       </div>
       <footer className="task-builder__footer"><div className="task-builder__footer-inner"><div className="footer-status"><span className={canStart ? "is-ready" : ""}>{busy ? "正在处理并写入任务目录…" : saved ? "所有更改已保存" : task ? `任务 ${task.id.slice(0, 8)} · ${task.status}` : canStart ? "文案长度已满足" : "请输入至少 50 字文案"}</span></div><div className="footer-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void handleSave()}>保存草稿</button>{!task || task.status === "draft" ? <button type="button" className="secondary-button" disabled={!canStart || busy} onClick={() => void handleEnqueue()}>加入队列</button> : null}{!task || task.status === "draft" || task.status === "pending" ? <button type="button" className="start-button" disabled={!canStart || busy} onClick={() => void handleStart()}><span>▶</span>{task?.status === "pending" ? "立即执行" : "开始制作"}</button> : task.runState === "completed" ? <button type="button" className="start-button" disabled={busy} onClick={() => void repackDraft()}>重新打包草稿</button> : null}</div></div></footer>
     </main>

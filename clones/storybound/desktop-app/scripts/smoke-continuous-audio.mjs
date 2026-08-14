@@ -121,10 +121,8 @@ try {
   if (ranges[0]?.start !== 0 || ranges.at(-1)?.end !== 4_000_000 || ranges.slice(1).some((range, index) => range.start !== ranges[index].end)) {
     throw new Error("教程字幕时间线出现空隙、重叠或尾部截断");
   }
-  const titleTrack = draftInfo.tracks?.find((track) => track.name === "cover_title");
-  const coverFrame = draftInfo.tracks?.find((track) => track.name === "cover_frame");
-  if (titleTrack?.segments?.[0]?.target_timerange?.duration !== 33_334 || coverFrame?.segments?.[0]?.target_timerange?.duration !== 33_334) {
-    throw new Error("教程封面没有限制为一帧");
+  if (draftInfo.tracks?.some((track) => String(track.name || "").startsWith("cover_"))) {
+    throw new Error("独立封面不应作为正片时间线轨道写入");
   }
   process.stdout.write(`${JSON.stringify({ ok: true, taskId, projectName: result.draft.projectName, narrationSegments: 1, subtitles: subtitleTexts, durationUs: draftInfo.duration })}\n`);
 } finally {

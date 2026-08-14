@@ -477,7 +477,22 @@ export function createMediaWorkbenchHandler(options = {}) {
   }
 
   async function findExecutable(candidates) {
-    for (const executable of candidates) {
+    const resolvedCandidates = [...candidates];
+    if (process.platform === "win32") {
+      for (const executable of candidates) {
+        if (/[\\/]/u.test(executable)) continue;
+        try {
+          const { stdout } = await execFileAsync("where.exe", [`${executable}.exe`], {
+            timeout: 5_000,
+            windowsHide: true,
+          });
+          resolvedCandidates.push(...String(stdout).split(/\r?\n/u).map((item) => item.trim()).filter(Boolean));
+        } catch {
+          // PATH candidates below remain valid on systems without where.exe.
+        }
+      }
+    }
+    for (const executable of [...new Set(resolvedCandidates)]) {
       try {
         await execFileAsync(executable, ["-version"], { timeout: 10_000, windowsHide: true });
         return executable;

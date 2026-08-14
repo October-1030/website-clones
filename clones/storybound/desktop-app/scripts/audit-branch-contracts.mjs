@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { sourceContentForm, rewriteStructureIssue, taskRewriteIntegrityIssue } from "../server/pipeline-integrity.mjs";
 import { createTaskStore } from "../server/task-store.mjs";
+import { referenceDisciplineForTrack, referencePlanMode } from "../server/track-image-policy.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const expectedTracks = [
@@ -54,17 +55,21 @@ async function check(name, run) {
   }
 }
 
-const [promptLibraryText, appData, appSource, createForm, builderModel, taskBuilder, draftBuilder, serverSource, stockSource, runningHubSource] = await Promise.all([
+const [promptLibraryText, appData, appSource, createPage, createForm, builderModel, taskBuilder, draftBuilder, serverSource, trackImagePolicy, stockSource, runningHubSource, coverPromptSource, coverCompositorSource] = await Promise.all([
   text("original-prompt-library.json"),
   text("src/data/app-data.ts"),
   text("src/App.tsx"),
+  text("src/components/CreatePage.tsx"),
   text("src/components/TaskCreateForm.tsx"),
   text("src/components/task-builder-model.ts"),
   text("src/components/TaskBuilder.tsx"),
   text("server/draft-builder.mjs"),
   text("server.mjs"),
+  text("server/track-image-policy.mjs"),
   text("server/stock-materials.mjs"),
   text("server/runninghub.mjs"),
+  text("src/lib/cover-prompt.ts"),
+  text("server/cover-compositor.mjs"),
 ]);
 const promptLibrary = JSON.parse(promptLibraryText);
 
@@ -76,6 +81,44 @@ await check("8 个赛道与原版提示词库一致", () => {
     assert.ok(track.metadataPrompt?.length > 300, `${track.name} 缺少元数据提示词`);
     assert.ok(track.imagePrompt?.length > 300, `${track.name} 缺少绘图提示词`);
   }
+});
+
+await check("绘本故事入口与专用运行分支完整", () => {
+  const pictureBook = promptLibrary.tracks.find((item) => item.id === "picture-book");
+  assert.equal(pictureBook?.name, "绘本故事");
+  assert.equal(pictureBook?.defaultStyleId, "pixar-3d");
+  assert.equal(pictureBook?.needsCharacterCard, true);
+  assert.match(pictureBook?.description || "", /儿童绘本.*睡前故事/u);
+  assert.match(pictureBook?.rewritePrompt || "", /儿童（3-10 岁）/u);
+  assert.match(pictureBook?.metadataPrompt || "", /#亲子阅读/u);
+  assert.match(pictureBook?.imagePrompt || "", /严禁写实儿童影像/u);
+  assert.ok(createPage.includes('"绘本故事"'), "创作首页没有展示绘本故事入口");
+  includesAll(`${serverSource}\n${trackImagePolicy}`, [
+    "buildPictureBookReferencePlan",
+    "compactPictureBookProviderPrompt",
+    "pictureBookComposition",
+    "绘本主角参考纪律",
+  ], "绘本故事后端分支");
+});
+
+await check("8 个赛道的参考图与生图策略互不串线", () => {
+  const tracks = new Map(promptLibrary.tracks.map((track) => [track.id, track]));
+  assert.equal(referencePlanMode(tracks.get("character-story")), "biography-balanced");
+  assert.equal(referencePlanMode(tracks.get("picture-book")), "picture-book");
+  assert.equal(referencePlanMode(tracks.get("folk-tale")), "per-shot");
+  assert.equal(referencePlanMode(tracks.get("health-book")), "per-shot");
+  assert.equal(referencePlanMode(tracks.get("culture-knowledge")), "per-shot");
+  assert.equal(referencePlanMode(tracks.get("ecommerce")), "per-shot");
+  assert.equal(referencePlanMode(tracks.get("inspirational")), "none");
+  assert.equal(referencePlanMode(tracks.get("general")), "none");
+  assert.match(referenceDisciplineForTrack(tracks.get("health-book")), /产品 \/ 器物参考纪律/u);
+  assert.match(referenceDisciplineForTrack(tracks.get("folk-tale")), /不设置传记片的固定空镜比例/u);
+  includesAll(serverSource, [
+    "isCharacterStoryTrack(track)",
+    "compactTrackProviderPrompt",
+    "shotUsesProductReference",
+    "referenceDisciplineForTrack(track)",
+  ], "赛道生图路由");
 });
 
 await check("13 套画风与原版提示词库一致", () => {
@@ -106,6 +149,9 @@ await check("创建页公开分支值完整", () => {
     '["off", "关闭"]', '["titled", "带标题文字"]', '["plain", "留白不带字"]', '["local", "本地上传"]',
     '["tts", "系统配音（TTS 生成）"]', '["external", "上传自定义配音"]',
     'ttsMode === "original-segmented"', 'ttsMode === "continuous"',
+    '"jimeng"', '"all-purpose"', '"minimax"', '"openai-compatible"',
+    'value: 0, label: "关闭"', 'value: 3, label: "前 3 张"', 'value: -1, label: "全部"', 'value: 5, label: "自定义"',
+    'bgmId === "__builtin__"', 'bgmId === "uploaded"', 'bgmId === "off"',
   ], "创建页");
 });
 
@@ -130,6 +176,14 @@ await check("不支持的组合在落盘前被确定性关闭", () => {
     'secondCover: coverEnabled && form.coverMode !== "local" && form.secondCover',
     'ttsProvider: form.videoForm === "podcast" ? "volcengine" : form.ttsProvider',
   ], "分支约束");
+  includesAll(createForm, [
+    "supportsReferenceUpload",
+    'form.imageProvider === "jimeng"',
+    'form.imageProvider === "minimax" && referenceKind === "character"',
+    "MiniMax image-01 官方参考图仅支持人物",
+    "网络素材模式不调用图片引擎，相关设置已隐藏",
+  ], "参考图与图片引擎约束");
+  assert.ok(serverSource.includes("!isProductReferenceTrack(track)"), "MiniMax 不应把产品参考图作为人物 subject_reference 发送");
 });
 
 await check("三种执行模式和四种暂停策略有真实执行端", () => {
@@ -141,6 +195,43 @@ await check("三种执行模式和四种暂停策略有真实执行端", () => {
     'activeTask.pausePreset === "custom"',
     "activeTask.customPauseSteps.includes(step)",
   ], "流水线模式");
+  assert.ok(
+    taskBuilder.indexOf('if (step === 2 && activeTask.mode === "direct")')
+      < taskBuilder.indexOf('if (!hasLlmCredentials) throw new Error'),
+    "直接模式机械分句仍被 LLM 凭据错误拦截",
+  );
+});
+
+await check("自定义画风随任务保存且所有引擎统一模板排字", () => {
+  includesAll(builderModel, [
+    "visualStyleOverride: task.options.visualStyleOverride",
+    "visualStyleOverride: form.visualStyleOverride",
+  ], "自定义画风持久化");
+  includesAll(createForm, [
+    "visualStyleOverride: custom ?",
+    "prefix: custom.prompt",
+    "visualStyleOverride: null",
+  ], "自定义画风选择");
+  includesAll(taskBuilder, [
+    "visualStyleOverride: activeTask.options.visualStyleOverride",
+    'coverBackgroundOnly: coverConfig.mode === "titled"',
+  ], "生图请求");
+  includesAll(serverSource, [
+    "context.visualStyleOverride",
+    "generationTask?.options?.visualStyleOverride",
+    "finalizeTitledCoverAsset",
+    "cleanCoverBackgroundPrompt(rawPrompt)",
+  ], "服务端画风和封面模板");
+  const coverTemplateIds = [
+    "cinematic-poster",
+    "minimal-clean",
+    "portrait-emotion",
+    "typographic-impact",
+    "guofeng-poster",
+    "legend-portrait",
+  ];
+  includesAll(coverPromptSource, coverTemplateIds, "封面模板选项");
+  includesAll(coverCompositorSource, coverTemplateIds, "封面模板排字器");
 });
 
 await check("AI/网络/本地素材三条路径均有真实消费端", () => {
@@ -153,6 +244,18 @@ await check("AI/网络/本地素材三条路径均有真实消费端", () => {
   ], "素材路径");
   includesAll(stockSource, ["searchCommonsMedia", "stock-license-manifest.json", "sourceUrl", "licenseUrl"], "网络素材授权链");
   includesAll(serverSource, ["/api/materials/stock/generate", "generateStockMaterials"], "网络素材服务端");
+  includesAll(taskBuilder, [
+    "characterReferenceImages: [asset]",
+    "referenceKind: originalReferenceKindByTrack[form.track]",
+    "task.track !== activeForm.track",
+    "referenceImage: null",
+    "不得继承其他任务或旧参考图",
+    "historicalPortraitMode: false",
+  ], "参考图替换隔离");
+  includesAll(serverSource, [
+    "savedKind !== track?.referenceKind",
+    "referenceKindMatches",
+  ], "参考图类型后端隔离");
 });
 
 await check("逐镜/连续/外部音频/播客均进入真实时间线与草稿", () => {
@@ -194,6 +297,10 @@ await check("任务存储覆盖每个枚举值并可无损恢复", async () => {
       ["mode", ["auto", "semi_auto", "direct"]],
       ["pausePreset", ["none", "key", "every", "custom"]],
       ["videoForm", ["narration", "podcast"]],
+      ["sourceMode", ["paste", "ai"]],
+      ["track", expectedTracks],
+      ["visualStyle", expectedStyles],
+      ["aspectRatio", ["9:16", "4:3", "1:1", "16:9"]],
     ];
     let serial = 0;
     for (const [field, values] of cases) {
@@ -206,12 +313,19 @@ await check("任务存储覆盖每个枚举值并可无损恢复", async () => {
       }
     }
     const optionValues = {
+      imageProvider: ["jimeng", "all-purpose", "minimax", "openai-compatible"],
+      rewriteIntensity: ["standard", "deep", "rewrite"],
+      narrativePov: ["original", "first", "third"],
       materialSource: ["ai", "stock", "local"],
       coverMode: ["off", "titled", "plain", "local"],
       voiceSource: ["tts", "external"],
       ttsProvider: ["minimax", "volcengine"],
       ttsMode: ["original-segmented", "continuous"],
       podcastImageMode: ["multi", "single"],
+      bgmId: ["__builtin__", "uploaded", "off"],
+      fixedIntroMode: ["account", "lock"],
+      videoIntroDurationMode: ["narration", "fixed"],
+      secondCoverMode: ["titled", "plain"],
     };
     for (const [field, values] of Object.entries(optionValues)) {
       for (const value of values) {
@@ -222,6 +336,15 @@ await check("任务存储覆盖每个枚举值并可无损恢复", async () => {
         assert.equal(restored.options[field], value, `${field}=${value} 未正确恢复`);
       }
     }
+    const visualStyleOverride = {
+      name: "审计画风",
+      prefix: "只用于任务持久化测试的冷色电影光线",
+      suffix: "远近景交替",
+      negativePrompt: "文字，水印",
+    };
+    await store.createTask({ id: "audit-visual-style-override", inputText: "自定义画风随任务保存测试。", options: { visualStyleOverride } });
+    const restoredOverride = await store.readTask("audit-visual-style-override");
+    assert.deepEqual(restoredOverride.options.visualStyleOverride, visualStyleOverride);
   } finally {
     if (previous === undefined) delete process.env.STORYBOUND_DATA_DIR;
     else process.env.STORYBOUND_DATA_DIR = previous;

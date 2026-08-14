@@ -148,6 +148,126 @@
 @media(max-width:680px){.form-grid--two,.form-grid--three,.audio-workbench article{grid-template-columns:1fr}.artifact-editor__head,.draft-result,.rewrite-provenance header{align-items:stretch;flex-direction:column}.rewrite-provenance>div{grid-template-columns:1fr}}
 @media(max-width:680px){.template-summary{grid-template-columns:1fr}}
 
+/* 原客户端 v1.17.0 创建页：页面标题、字段与输入区均使用紧凑文字层级。
+   仅作用于新建任务，不改变已生成任务的工作台阅读密度。 */
+.task-builder--create {
+  background: var(--builder-bg);
+}
+
+.task-builder--create .task-builder__inner {
+  width: min(1000px, calc(100% - 56px));
+  padding: 24px 0 96px;
+}
+
+.task-builder--create .task-builder__header {
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.task-builder--create .task-builder__header h1 {
+  color: var(--builder-text);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.task-builder--create .task-builder__header p {
+  margin-top: 4px;
+  color: var(--builder-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.task-builder--create .builder-card {
+  margin-top: 16px;
+  padding: 18px 20px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.task-builder--create .builder-card__heading {
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.task-builder--create .builder-card__heading h2 {
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.task-builder--create .builder-card__heading p {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.task-builder--create .field-label {
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.task-builder--create .field-label small,
+.task-builder--create .field-help {
+  color: var(--builder-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+}
+
+.task-builder--create .text-input,
+.task-builder--create .copy-textarea,
+.task-builder--create .audio-settings-grid select {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.task-builder--create .text-input {
+  height: auto;
+  min-height: 38px;
+}
+
+.task-builder--create .copy-textarea {
+  min-height: 240px;
+  line-height: 1.6;
+  resize: none;
+}
+
+.task-builder--create .copy-textarea--brief {
+  min-height: 132px;
+}
+
+.task-builder--create .field-group {
+  margin-top: 20px;
+}
+
+.task-builder--create .source-switch {
+  gap: 8px;
+  margin: 20px 0;
+}
+
+.task-builder--create .source-switch button {
+  min-height: 72px;
+  padding: 13px 16px;
+  border-radius: 8px;
+}
+
+.task-builder--create .source-switch strong {
+  font-size: 14px;
+}
+
+.task-builder--create .source-switch span {
+  font-size: 12px;
+}
+
+@media (max-width: 680px) {
+  .task-builder--create .task-builder__inner {
+    width: min(100% - 28px, 1000px);
+    padding-top: 20px;
+  }
+}
+
 .task-builder__header {
   display: flex;
   align-items: center;

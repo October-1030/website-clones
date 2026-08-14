@@ -45,11 +45,36 @@ export async function transcribeMedia(file: File): Promise<string> {
   return String(payload.text || "");
 }
 
-export async function transcribeBenchmarkVideo(url: string): Promise<string> {
+export interface BenchmarkTranscriptionSource {
+  mediaUrl?: string;
+  format?: string;
+  expiresAt?: string;
+}
+
+export async function transcribeBenchmarkVideo(
+  url: string,
+  source: BenchmarkTranscriptionSource = {},
+): Promise<string> {
   const response = await fetch("/api/asr/transcribe-benchmark", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({
+      url,
+      mediaUrl: source.mediaUrl || "",
+      format: source.format || "",
+      expiresAt: source.expiresAt || "",
+    }),
+  });
+  if (!response.ok) throw new Error(await responseError(response));
+  const payload = await response.json() as { text?: string };
+  return String(payload.text || "");
+}
+
+export async function transcribeBenchmarkWork(workId: string): Promise<string> {
+  const response = await fetch("/api/asr/transcribe-benchmark-work", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workId }),
   });
   if (!response.ok) throw new Error(await responseError(response));
   const payload = await response.json() as { text?: string };

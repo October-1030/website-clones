@@ -23,7 +23,7 @@ const createOptions: CreateOption[] = [
     eyebrow: "Image · Story",
     description:
       "经典图文成片：AI 分镜配图 + 文案朗读 + 字幕，最通用的口播 / 故事视频形态。",
-    tags: ["人物故事", "健康图书", "带货口播"],
+    tags: ["人物故事", "健康图书", "绘本故事", "带货口播"],
     hint: "支持双人播客 / 真图素材",
   },
   {

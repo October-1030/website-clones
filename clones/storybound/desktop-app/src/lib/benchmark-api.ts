@@ -6,9 +6,22 @@ export interface BenchmarkProviderStatus {
   accountSync: {
     configured: boolean;
     provider: string;
+    mode: "justone" | "direct" | "storybound-proxy" | "unconfigured" | "error";
+    source: string | null;
+    balance: number | null;
+    checkedAt: string | null;
+    canDelete: boolean;
     requiresOriginalAccount: boolean;
     mayConsumeCredits: boolean;
+    ready?: boolean;
+    error?: string;
   };
+}
+
+export interface BenchmarkSourceInput {
+  provider?: "justone" | "dajiala";
+  apiKey: string;
+  verifycode?: string;
 }
 
 export interface ParsedBenchmarkVideo {
@@ -65,6 +78,62 @@ export interface SyncedBenchmarkResult {
   works: SyncedBenchmarkWork[];
 }
 
+export interface BenchmarkLibraryAccount {
+  id: string;
+  name: string;
+  sourceUrl: string;
+  group: string;
+  track: string;
+  notes: string;
+  favorite: boolean;
+  avatar: string;
+  remoteId: string;
+  lastBuffer: string;
+  continueFlag: number;
+  pageDepth: number;
+  lastRefreshAt: string;
+  createdAt: string;
+}
+
+export interface BenchmarkLibraryWork {
+  id: string;
+  accountId: string;
+  url: string;
+  mediaUrl: string;
+  title: string;
+  publishTime: string;
+  likes: number;
+  favorites: number;
+  comments: number;
+  forwards: number;
+  growth: number;
+  notes: string;
+  favorite: boolean;
+  created: boolean;
+  transcript: string;
+  analysis: string;
+  localMediaName: string;
+  localMediaType: string;
+  localMediaSize: number;
+  remoteWorkId: string;
+  description: string;
+  coverUrl: string;
+  quality: string;
+  format: string;
+  codec: string;
+  plays: number;
+  expiresAt: string;
+  duration: number;
+  decodeKey: string;
+  createdAt: string;
+}
+
+export interface BenchmarkLibrary {
+  version: 1;
+  accounts: BenchmarkLibraryAccount[];
+  works: BenchmarkLibraryWork[];
+}
+
 async function responseError(response: Response): Promise<string> {
   try {
     const payload = await response.json() as { error?: string };
@@ -88,6 +157,37 @@ export async function fetchBenchmarkProviderStatus(): Promise<BenchmarkProviderS
   const response = await fetch("/api/benchmark/status", { cache: "no-store" });
   if (!response.ok) throw new Error(await responseError(response));
   return response.json() as Promise<BenchmarkProviderStatus>;
+}
+
+export async function saveBenchmarkSourceCredential(
+  input: BenchmarkSourceInput,
+): Promise<BenchmarkProviderStatus> {
+  const payload = await postJson<{ accountSync: BenchmarkProviderStatus["accountSync"] }>(
+    "/api/benchmark/source",
+    input,
+  );
+  const current = await fetchBenchmarkProviderStatus();
+  return { ...current, accountSync: payload.accountSync };
+}
+
+export async function deleteBenchmarkSourceCredential(): Promise<BenchmarkProviderStatus> {
+  const response = await fetch("/api/benchmark/source", { method: "DELETE" });
+  if (!response.ok) throw new Error(await responseError(response));
+  const payload = await response.json() as { accountSync: BenchmarkProviderStatus["accountSync"] };
+  const current = await fetchBenchmarkProviderStatus();
+  return { ...current, accountSync: payload.accountSync };
+}
+
+export async function fetchBenchmarkLibrary(): Promise<BenchmarkLibrary> {
+  const response = await fetch("/api/benchmark/library", { cache: "no-store" });
+  if (!response.ok) throw new Error(await responseError(response));
+  const payload = await response.json() as { library: BenchmarkLibrary };
+  return payload.library;
+}
+
+export async function saveBenchmarkLibrary(library: BenchmarkLibrary): Promise<BenchmarkLibrary> {
+  const payload = await postJson<{ library: BenchmarkLibrary }>("/api/benchmark/library", { library });
+  return payload.library;
 }
 
 export async function parseBenchmarkVideo(url: string): Promise<ParsedBenchmarkVideo> {

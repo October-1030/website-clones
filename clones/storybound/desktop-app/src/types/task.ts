@@ -1,5 +1,5 @@
 import type { GeneratedImage } from "./image";
-import type { PipelineLlmArtifacts, PromptTemplateOverride } from "./llm";
+import type { PipelineLlmArtifacts, PromptTemplateOverride, VisualStyleOverride } from "./llm";
 import type { ExecutionMode, PausePreset, PipelineStatus, VideoForm } from "./app";
 import type { DraftTemplateConfig } from "./draft-template";
 import type { TtsProvider } from "./tts";
@@ -13,6 +13,7 @@ export type VoiceSource = "tts" | "external";
 
 export interface TaskOptions {
   imageProvider?: ImageProviderId;
+  visualStyleOverride?: VisualStyleOverride | null;
   rewriteIntensity?: "standard" | "deep" | "rewrite";
   narrativePov?: "original" | "first" | "third";
   targetLength?: number | null;
@@ -40,6 +41,15 @@ export interface TaskOptions {
   bgmSync?: boolean;
   bgmId?: "__builtin__" | "uploaded" | "off";
   referenceImage?: StoredAsset | null;
+  /** Declares whether the uploaded reference represents a person or a product/object. */
+  referenceKind?: "character" | "product" | null;
+  /** Optional historical identity sheet plus its source portraits. */
+  characterReferenceImages?: StoredAsset[];
+  /** Provider instruction that locks a verified reference to the intended identity. */
+  referenceGuidance?: string | null;
+  /** Use verified archival portrait material for real-person face shots. */
+  historicalPortraitMode?: boolean;
+  historicalPortraitNotice?: string | null;
   coverMode?: CoverMode;
   coverTemplateId?: string;
   coverRatio?: string;
@@ -65,6 +75,8 @@ export interface StoredAsset {
   path: string;
   url: string;
   bytes: number;
+  /** Original HTTPS asset used for a provider-side identity reference. */
+  sourceUrl?: string;
   durationSec?: number;
 }
 
@@ -74,6 +86,13 @@ export interface StoredImage extends GeneratedImage {
   error?: string;
   borrowedFrom?: number;
   crop?: { x: number; y: number; scale: number };
+  historicalPortrait?: boolean;
+  sourceTitle?: string;
+  sourceUrl?: string;
+  attribution?: string;
+  license?: string;
+  licenseUrl?: string;
+  originalSourceUrl?: string;
 }
 
 export interface AudioSegment {

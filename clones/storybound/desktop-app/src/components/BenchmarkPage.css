@@ -58,6 +58,17 @@
   color: var(--warning);
 }
 
+.benchmark-provider-status__action {
+  padding: 4px 8px;
+  color: var(--brand);
+  background: color-mix(in oklch, var(--brand) 8%, transparent);
+  border: 1px solid color-mix(in oklch, var(--brand) 35%, var(--border));
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 700;
+}
+
 .benchmark-page__summary {
   display: grid;
   grid-template-columns: auto auto auto auto;
@@ -98,6 +109,12 @@
   background: transparent;
   cursor: pointer;
   font-size: 18px;
+}
+
+.benchmark-notice.is-error {
+  color: color-mix(in oklch, var(--danger) 78%, white);
+  background: color-mix(in oklch, var(--danger) 8%, var(--surface));
+  border-color: color-mix(in oklch, var(--danger) 30%, var(--border));
 }
 
 .benchmark-parser-panel {
@@ -269,6 +286,58 @@
   gap: 8px;
 }
 
+.benchmark-platform-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  margin-bottom: 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.benchmark-platform-tabs button {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 6px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.benchmark-platform-tabs button.is-selected {
+  color: var(--brand);
+  background: color-mix(in oklch, var(--brand) 11%, var(--bg));
+  border-color: color-mix(in oklch, var(--brand) 35%, var(--border));
+  font-weight: 800;
+}
+
+.benchmark-platform-tabs button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.benchmark-account-rail__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 1px 2px 8px;
+}
+
+.benchmark-account-rail__head span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.benchmark-account-rail__head strong {
+  color: var(--brand);
+  font-size: 18px;
+}
+
 .benchmark-search {
   display: flex;
   height: 38px;
@@ -312,6 +381,189 @@
   min-height: 36px;
   border-radius: 8px;
   cursor: pointer;
+}
+
+.benchmark-account-group-filter {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.benchmark-account-group-filter select,
+.benchmark-sync-page-limit select {
+  min-width: 0;
+  padding: 7px 8px;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: 0;
+}
+
+.benchmark-account-batch-toggle {
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.benchmark-account-batch-toggle.is-selected {
+  color: var(--brand);
+  border-color: color-mix(in oklch, var(--brand) 44%, var(--border));
+}
+
+.benchmark-batch-panel {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 9px;
+  margin-top: 10px;
+  background: color-mix(in oklch, var(--brand) 8%, var(--bg));
+  border: 1px solid color-mix(in oklch, var(--brand) 30%, var(--border));
+  border-radius: 9px;
+}
+
+.benchmark-batch-panel > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.benchmark-batch-panel strong {
+  color: var(--text-primary);
+  font-size: 11px;
+}
+
+.benchmark-batch-panel span {
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.benchmark-batch-panel > button {
+  min-height: 30px;
+  padding: 0 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.benchmark-batch-confirm {
+  grid-column: 1 / -1;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in oklch, var(--brand) 22%, var(--border));
+}
+
+.benchmark-batch-confirm p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.benchmark-batch-confirm > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.benchmark-batch-confirm button {
+  padding: 5px 8px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.benchmark-refresh-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 62%);
+  backdrop-filter: blur(3px);
+}
+
+.benchmark-refresh-dialog {
+  width: min(420px, 100%);
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 24px 72px rgb(0 0 0 / 45%);
+}
+
+.benchmark-refresh-dialog > header,
+.benchmark-refresh-dialog__body,
+.benchmark-refresh-dialog > footer {
+  padding: 16px 18px;
+}
+
+.benchmark-refresh-dialog > header {
+  border-bottom: 1px solid var(--border);
+}
+
+.benchmark-refresh-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.benchmark-refresh-dialog p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.benchmark-refresh-dialog__body small {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.benchmark-refresh-dialog__error {
+  padding: 9px 10px;
+  margin-top: 10px;
+  color: var(--danger);
+  background: color-mix(in oklch, var(--danger) 10%, transparent);
+  border: 1px solid color-mix(in oklch, var(--danger) 42%, transparent);
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.benchmark-refresh-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.benchmark-refresh-dialog > footer button {
+  min-width: 84px;
+  padding: 8px 12px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.benchmark-refresh-dialog > footer button:disabled {
+  cursor: wait;
+  opacity: 0.62;
 }
 
 .benchmark-inline-form,
@@ -444,6 +696,26 @@
   margin-top: 11px;
 }
 
+.benchmark-account-group {
+  display: grid;
+  gap: 5px;
+  padding-top: 5px;
+}
+
+.benchmark-account-group + .benchmark-account-group {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.benchmark-account-group__label {
+  padding: 2px 7px 0;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
 .benchmark-account-list > button,
 .benchmark-account-list article {
   min-width: 0;
@@ -465,6 +737,30 @@
   background: transparent;
   cursor: pointer;
   text-align: left;
+}
+
+.benchmark-account-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.benchmark-account-row .benchmark-account-main {
+  flex: 1;
+}
+
+.benchmark-account-check {
+  display: grid;
+  width: 27px;
+  flex: 0 0 auto;
+  place-items: center;
+  cursor: pointer;
+}
+
+.benchmark-account-check input {
+  width: 13px;
+  height: 13px;
+  accent-color: var(--brand);
 }
 
 .benchmark-account-list > button:hover,
@@ -533,6 +829,10 @@
 
 .benchmark-account-list article:hover .benchmark-account-actions,
 .benchmark-account-list article:focus-within .benchmark-account-actions {
+  display: flex;
+}
+
+.benchmark-account-list article:has(.benchmark-account-check) .benchmark-account-actions {
   display: flex;
 }
 
@@ -713,6 +1013,34 @@
 .benchmark-sync-panel__actions button:disabled {
   cursor: not-allowed;
   opacity: .4;
+}
+
+.benchmark-sync-page-limit {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 0 9px;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 10px;
+}
+
+.benchmark-sync-page-limit select {
+  min-height: 30px;
+  border-width: 0 0 0 1px;
+  border-radius: 0 6px 6px 0;
+}
+
+.benchmark-sync-progress {
+  padding: 8px 10px;
+  color: color-mix(in oklch, var(--brand) 70%, white);
+  background: color-mix(in oklch, var(--brand) 8%, var(--bg));
+  border: 1px solid color-mix(in oklch, var(--brand) 26%, var(--border));
+  border-radius: 7px;
+  font-size: 10px;
 }
 
 .benchmark-work-form {
