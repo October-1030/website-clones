@@ -896,15 +896,6 @@ function timelineInMicroseconds(timeline) {
   });
 }
 
-function displayWidth(value) {
-  return [...String(value || "")].reduce((sum, character) => sum + (character.codePointAt(0) < 4352 ? 0.5 : 1), 0);
-}
-
-function fittedFontSize(configuredSize, value, budget, minimum) {
-  const longestLine = Math.max(1, ...String(value || "").split("\n").map(displayWidth));
-  return Math.max(minimum, Math.min(Number(configuredSize), budget / longestLine));
-}
-
 export async function buildJianyingDraft(taskStore, task) {
   const shots = resolveShots(task);
   if (!shots.length) throw new Error("没有分镜，无法生成剪映草稿");

@@ -1,4 +1,4 @@
-import type { ImagePrompt } from "./llm";
+import type { ImagePrompt, VisualStyleOverride } from "./llm";
 
 export type ImageProviderId = "jimeng" | "all-purpose" | "minimax" | "openai-compatible";
 
@@ -36,6 +36,7 @@ export interface ImageGenerationRequest {
   maxImages: number;
   track: string;
   visualStyle: string;
+  visualStyleOverride?: VisualStyleOverride | null;
   provider?: ImageProviderId;
   force?: boolean;
   coverBackgroundOnly?: boolean;

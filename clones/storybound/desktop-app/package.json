@@ -19,6 +19,8 @@
     "smoke:integrity": "node scripts/smoke-pipeline-integrity.mjs",
     "smoke:branches": "node scripts/audit-branch-contracts.mjs",
     "smoke:picture-book": "node scripts/smoke-picture-book-track.mjs",
+    "smoke:track-images": "node scripts/smoke-track-image-policy.mjs",
+    "smoke:cover-templates": "node scripts/smoke-cover-templates.mjs",
     "smoke:providers": "node scripts/smoke-material-providers.mjs",
     "smoke:image-providers": "node scripts/smoke-image-provider-routing.mjs",
     "smoke:stock-live": "node scripts/smoke-stock-live.mjs",

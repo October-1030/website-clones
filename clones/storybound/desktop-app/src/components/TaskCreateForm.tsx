@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { contentTracks, originalDefaultStyleByTrack, pipelineSteps, visualStyles } from "../data/app-data";
+import { contentTracks, originalDefaultStyleByTrack, originalReferenceKindByTrack, pipelineSteps, visualStyles } from "../data/app-data";
 import { draftTemplates } from "../data/draft-templates";
 import { speedPresets } from "../data/tts-data";
 import {
@@ -258,6 +258,7 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
     promptTemplateId: `system-${track}`,
     promptTemplateOverride: null,
     visualStyle: originalDefaultStyleByTrack[track] ?? form.visualStyle,
+    visualStyleOverride: null,
     ...(track === "电商带货" ? { keepPromotion: true } : {}),
   });
   const updatePromptTemplate = (templateId: string) => {
@@ -274,6 +275,7 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
         },
         track: custom.baseTrack,
         visualStyle: originalDefaultStyleByTrack[custom.baseTrack] ?? form.visualStyle,
+        visualStyleOverride: null,
         ...(custom.baseTrack === "电商带货" ? { keepPromotion: true } : {}),
       });
       return;
@@ -287,14 +289,30 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
     () => [...visualStyles, ...customStyles.map((style) => style.name)],
     [customStyles],
   );
+  const referenceKind = originalReferenceKindByTrack[form.track] ?? "none";
+  const supportsReferenceUpload = form.materialSource === "ai"
+    && referenceKind !== "none"
+    && (form.imageProvider === "jimeng" || (form.imageProvider === "minimax" && referenceKind === "character"));
+  const selectVisualStyle = (name: string) => {
+    const custom = customStyles.find((style) => style.name === name);
+    onChange({
+      visualStyle: name,
+      visualStyleOverride: custom ? {
+        name: custom.name,
+        prefix: custom.prompt,
+        negativePrompt: custom.negativePrompt,
+      } : null,
+    });
+  };
   const applyMarketItem = (item: MarketItem) => onChange({
     ...(item.apply.track ? {
       track: item.apply.track,
       promptTemplateId: `system-${item.apply.track}`,
       promptTemplateOverride: null,
       visualStyle: originalDefaultStyleByTrack[item.apply.track] ?? form.visualStyle,
+      visualStyleOverride: null,
     } : {}),
-    ...(item.apply.visualStyle ? { visualStyle: item.apply.visualStyle } : {}),
+    ...(item.apply.visualStyle ? { visualStyle: item.apply.visualStyle, visualStyleOverride: null } : {}),
     ...(item.apply.coverTemplateId ? { coverMode: "titled", coverTemplateId: item.apply.coverTemplateId } : {}),
   });
   const startCtaEdit = (index: number) => {
@@ -502,14 +520,14 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
         {form.materialSource === "local" || form.materialSource === "stock" ? <label className="upload-tile field-group"><input type="file" accept="image/*" multiple onChange={(event) => event.target.files && onUploadImages(event.target.files)} /><strong>{form.materialSource === "stock" ? "自动检索 Wikimedia Commons · 也可手动导入" : "素材库为空？从本机批量导入"}</strong><span>{form.materialSource === "stock" ? "系统用你的 M3 生成检索词并核对候选，下载后保留作者、来源和许可清单；真实人物无法确认时会停下来要求替换，不会拿相似外国人补位" : taskReady ? "按文件顺序匹配分镜，也可在产物区逐张替换" : "上传时会自动创建本地任务目录"}</span></label> : null}
         <div className="field-group option-checks"><label><input type="checkbox" checked={form.autoBorrowImage} onChange={(event) => onChange({ autoBorrowImage: event.target.checked })} />失败图自动使用相邻画面补位</label></div>
         <div className="field-group form-grid form-grid--two"><div><span className="field-label field-label--standalone">画面生成比例</span><div className="segmented-control">{ratios.map((ratio) => <button key={ratio.value} type="button" disabled={Boolean(form.draftTemplateId)} className={form.aspectRatio === ratio.value ? "is-selected" : ""} onClick={() => onChange({ aspectRatio: ratio.value })}>{ratio.label}</button>)}</div><p className="template-hint">{form.draftTemplateId ? `已跟随剪映草稿模板：${activeTemplate.image.ratio}` : "未选择草稿模板时可自由选择"}</p></div><div className="settings-note"><strong>成片时长由真实配音决定</strong><span>目标字数、分镜数和 TTS 语速共同决定总时长；不会强行拉伸音频。</span></div></div>
-        <div className="field-group"><span className="field-label field-label--standalone">图片引擎</span><div className="segmented-control"><button type="button" className={form.imageProvider === "jimeng" ? "is-selected" : ""} onClick={() => selectImageProvider("jimeng")}>即梦 Seedream</button><button type="button" className={form.imageProvider === "all-purpose" ? "is-selected" : ""} onClick={() => selectImageProvider("all-purpose")}>全能绘图</button><button type="button" className={form.imageProvider === "minimax" ? "is-selected" : ""} onClick={() => selectImageProvider("minimax")}>MiniMax image-01</button><button type="button" className={form.imageProvider === "openai-compatible" ? "is-selected" : ""} onClick={() => selectImageProvider("openai-compatible")}>自定义平台</button></div><p className="template-hint">{form.imageProvider === "minimax" ? "新增路线：使用本机 MiniMax 凭据，适合人物参考近景。" : form.imageProvider === "jimeng" ? (imageProviderConfig.jimeng.apiKey ? `已配置 ${imageProviderConfig.jimeng.model}` : "保留原站即梦路线；请先在系统设置填写火山方舟 API Key。") : form.imageProvider === "all-purpose" ? (imageProviderConfig.allPurpose.apiKey ? `已配置 ${imageProviderConfig.allPurpose.model}` : "保留原站全能绘图路线；独立版需配置你自己的兼容图片 API。") : (imageProviderConfig.custom.apiKey ? `已配置 ${imageProviderConfig.custom.model}` : "请先在系统设置填写自定义图片平台。")}</p></div>
-        <div className="field-group"><span className="field-label field-label--standalone">视觉风格</span><div className="chip-list">{availableVisualStyles.map((item) => <button key={item} type="button" className={`chip ${form.visualStyle === item ? "is-selected" : ""}`} onClick={() => onChange({ visualStyle: item })}>{item}</button>)}</div></div>
-        <details className="custom-pause-panel field-group"><summary>新建自定义画风</summary><div className="form-grid form-grid--two"><label><span className="field-label field-label--standalone">画风名称</span><input className="text-input" value={newStyleName} onChange={(event) => setNewStyleName(event.target.value)} placeholder="例如：赛博朋克雨夜" /></label><label><span className="field-label field-label--standalone">提示词前缀</span><input className="text-input" value={newStylePrompt} onChange={(event) => setNewStylePrompt(event.target.value)} placeholder="描述色调、材质、光线与构图" /></label></div><button className="primary-button" type="button" disabled={!newStyleName.trim() || !newStylePrompt.trim()} onClick={() => {
+        {form.materialSource !== "stock" ? <div className="field-group"><span className="field-label field-label--standalone">图片引擎</span><div className="segmented-control"><button type="button" className={form.imageProvider === "jimeng" ? "is-selected" : ""} onClick={() => selectImageProvider("jimeng")}>即梦 Seedream</button><button type="button" className={form.imageProvider === "all-purpose" ? "is-selected" : ""} onClick={() => selectImageProvider("all-purpose")}>全能绘图</button><button type="button" className={form.imageProvider === "minimax" ? "is-selected" : ""} onClick={() => selectImageProvider("minimax")}>MiniMax image-01</button><button type="button" className={form.imageProvider === "openai-compatible" ? "is-selected" : ""} onClick={() => selectImageProvider("openai-compatible")}>自定义平台</button></div><p className="template-hint">{form.materialSource === "local" ? "本地素材不调用生图；此引擎只在你选择 AI 封面时使用。" : form.imageProvider === "minimax" ? "新增路线：使用本机 MiniMax 凭据，适合人物参考近景。" : form.imageProvider === "jimeng" ? (imageProviderConfig.jimeng.apiKey ? `已配置 ${imageProviderConfig.jimeng.model}` : "保留原站即梦路线；请先在系统设置填写火山方舟 API Key。") : form.imageProvider === "all-purpose" ? (imageProviderConfig.allPurpose.apiKey ? `已配置 ${imageProviderConfig.allPurpose.model}` : "保留原站全能绘图路线；独立版需配置你自己的兼容图片 API。") : (imageProviderConfig.custom.apiKey ? `已配置 ${imageProviderConfig.custom.model}` : "请先在系统设置填写自定义图片平台。")}</p></div> : <p className="template-hint">网络素材模式不调用图片引擎，相关设置已隐藏。</p>}
+        {form.materialSource !== "stock" ? <div className="field-group"><span className="field-label field-label--standalone">视觉风格</span><div className="chip-list">{availableVisualStyles.map((item) => <button key={item} type="button" className={`chip ${form.visualStyle === item ? "is-selected" : ""}`} onClick={() => selectVisualStyle(item)}>{item}</button>)}</div></div> : null}
+        {form.materialSource !== "stock" ? <details className="custom-pause-panel field-group"><summary>新建自定义画风</summary><div className="form-grid form-grid--two"><label><span className="field-label field-label--standalone">画风名称</span><input className="text-input" value={newStyleName} onChange={(event) => setNewStyleName(event.target.value)} placeholder="例如：赛博朋克雨夜" /></label><label><span className="field-label field-label--standalone">提示词前缀</span><input className="text-input" value={newStylePrompt} onChange={(event) => setNewStylePrompt(event.target.value)} placeholder="描述色调、材质、光线与构图" /></label></div><button className="primary-button" type="button" disabled={!newStyleName.trim() || !newStylePrompt.trim()} onClick={() => {
           const created = { id: `style-${crypto.randomUUID()}`, name: newStyleName.trim(), prompt: newStylePrompt.trim(), negativePrompt: "文字，水印，标志，低清晰度" };
           const next = [...customStyles.filter((style) => style.name !== created.name), created];
           writeCustomVisualStyles(next);
           setCustomStyles(next);
-          onChange({ visualStyle: created.name });
+          onChange({ visualStyle: created.name, visualStyleOverride: { name: created.name, prefix: created.prompt, negativePrompt: created.negativePrompt } });
           setNewStyleName("");
           setNewStylePrompt("");
         }}>保存并用于当前任务</button>{customStyles.length ? <div className="chip-list">{customStyles.map((style) => <button className="chip" key={style.id} type="button" title="删除自定义画风" onClick={() => {
@@ -517,8 +535,8 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
           const next = customStyles.filter((item) => item.id !== style.id);
           writeCustomVisualStyles(next);
           setCustomStyles(next);
-          if (form.visualStyle === style.name) onChange({ visualStyle: visualStyles[0] });
-        }}>删除 · {style.name}</button>)}</div> : null}</details>
+          if (form.visualStyle === style.name) onChange({ visualStyle: visualStyles[0], visualStyleOverride: null });
+        }}>删除 · {style.name}</button>)}</div> : null}</details> : null}
         {installedMarketItems.length ? <div className="field-group"><span className="field-label field-label--standalone">我的市场 · 已安装资源</span><div className="chip-list">{installedMarketItems.map((item) => <button key={item.id} type="button" className="chip" title={item.description} onClick={() => applyMarketItem(item)}>{item.kind === "prompt" ? "提示词" : item.kind === "style" ? "画风" : "封面"} · {item.name}</button>)}</div><p className="template-hint">点击资源会把对应赛道、画风或封面模板应用到当前任务。</p></div> : null}
         <div className="field-group form-grid form-grid--two"><label><span className="field-label field-label--standalone">剪映草稿模板</span><select className="text-input" value={form.draftTemplateId} onChange={(event) => {
           const template = availableTemplates.find((item) => item.id === event.target.value);
@@ -528,7 +546,7 @@ export function TaskCreateForm({ form, voices, hasLlmCredentials, hasTtsCredenti
           }
           const ratio = ratios.find((item) => item.value === template.config.image.ratio)?.value;
           onChange({ draftTemplateId: template.id, draftTemplateConfig: template.id.startsWith("custom-") ? structuredClone(template.config) : null, ...(ratio ? { aspectRatio: ratio } : {}) });
-        }}><option value="">不使用模板 · 自由选择比例</option>{availableTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}{template.id.startsWith("custom-") ? " · 我的模板" : ""}</option>)}</select></label><label className="upload-tile upload-tile--compact"><input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUploadReference(event.target.files[0])} /><strong>{referenceName ? "✓ 人物参考图已保存" : form.track === "电商带货" ? "产品参考图" : "主角参考图"}</strong><span>{referenceName || "上传后写入任务人物 / 产品一致性配置"}</span></label></div>
+        }}><option value="">不使用模板 · 自由选择比例</option>{availableTemplates.map((template) => <option key={template.id} value={template.id}>{template.name}{template.id.startsWith("custom-") ? " · 我的模板" : ""}</option>)}</select></label>{supportsReferenceUpload ? <label className="upload-tile upload-tile--compact"><input type="file" accept="image/*" onChange={(event) => event.target.files?.[0] && onUploadReference(event.target.files[0])} /><strong>{referenceName ? `✓ ${referenceKind === "product" ? "产品 / 器物" : "人物"}参考图已保存` : referenceKind === "product" ? "产品 / 器物参考图" : "主角参考图"}</strong><span>{referenceName || (referenceKind === "product" ? "只约束产品或器物外观，不会被当成人脸参考" : "上传后写入当前任务的人物一致性配置")}</span></label> : <div className="settings-note"><strong>当前组合不发送 AI 参考图</strong><span>{form.materialSource !== "ai" ? "本地 / 网络素材由各自素材来源管理。" : referenceKind === "none" ? "原版此赛道不建立固定参考卡。" : form.imageProvider === "minimax" && referenceKind === "product" ? "MiniMax image-01 官方参考图仅支持人物；产品 / 器物参考请切换即梦。" : "当前图片引擎适配器没有参考图接口，请切换即梦或使用 MiniMax 人物参考。"}</span></div>}</div>
         {form.draftTemplateId ? <div className="template-summary"><div><strong>{selectedTemplate.name}{form.draftTemplateConfig ? " · 已自定义" : ""}</strong><span>{activeTemplate.canvas.width}×{activeTemplate.canvas.height} · 画面 {activeTemplate.image.ratio}</span></div><div><span>正文字幕 {activeTemplate.caption.fontSize} 号 / 每行 {activeTemplate.caption.maxCharsPerLine} 字</span><span>{activeTemplate.caption.color} · 背景透明度 {activeTemplate.caption.background.alpha}</span></div><div><span>免责声明 {activeTemplate.disclaimer.visible ? "开启" : "关闭"}</span><span>旁白 {activeTemplate.audio.narrationVolume} / BGM {activeTemplate.audio.bgmVolume}</span></div></div> : null}
         <DraftTemplateEditor config={activeTemplate} onChange={(draftTemplateConfig) => onChange({ draftTemplateConfig })} onReset={() => onChange({ draftTemplateConfig: null })} onUploadBackground={onUploadTemplateBackground} />
         {form.materialSource === "ai" && form.videoForm === "narration" ? <div className="field-group dynamic-storyboard-panel"><span className="field-label field-label--standalone">动态分镜</span><div className="segmented-control">{[{ value: 0, label: "关闭" }, { value: 3, label: "前 3 张" }, { value: -1, label: "全部" }, { value: 5, label: "自定义" }].map((option) => {

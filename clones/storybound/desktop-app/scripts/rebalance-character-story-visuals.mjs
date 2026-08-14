@@ -100,7 +100,6 @@ async function main() {
       options: {
         ...task.options,
         referenceImage: identityBoard,
-        referenceGuidance: "人物必须是于右任本人，严格依据所附三张真实历史肖像组成的身份参考板。不可退化为泛化老人。辨识点必须保持：宽而高的额头、浓直而略下压的眉、下垂眼睑、消瘦的长脸、较长鼻梁、两颊和下颌相连的极长银白美髯；晚年胡须须达到胸前并有自然分束。始终是东亚中国男性、民国文人，不得生成为西方人、欧洲人、白人、混血脸、短圆胡子或不同人物。青年镜头只允许年龄回推，骨相、眉眼和长脸必须仍可辨识。",
         referenceGuidance: "The attached image is the single approved, authentic late-life portrait of Yu Youren. It is the sole face card for this task. Treat it as a strict identity reference, not a generic old-man example. Preserve his broad high bald forehead, very heavy straight eyebrows, hooded eyes, long narrow East Asian Chinese face, long bridge nose, sparse cheek beard, and exceptionally long thin central white beard. For young and middle-aged scenes, age and beard length may change, but the high forehead, strong brows, long facial structure, and East Asian Chinese identity must remain recognisable. Never generate a Western, European, white, mixed-race, or generic elderly face; never use a round short beard, a different person, or a portrait pose unless the scene requires it.",
         characterReferenceImages: [identityBoard],
       },

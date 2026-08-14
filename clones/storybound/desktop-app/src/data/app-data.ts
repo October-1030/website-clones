@@ -58,6 +58,17 @@ export const originalDefaultStyleByTrack: Record<string, string> = {
   通用故事: "写实彩色",
 };
 
+export const originalReferenceKindByTrack: Record<string, "character" | "product" | "none"> = {
+  人物故事: "character",
+  健康图书: "product",
+  传统文化: "product",
+  绘本故事: "character",
+  电商带货: "product",
+  心灵鸡汤: "none",
+  民间故事: "character",
+  通用故事: "none",
+};
+
 export const visualStyles = [
   "黑白摄影",
   "写实彩色",

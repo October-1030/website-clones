@@ -14,6 +14,13 @@ import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
 import { metadataIssue, rewriteStructureContract, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
 import { buildPictureBookReferencePlan, compactPictureBookProviderPrompt, isPictureBookTrack, pictureBookComposition } from "./server/picture-book-policy.mjs";
+import {
+  compactTrackProviderPrompt,
+  isCharacterStoryTrack,
+  isProductReferenceTrack,
+  referenceDisciplineForTrack,
+  referencePlanMode,
+} from "./server/track-image-policy.mjs";
 import { generateRunningHubVideos, runningHubModels, testRunningHubConnection } from "./server/runninghub.mjs";
 import { saveStockSelections, searchCommonsMedia } from "./server/stock-materials.mjs";
 import { createTaskStore, resolveStoryboundDataRoot } from "./server/task-store.mjs";
@@ -658,7 +665,21 @@ function originalTrack(value) {
   )) || originalPromptLibrary.tracks.find((track) => track.id === "general");
 }
 
-function originalStyle(value, track) {
+function originalStyle(value, track, override = null) {
+  if (
+    override
+    && typeof override === "object"
+    && String(override.name || "").trim() === String(value || "").trim()
+    && String(override.prefix || "").trim()
+  ) {
+    return {
+      id: `custom:${String(override.name).trim()}`,
+      name: String(override.name).trim(),
+      prefix: String(override.prefix).trim(),
+      suffix: String(override.suffix || "").trim(),
+      negativePrompt: String(override.negativePrompt || "").trim(),
+    };
+  }
   const normalized = String(value || "").trim().toLowerCase();
   return originalPromptLibrary.styles.find((style) => (
     style.id.toLowerCase() === normalized || style.name === value
@@ -683,7 +704,9 @@ function promptUsesReference(item, shotId, task, track) {
   return shotUsesCharacterReference(storyboardShot, item, track);
 }
 
-function taskCharacterReferences(task) {
+function taskCharacterReferences(task, track) {
+  const savedKind = task?.options?.referenceKind;
+  if (savedKind && savedKind !== track?.referenceKind) return [];
   const references = Array.isArray(task?.options?.characterReferenceImages)
     ? task.options.characterReferenceImages
     : task?.options?.referenceImage ? [task.options.referenceImage] : [];
@@ -859,6 +882,23 @@ function shotUsesCharacterReference(shot, provided, track) {
   return /(?:主角|人物|男孩|女孩|男人|女人|老人|少年|少女|母亲|父亲|李香兰|山口淑子)/u.test(visual);
 }
 
+function shotUsesProductReference(shot, provided, track) {
+  if (!isProductReferenceTrack(track)) return false;
+  if (typeof provided?.useReference === "boolean") return provided.useReference;
+  if (typeof provided?.use_reference === "boolean") return provided.use_reference;
+  const visual = String(shot?.visual || provided?.prompt || provided?.desc_prompt || "");
+  if (/(?:纯环境|空镜|无产品|不出现产品|不出现器物|人物独立镜头)/u.test(visual)) return false;
+  if (track?.id === "ecommerce") return /(?:产品|商品|包装|瓶|盒|罐|主推|器具|设备|工具|使用|展示)/u.test(visual);
+  if (track?.id === "health-book") return /(?:书|食材|药材|茶|汤|杯|壶|锅|器具|产品|包装|瓶|罐)/u.test(visual);
+  return /(?:器物|文物|书法|碑|鼎|香炉|瓷|陶|玉|纹样|服饰|建筑构件|产品)/u.test(visual);
+}
+
+function shotUsesTrackReference(shot, provided, track) {
+  return isProductReferenceTrack(track)
+    ? shotUsesProductReference(shot, provided, track)
+    : shotUsesCharacterReference(shot, provided, track);
+}
+
 const environmentNarrativePattern = /(?:法庭|审判|国籍|身份材料|护照|文件|报纸|学校|广播|银幕|电影公司|电影系统|满映|摄影机|胶片|唱片|影院|舞厅|霓虹|城市|上海|东北|九一八|伪满洲国|战争|侵略|宣传|舞台|名字|身份|参议院|议员|历史|时代|旋律|歌曲)/u;
 const directCharacterPattern = /(?:她|他|李香兰|山口淑子|女人|女孩|人物|主角).{0,12}(?:走|坐|站|唱|演|望|看|说|抬头|被捕|离开|回到|当选|去世)/u;
 
@@ -879,12 +919,20 @@ function environmentScore(shot, provided, index) {
 
 function buildReferencePlan(shots, providedPrompts, track) {
   const plan = new Map();
-  if (!track?.needsCharacterCard) {
+  const mode = referencePlanMode(track);
+  if (mode === "none") {
     shots.forEach((shot) => plan.set(shot.id, false));
     return plan;
   }
-  if (isPictureBookTrack(track)) {
+  if (mode === "picture-book") {
     return buildPictureBookReferencePlan(shots, providedPrompts);
+  }
+  if (mode === "per-shot") {
+    shots.forEach((shot, index) => {
+      const provided = providedPrompts.find((item) => Number(item.shotId || item.id) === Number(shot.id)) || providedPrompts[index] || {};
+      plan.set(shot.id, shotUsesTrackReference(shot, provided, track));
+    });
+    return plan;
   }
   // A character reference anchors identity; it should not turn a narrative
   // into a sequence of portraits.  Prefer environment, object, and action
@@ -926,6 +974,56 @@ function cameraComposition(index, useReference) {
   return "远景或全景，环境占画面60%以上，人物只作为场景中的叙事主体";
 }
 
+function generalTrackComposition(index, useReference, track) {
+  const slot = index % 10;
+  if (isProductReferenceTrack(track) && useReference) {
+    if ([1, 5, 8].includes(slot)) return "产品或器物细节近景，保留使用环境线索，不得只剩无法辨认的局部";
+    if ([2, 4, 7, 9].includes(slot)) return "中景展示核心产品或器物与真实使用场景，主体清晰但不遮满画面";
+    return "环境建立镜头，核心产品或器物仍可辨认，场景与道具共同承担叙事";
+  }
+  if ([1, 5, 8].includes(slot)) return "叙事近景，主体清晰并保留必要环境线索，避免连续大头特写";
+  if ([2, 4, 7, 9].includes(slot)) return "中景，完整展示本镜动作、主体关系与场景信息";
+  return "远景或建立镜头，以当前字幕语义决定人物、产品、器物或环境的画面占比";
+}
+
+async function finalizeTitledCoverAsset({ saved, shotId, body, generationTask, aspectRatio }) {
+  if (!saved?.path || !body.coverBackgroundOnly || shotId < 9000 || !generationTask) return saved;
+  const mode = shotId === 9001
+    ? generationTask.options?.coverMode
+    : generationTask.options?.secondCoverMode;
+  if (mode !== "titled") return saved;
+  const title = String(generationTask.artifacts?.rewrite?.title || generationTask.title || "").trim();
+  const subtitles = Array.isArray(generationTask.artifacts?.rewrite?.subtitle)
+    ? generationTask.artifacts.rewrite.subtitle.map((line) => String(line || "").trim()).filter(Boolean).slice(0, 2)
+    : [];
+  if (!title || subtitles.length === 0) throw new Error("封面精确排字失败：缺少主标题或副标题");
+  const size = coverCanvasSize(aspectRatio);
+  try {
+    const rendered = await renderTitledCover({
+      sourcePath: saved.path,
+      title,
+      subtitles,
+      width: size.width,
+      height: size.height,
+      templateId: String(body.coverTemplateId || generationTask.options?.coverTemplateId || "cinematic-poster"),
+    });
+    if (!rendered) throw new Error("排字器未返回封面文件");
+    return {
+      ...saved,
+      bytes: rendered.bytes,
+      width: rendered.width,
+      height: rendered.height,
+      sourceBackupPath: rendered.backupPath,
+      textComposited: true,
+      textRenderer: rendered.textRenderer,
+    };
+  } catch (error) {
+    const failure = new Error(`封面精确排字失败：${error instanceof Error ? error.message : "未知错误"}`);
+    failure.code = "COVER_TEXT_RENDER_FAILED";
+    throw failure;
+  }
+}
+
 async function generateMinimaxImages(body) {
   const prompts = Array.isArray(body.prompts) ? body.prompts : [];
   if (prompts.length === 0) throw new Error("缺少绘图 prompt");
@@ -938,14 +1036,13 @@ async function generateMinimaxImages(body) {
     ? body.aspectRatio
     : "9:16";
   const track = originalTrack(body.track);
-  const style = originalStyle(body.visualStyle, track);
   let subjectReference = null;
   let generationTask = null;
   if (body.taskId) {
     generationTask = await taskStore.readTask(body.taskId);
     const integrityIssue = taskRewriteIntegrityIssue(generationTask);
     if (integrityIssue) throw new Error(`Step 2 完整性校验未通过：${integrityIssue}`);
-    const references = taskCharacterReferences(generationTask);
+    const references = taskCharacterReferences(generationTask, track);
     // MiniMax documents subject_reference with an externally reachable image URL.
     // Prefer the vetted source URL when one was saved with the task; local uploads
     // retain the data-URL fallback so offline user assets still work.
@@ -964,6 +1061,11 @@ async function generateMinimaxImages(body) {
     // can be sent as the one provider reference.
     subjectReference = entries.filter(Boolean).slice(0, 1);
   }
+  const style = originalStyle(
+    body.visualStyle,
+    track,
+    body.visualStyleOverride || generationTask?.options?.visualStyleOverride,
+  );
   const selectedPrompts = prompts.slice(0, maxImages);
   const forcedAssetVersion = body.force ? Date.now() : 0;
   function generatedAssetUrl(saved, fallback) {
@@ -972,58 +1074,24 @@ async function generateMinimaxImages(body) {
     const separator = saved.url.includes("?") ? "&" : "?";
     return `${saved.url}${separator}v=${forcedAssetVersion}`;
   }
-  async function finalizeTitledCover(saved, shotId) {
-    if (!saved?.path || !body.coverBackgroundOnly || shotId < 9000 || !generationTask) return saved;
-    const mode = shotId === 9001
-      ? generationTask.options?.coverMode
-      : generationTask.options?.secondCoverMode;
-    if (mode !== "titled") return saved;
-    const title = String(generationTask.artifacts?.rewrite?.title || generationTask.title || "").trim();
-    const subtitles = Array.isArray(generationTask.artifacts?.rewrite?.subtitle)
-      ? generationTask.artifacts.rewrite.subtitle.map((line) => String(line || "").trim()).filter(Boolean).slice(0, 2)
-      : [];
-    if (!title || subtitles.length === 0) throw new Error("封面精确排字失败：缺少主标题或副标题");
-    const size = coverCanvasSize(aspectRatio);
-    try {
-      const rendered = await renderTitledCover({
-        sourcePath: saved.path,
-        title,
-        subtitles,
-        width: size.width,
-        height: size.height,
-        templateId: String(body.coverTemplateId || generationTask.options?.coverTemplateId || "cinematic-poster"),
-      });
-      if (!rendered) throw new Error("排字器未返回封面文件");
-      return {
-        ...saved,
-        bytes: rendered.bytes,
-        width: rendered.width,
-        height: rendered.height,
-        sourceBackupPath: rendered.backupPath,
-        textComposited: true,
-        textRenderer: rendered.textRenderer,
-      };
-    } catch (error) {
-      const failure = new Error(`封面精确排字失败：${error instanceof Error ? error.message : "未知错误"}`);
-      failure.code = "COVER_TEXT_RENDER_FAILED";
-      throw failure;
-    }
-  }
   const images = await mapLimit(selectedPrompts, 3, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
-    const useSubjectReference = Boolean(subjectReference) && promptUsesReference(item, shotId, generationTask, track);
+    const useSubjectReference = Boolean(subjectReference)
+      && !isProductReferenceTrack(track)
+      && promptUsesReference(item, shotId, generationTask, track);
     const isCharacterAction = item?.characterAction === true;
     // A prompt sent to image-01 must preserve the scene and composition.  In
     // particular, do not prepend a second full identity essay here: that could
     // consume the 1500-character provider limit before the action is reached.
     const providerPrompt = isPictureBookTrack(track)
       ? compactPictureBookProviderPrompt({ item, shotId, task: generationTask, aspectRatio, useReference: useSubjectReference })
-      : (useSubjectReference
-        ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
-        : isCharacterAction
-          ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
-          : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio)
-      );
+      : isCharacterStoryTrack(track)
+        ? (useSubjectReference
+          ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
+          : isCharacterAction
+            ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
+            : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio))
+        : compactTrackProviderPrompt({ item, shotId, task: generationTask, track, useReference: useSubjectReference });
     const prompt = (body.coverBackgroundOnly && shotId >= 9000
       ? cleanCoverBackgroundPrompt(providerPrompt)
       : providerPrompt).slice(0, 1500);
@@ -1079,7 +1147,7 @@ async function generateMinimaxImages(body) {
           let saved = body.taskId
             ? await taskStore.saveBuffer(body.taskId, "images", `${shotId}.jpg`, Buffer.from(base64, "base64"))
             : null;
-          saved = await finalizeTitledCover(saved, shotId);
+          saved = await finalizeTitledCoverAsset({ saved, shotId, body, generationTask, aspectRatio });
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
@@ -1102,7 +1170,7 @@ async function generateMinimaxImages(body) {
           let saved = body.taskId
             ? await taskStore.saveRemoteAsset(body.taskId, "images", `${shotId}.jpg`, imageUrl)
             : null;
-          saved = await finalizeTitledCover(saved, shotId);
+          saved = await finalizeTitledCoverAsset({ saved, shotId, body, generationTask, aspectRatio });
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
@@ -1177,7 +1245,9 @@ async function generateCompatibleImages(body) {
   const generationTask = body.taskId ? await taskStore.readTask(body.taskId) : null;
   const track = originalTrack(body.track);
   let referenceDataUrl = null;
-  const reference = generationTask?.options?.referenceImage;
+  const referenceKindMatches = !generationTask?.options?.referenceKind
+    || generationTask.options.referenceKind === track?.referenceKind;
+  const reference = referenceKindMatches ? generationTask?.options?.referenceImage : null;
   if (config.supportsReference && reference?.path && existsSync(reference.path)) {
     const extension = extname(reference.path).toLowerCase();
     const mime = extension === ".png" ? "image/png" : "image/jpeg";
@@ -1187,7 +1257,10 @@ async function generateCompatibleImages(body) {
   const concurrency = Math.max(1, Math.min(10, Number(config.concurrency) || 2));
   const images = await mapLimit(selectedPrompts, concurrency, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
-    const prompt = String(item.prompt || "").trim().slice(0, 4000);
+    const rawPrompt = String(item.prompt || "").trim();
+    const prompt = (body.coverBackgroundOnly && shotId >= 9000
+      ? cleanCoverBackgroundPrompt(rawPrompt)
+      : rawPrompt).slice(0, 4000);
     const useReference = Boolean(referenceDataUrl) && promptUsesReference(item, shotId, generationTask, track);
     try {
       const response = await fetchWithTimeout(endpoint, {
@@ -1221,6 +1294,14 @@ async function generateCompatibleImages(body) {
       } else {
         throw new Error("图片 Provider 未返回 b64_json 或 url");
       }
+      saved = await finalizeTitledCoverAsset({
+        saved,
+        shotId,
+        body,
+        generationTask,
+        aspectRatio: body.aspectRatio || "9:16",
+      });
+      if (saved?.url) url = saved.url;
       return {
         id: payload.id || `compatible-image-${Date.now()}-${index}`,
         shotId,
@@ -1228,6 +1309,11 @@ async function generateCompatibleImages(body) {
         url,
         path: saved?.path,
         bytes: saved?.bytes,
+        width: saved?.width,
+        height: saved?.height,
+        sourceBackupPath: saved?.sourceBackupPath,
+        textComposited: saved?.textComposited,
+        textRenderer: saved?.textRenderer,
         retryLevel: 0,
         useReference,
         provider,
@@ -1431,7 +1517,7 @@ function characterCardPrompt(card) {
 
 function normalizePipelineResult(step, payload, context, artifacts) {
   const track = originalTrack(context.track);
-  const style = originalStyle(context.visualStyle, track);
+  const style = originalStyle(context.visualStyle, track, context.visualStyleOverride);
   if (step === "precheck") {
     const cleanText = clampString(payload.cleanText || payload.cleaned_text || payload.content, context.inputText).slice(0, 10000);
     return {
@@ -1514,14 +1600,15 @@ function normalizePipelineResult(step, payload, context, artifacts) {
       styleId: style?.id || "realistic",
       prompts: shots.map((shot, index) => {
         const provided = prompts.find((item) => Number(item.shotId || item.id) === shot.id) || prompts[index] || {};
-        const useReference = referencePlan.get(shot.id) ?? shotUsesCharacterReference(shot, provided, track);
+        const useReference = referencePlan.get(shot.id) ?? shotUsesTrackReference(shot, provided, track);
         const fixedCharacter = useReference ? characterCardPrompt(artifacts.storyboard?.characterCard) : "";
         const fallbackCore = `${shot.visual}，${shot.emotion}`;
+        const supplied = clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore);
         const suppliedCore = pictureBook
-          ? clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore)
-          : useReference
-            ? removeCameraCliches(clampString(provided.prompt || provided.desc_prompt || provided.visual_prompt || provided.scene, fallbackCore))
-            : environmentSceneForShot(shot);
+          ? supplied
+          : isCharacterStoryTrack(track)
+            ? useReference ? removeCameraCliches(supplied) : environmentSceneForShot(shot)
+            : supplied;
         const narrativeCue = clampString(shot.text).replace(/\s+/g, " ").slice(0, 100);
         const semanticCore = narrativeCue && !suppliedCore.includes(narrativeCue.slice(0, 12))
           ? `${suppliedCore}。本镜叙事内容（仅用于转化成画面，禁止在图中生成文字）：${narrativeCue}`
@@ -1531,7 +1618,9 @@ function normalizePipelineResult(step, payload, context, artifacts) {
           : semanticCore;
         const composition = pictureBook
           ? pictureBookComposition(index, useReference)
-          : cameraComposition(index, useReference);
+          : isCharacterStoryTrack(track)
+            ? cameraComposition(index, useReference)
+            : generalTrackComposition(index, useReference, track);
         const corePrompt = `${characterCore}。镜头构图硬约束：${composition}`;
         const prefixMarker = clampString(style?.prefix).slice(0, 14);
         const negativePrompt = clampString(provided.negativePrompt || provided.negative_prompt, style?.negativePrompt);
@@ -1552,7 +1641,7 @@ function normalizePipelineResult(step, payload, context, artifacts) {
 
 function pipelineContextPayload(context, artifacts) {
   const track = originalTrack(context.track);
-  const style = originalStyle(context.visualStyle, track);
+  const style = originalStyle(context.visualStyle, track, context.visualStyleOverride);
   const sourceText = artifacts.rewrite?.narration || artifacts.precheck?.cleanText || context.inputText;
   return {
     title: context.title,
@@ -1756,7 +1845,7 @@ function stockQueryVariants(plan) {
   append(plan.exactSubject);
   for (const value of [plan.queryEn, plan.queryZh]) {
     append(value);
-    if (!/^[\x00-\x7F]+$/.test(String(value || ""))) continue;
+    if (![...String(value || "")].every((character) => character.codePointAt(0) <= 0x7f)) continue;
     const words = String(value).trim().split(/\s+/).filter(Boolean);
     for (let length = words.length - 1; length >= Math.min(3, words.length); length -= 1) {
       append(words.slice(0, length).join(" "));
@@ -2030,11 +2119,7 @@ async function runLlmPipeline(body) {
   }
 
   let promptPayload = { prompts: [] };
-  const referenceDiscipline = isPictureBookTrack(track)
-    ? `\n绘本主角参考纪律（与原客户端 character + force 契约一致）：\n- 每条 prompt 必须返回 useReference 布尔值。\n- 固定主角或固定配角实际出现时为 true；纯环境、关键物件和没有角色的空镜为 false。\n- 角色出现时必须保持种类、颜色、体型、服饰和标志特征一致；不得替换为真实儿童或历史人物。\n- 不得为了凑空镜比例移除字幕中实际出现的角色；景别按特写/中景/全景交替。`
-    : track?.needsCharacterCard
-      ? `\n人物参考图纪律（与原客户端 use_reference 契约一致）：\n- 每条 prompt 必须返回 useReference 布尔值。\n- 只有主角本人实际出现在画面中时才为 true；纯环境、建筑、街景、道具、文件、唱片、胶片、空镜和配角独立镜头必须为 false。\n- 人物故事应同时包含 true 和 false，禁止整批全为 true。\n- 不得连续 3 镜使用面部近景或大头特写；整体尽量按近景/中景/全景约 3:4:3 分布。\n- 没有人物的句子优先设计可讲故事的时代场景或关键物件，不要为了使用参考图强塞主角。`
-    : "\n每条 prompt 必须返回 useReference: false。";
+  const referenceDiscipline = referenceDisciplineForTrack(track);
   try {
     promptPayload = await callLlmJson(config, pipelineMessages(
       [originalPromptLibrary.storyboardAgentPrompt, promptOverride.imagePrompt || track?.imagePrompt, context.ttsMode === "continuous" ? tutorialImagePrompt : "", originalPromptLibrary.producerAgentPrompt],

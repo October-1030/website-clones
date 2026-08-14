@@ -20,6 +20,7 @@ export interface BuilderFormState {
   promptTemplateId: string;
   promptTemplateOverride: PromptTemplateOverride | null;
   visualStyle: string;
+  visualStyleOverride: TaskOptions["visualStyleOverride"];
   aspectRatio: ImageGenerationRequest["aspectRatio"];
   rewriteIntensity: NonNullable<TaskOptions["rewriteIntensity"]>;
   narrativePov: NonNullable<TaskOptions["narrativePov"]>;
@@ -43,7 +44,6 @@ export interface BuilderFormState {
   videoIntroCount: number;
   videoIntroDurationMode: "narration" | "fixed";
   videoIntroDuration: number;
-  bgmSync: boolean;
   bgmId: NonNullable<TaskOptions["bgmId"]>;
   coverMode: NonNullable<TaskOptions["coverMode"]>;
   coverTemplateId: string;
@@ -77,6 +77,7 @@ export const defaultBuilderForm: BuilderFormState = {
   promptTemplateId: `system-${defaultTrack}`,
   promptTemplateOverride: null,
   visualStyle: originalDefaultStyleByTrack[defaultTrack] ?? visualStyles[0] ?? "黑白摄影",
+  visualStyleOverride: null,
   aspectRatio: "9:16",
   rewriteIntensity: "standard",
   narrativePov: "original",
@@ -100,7 +101,6 @@ export const defaultBuilderForm: BuilderFormState = {
   videoIntroCount: 0,
   videoIntroDurationMode: "fixed",
   videoIntroDuration: 6,
-  bgmSync: false,
   bgmId: "__builtin__",
   coverMode: "off",
   coverTemplateId: "cinematic-poster",
@@ -134,6 +134,7 @@ export function formFromTask(task: StoryboundTask, fallbackTtsProvider: TtsProvi
     promptTemplateId: task.options.promptTemplateId ?? `system-${task.track}`,
     promptTemplateOverride: task.options.promptTemplateOverride ?? null,
     visualStyle: task.visualStyle,
+    visualStyleOverride: task.options.visualStyleOverride ?? null,
     aspectRatio: task.aspectRatio,
     rewriteIntensity: (task.options.rewriteIntensity as string) === "light"
       ? "standard"
@@ -161,7 +162,6 @@ export function formFromTask(task: StoryboundTask, fallbackTtsProvider: TtsProvi
     videoIntroCount: task.options.videoIntroCount ?? 0,
     videoIntroDurationMode: task.options.videoIntroDurationMode ?? ((task.options.videoIntroDuration ?? 6) === 0 ? "narration" : "fixed"),
     videoIntroDuration: task.options.videoIntroDuration && task.options.videoIntroDuration > 0 ? task.options.videoIntroDuration : 6,
-    bgmSync: task.options.bgmSync ?? false,
     bgmId: task.options.bgmId ?? (task.media.bgm?.path ? "uploaded" : "__builtin__"),
     coverMode: task.options.coverMode ?? "off",
     coverTemplateId: task.options.coverTemplateId ?? "cinematic-poster",
@@ -217,6 +217,7 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       outroCta: form.outroCta,
       materialSource: form.materialSource,
       imageProvider: form.imageProvider,
+      visualStyleOverride: form.visualStyleOverride,
       autoBorrowImage: form.autoBorrowImage,
       dynamicStoryboard,
       draftTemplateId: form.draftTemplateId,
@@ -225,7 +226,6 @@ export function taskPatchFromForm(form: BuilderFormState): Partial<StoryboundTas
       videoIntroCount: dynamicStoryboard ? form.videoIntroCount : 0,
       videoIntroDurationMode: form.videoIntroDurationMode,
       videoIntroDuration: dynamicStoryboard && form.videoIntroDurationMode === "fixed" ? Math.max(5, Math.min(15, form.videoIntroDuration)) : 0,
-      bgmSync: form.bgmSync,
       bgmId: form.bgmId,
       coverMode: coverEnabled ? form.coverMode : "off",
       coverTemplateId: form.coverTemplateId,

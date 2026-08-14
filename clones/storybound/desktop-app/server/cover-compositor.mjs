@@ -24,9 +24,14 @@ function visibleLength(value) {
 
 const templateStyles = {
   "cinematic-poster": { titleColor: "&H0000DEFF", subtitleColor: "&H00FFFFFF", titleY: 0.43, boxY: 0.31, boxHeight: 0.34 },
+  "minimal-clean": { titleColor: "&H00FFFFFF", subtitleColor: "&H00E6E6E6", titleY: 0.39, boxY: 0.30, boxHeight: 0.30 },
+  "portrait-emotion": { titleColor: "&H0000DEFF", subtitleColor: "&H00FFFFFF", titleY: 0.64, boxY: 0.52, boxHeight: 0.30 },
+  "typographic-impact": { titleColor: "&H0000DEFF", subtitleColor: "&H00FFFFFF", titleY: 0.40, boxY: 0.27, boxHeight: 0.43 },
+  "guofeng-poster": { titleColor: "&H0000D8FF", subtitleColor: "&H00FFFFFF", titleY: 0.43, boxY: 0.31, boxHeight: 0.34 },
+  "legend-portrait": { titleColor: "&H0000D8FF", subtitleColor: "&H00FFFFFF", titleY: 0.39, boxY: 0.26, boxHeight: 0.43 },
+  // Legacy task files created before the template ids were aligned.
   minimal: { titleColor: "&H00FFFFFF", subtitleColor: "&H00E6E6E6", titleY: 0.39, boxY: 0.30, boxHeight: 0.30 },
   emotional: { titleColor: "&H0000DEFF", subtitleColor: "&H00FFFFFF", titleY: 0.64, boxY: 0.52, boxHeight: 0.30 },
-  "typographic-impact": { titleColor: "&H0000DEFF", subtitleColor: "&H00FFFFFF", titleY: 0.40, boxY: 0.27, boxHeight: 0.43 },
   "chinese-ink": { titleColor: "&H0000D8FF", subtitleColor: "&H00FFFFFF", titleY: 0.43, boxY: 0.31, boxHeight: 0.34 },
   "legendary-portrait": { titleColor: "&H0000D8FF", subtitleColor: "&H00FFFFFF", titleY: 0.39, boxY: 0.26, boxHeight: 0.43 },
 };

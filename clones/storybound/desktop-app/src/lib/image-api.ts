@@ -69,12 +69,20 @@ export async function generateImages(
   signal?: AbortSignal,
 ): Promise<ImageGenerationResponse> {
   const customStyle = findCustomVisualStyle(options.visualStyle);
-  const request = customStyle
+  const styleOverride = options.visualStyleOverride || (customStyle ? {
+    name: customStyle.name,
+    prefix: customStyle.prompt,
+    negativePrompt: customStyle.negativePrompt,
+  } : null);
+  const request = styleOverride
     ? {
         ...options,
+        visualStyleOverride: styleOverride,
         prompts: options.prompts.map((prompt) => ({
           ...prompt,
-          prompt: `${customStyle.prompt}，${prompt.prompt}${customStyle.negativePrompt ? `。画面中避免出现：${customStyle.negativePrompt}` : ""}`,
+          prompt: prompt.prompt.includes(styleOverride.prefix)
+            ? prompt.prompt
+            : `${styleOverride.prefix}，${prompt.prompt}${styleOverride.negativePrompt ? `。画面中避免出现：${styleOverride.negativePrompt}` : ""}`,
         })),
       }
     : options;
