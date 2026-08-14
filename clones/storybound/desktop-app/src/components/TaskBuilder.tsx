@@ -47,6 +47,44 @@ interface TaskVoicePreview {
 }
 
 const shortVoicePreviewText = "真正重要的不是走得多快，而是每一步都走在自己的方向上。";
+const taskRunLeaseVersion = 1;
+const taskRunLeaseHeartbeatMs = 3_000;
+const taskRunLeaseStaleMs = 15_000;
+
+interface TaskRunLease {
+  version: number;
+  owner: string;
+  heartbeatAt: number;
+}
+
+function taskRunLeaseKey(taskId: string): string {
+  return `storybound:task-run-lease:${taskId}`;
+}
+
+function readTaskRunLease(taskId: string): TaskRunLease | null {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(taskRunLeaseKey(taskId)) || "null") as Partial<TaskRunLease> | null;
+    if (!value || value.version !== taskRunLeaseVersion || typeof value.owner !== "string" || !Number.isFinite(value.heartbeatAt)) return null;
+    return value as TaskRunLease;
+  } catch {
+    return null;
+  }
+}
+
+function hasActiveTaskRunLease(taskId: string): boolean {
+  const lease = readTaskRunLease(taskId);
+  return Boolean(lease && Date.now() - lease.heartbeatAt < taskRunLeaseStaleMs);
+}
+
+function writeTaskRunLease(taskId: string, owner: string): void {
+  const lease: TaskRunLease = { version: taskRunLeaseVersion, owner, heartbeatAt: Date.now() };
+  window.localStorage.setItem(taskRunLeaseKey(taskId), JSON.stringify(lease));
+}
+
+function releaseTaskRunLease(taskId: string, owner: string): void {
+  const lease = readTaskRunLease(taskId);
+  if (lease?.owner === owner) window.localStorage.removeItem(taskRunLeaseKey(taskId));
+}
 
 function createTaskId(): string {
   return typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `storybound-${Date.now().toString(36)}`;
@@ -231,6 +269,9 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const pauseRequestedRef = useRef(false);
   const autoStartedRef = useRef<string | null>(null);
   const queuedRunRef = useRef<() => void>(() => undefined);
+  const runLeaseOwnerRef = useRef<string | null>(null);
+  const runLeaseTaskIdRef = useRef<string | null>(null);
+  const recoveryTaskIdsRef = useRef(new Set<string>());
 
   const activeTtsProvider: TtsProvider = form.videoForm === "podcast" ? "volcengine" : form.ttsProvider;
   const availableVoices = useMemo(() => activeTtsProvider === "minimax"
@@ -245,6 +286,31 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
   const providerReady = (provider: TtsProvider) => provider === "minimax"
     ? Boolean(config.minimax.apiKey.trim() || credentialStatus.minimax.available)
     : Boolean((config.volcengine.appId.trim() && config.volcengine.accessToken.trim()) || credentialStatus.volcengine.available);
+
+  const recoverInterruptedTask = useCallback(async (candidate: StoryboundTask): Promise<StoryboundTask> => {
+    if (candidate.status !== "running" || hasActiveTaskRunLease(candidate.id) || recoveryTaskIdsRef.current.has(candidate.id)) return candidate;
+    recoveryTaskIdsRef.current.add(candidate.id);
+    try {
+      const stepStatuses = [...candidate.stepStatuses];
+      if (stepStatuses[candidate.currentStep] === "running") stepStatuses[candidate.currentStep] = "paused";
+      const recovered = await updateTask(candidate.id, {
+        status: "paused",
+        runState: "paused",
+        stepStatuses,
+        error: null,
+      });
+      await appendTaskEvent(candidate.id, {
+        type: "run_interrupted",
+        step: candidate.currentStep,
+        detail: "检测到页面或网络中断，已保留现有产物并恢复为可继续状态",
+      });
+      setTask(recovered);
+      onOpenPipeline(recovered);
+      return recovered;
+    } finally {
+      recoveryTaskIdsRef.current.delete(candidate.id);
+    }
+  }, [onOpenPipeline]);
 
   const previewVoice = useCallback(async (voiceId: string, fullText?: string) => {
     if (!voiceId || previewingVoiceId || !hasTtsCredentials) return;
@@ -332,16 +398,26 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
       return;
     }
     setLoading(true);
-    void getTask(taskId).then((loaded) => {
+    void getTask(taskId).then(async (loaded) => {
       if (cancelled) return;
-      setTask(loaded);
-      setForm(formFromTask(loaded, config.provider));
-      onOpenPipeline(loaded);
+      const active = await recoverInterruptedTask(loaded);
+      if (cancelled) return;
+      setTask(active);
+      setForm(formFromTask(active, config.provider));
+      onOpenPipeline(active);
     }).catch((error: unknown) => {
       if (!cancelled) window.alert(error instanceof Error ? error.message : "无法打开任务");
     }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [config.provider, onOpenPipeline, taskId]);
+  }, [config.provider, onOpenPipeline, recoverInterruptedTask, taskId]);
+
+  useEffect(() => {
+    if (!task || busy || task.status !== "running") return;
+    const timer = window.setInterval(() => {
+      if (!hasActiveTaskRunLease(task.id)) void recoverInterruptedTask(task);
+    }, taskRunLeaseHeartbeatMs);
+    return () => window.clearInterval(timer);
+  }, [busy, recoverInterruptedTask, task]);
 
   useEffect(() => {
     if (!task || busy) return;
@@ -351,7 +427,12 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     return () => window.clearTimeout(timer);
   }, [busy, form, task]);
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  useEffect(() => () => {
+    abortRef.current?.abort();
+    if (runLeaseOwnerRef.current && runLeaseTaskIdRef.current) {
+      releaseTaskRunLease(runLeaseTaskIdRef.current, runLeaseOwnerRef.current);
+    }
+  }, []);
   useEffect(() => () => {
     voicePreviewPlayerRef.current?.pause();
     if (voicePreviewUrlRef.current) URL.revokeObjectURL(voicePreviewUrlRef.current);
@@ -746,6 +827,11 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     pauseRequestedRef.current = false;
     const controller = new AbortController();
     abortRef.current = controller;
+    const leaseOwner = createTaskId();
+    runLeaseOwnerRef.current = leaseOwner;
+    runLeaseTaskIdRef.current = initialTask.id;
+    writeTaskRunLease(initialTask.id, leaseOwner);
+    const leaseHeartbeat = window.setInterval(() => writeTaskRunLease(initialTask.id, leaseOwner), taskRunLeaseHeartbeatMs);
     let activeTask = initialTask;
     try {
       for (let step = fromStep; step < pipelineSteps.length; step += 1) {
@@ -786,6 +872,10 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         if (autoRun) onQueueAdvance?.(activeTask.id, "failed");
       }
     } finally {
+      window.clearInterval(leaseHeartbeat);
+      releaseTaskRunLease(initialTask.id, leaseOwner);
+      if (runLeaseOwnerRef.current === leaseOwner) runLeaseOwnerRef.current = null;
+      if (runLeaseTaskIdRef.current === initialTask.id) runLeaseTaskIdRef.current = null;
       if (abortRef.current === controller) abortRef.current = null;
       setBusy(false);
     }
