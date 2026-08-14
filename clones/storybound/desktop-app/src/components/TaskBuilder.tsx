@@ -595,6 +595,67 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     });
   }
 
+  async function generateTaskCoverImages(
+    activeTask: StoryboundTask,
+    prompts: NonNullable<StoryboundTask["artifacts"]["prompts"]>["prompts"],
+    signal?: AbortSignal,
+    force = false,
+  ): Promise<StoredImage[]> {
+    if (activeTask.options.coverMode === "local") {
+      const asset = activeTask.options.coverLocalAsset;
+      if (!asset?.path) throw new Error("封面模式选择了本地上传，但还没有选择封面图片");
+      return [{
+        id: `local-cover-${Date.now()}`,
+        shotId: 9001,
+        prompt: "本地上传封面",
+        ...asset,
+        status: "ready",
+      }];
+    }
+    if (!activeTask.options.coverMode || activeTask.options.coverMode === "off") return [];
+    const coverTitle = activeTask.artifacts.rewrite?.title || activeTask.title;
+    const coverSubtitles = activeTask.artifacts.rewrite?.subtitle || [];
+    const coverConfigs = [{
+      mode: activeTask.options.coverMode,
+      templateId: activeTask.options.coverTemplateId,
+      ratio: activeTask.options.coverRatio,
+    }, ...(activeTask.options.secondCover ? [{
+      mode: activeTask.options.secondCoverMode || "titled",
+      templateId: activeTask.options.secondCoverTemplateId || "cinematic-poster",
+      ratio: activeTask.options.secondCoverRatio || "3:4",
+    }] : [])];
+    const characterCoverPrompts = prompts.filter((prompt) => prompt.useReference === true);
+    const coverImages: StoredImage[] = [];
+    for (const [index, coverConfig] of coverConfigs.entries()) {
+      const representativePrompt = characterCoverPrompts[index % characterCoverPrompts.length]
+        || prompts[index % prompts.length];
+      const coverPrompt = buildCoverImagePrompt({
+        corePrompt: `${activeTask.visualStyle}，主题：${coverTitle}，${representativePrompt?.prompt || "高完成度短视频封面"}`,
+        title: coverTitle,
+        subtitles: coverSubtitles,
+        mode: coverConfig.mode === "titled" ? "titled" : "plain",
+        templateId: coverConfig.templateId,
+      });
+      const coverResult = await generateImages({
+        taskId: activeTask.id,
+        prompts: [{ shotId: 9001 + index, ...coverPrompt }],
+        apiKey: config.minimax.apiKey,
+        aspectRatio: coverAspectRatio(coverConfig.ratio),
+        maxImages: 1,
+        track: activeTask.track,
+        visualStyle: activeTask.visualStyle,
+        coverBackgroundOnly: true,
+        provider: activeTask.options.imageProvider,
+        force,
+      }, signal);
+      coverImages.push(...coverResult.images.map((image) => ({
+        ...image,
+        status: image.status || (image.path ? "ready" : "failed"),
+      })) as StoredImage[]);
+    }
+    return coverImages;
+  }
+
   async function runImageStep(activeTask: StoryboundTask, signal: AbortSignal): Promise<StoryboundTask> {
     const prompts = activeTask.artifacts.prompts?.prompts || [];
     if (!prompts.length) throw new Error("没有绘图提示词，请先完成 Step 4");
@@ -629,42 +690,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     if (activeTask.options.autoBorrowImage) images = borrowFailedImages(images);
     const unusable = images.filter((image) => !image.path);
     if (unusable.length) throw new Error(`还有 ${unusable.length} 个分镜缺图，请上传替换、重画或使用相邻画面补位`);
-    let coverImages = activeTask.media.coverImages || [];
-    if (activeTask.options.coverMode === "local") {
-      const asset = activeTask.options.coverLocalAsset;
-      if (!asset?.path) throw new Error("封面模式选择了本地上传，但还没有选择封面图片");
-      coverImages = [{
-        id: `local-cover-${Date.now()}`,
-        shotId: 9001,
-        prompt: "本地上传封面",
-        ...asset,
-        status: "ready",
-      }];
-    } else if (activeTask.options.coverMode && activeTask.options.coverMode !== "off") {
-      const coverTitle = activeTask.artifacts.rewrite?.title || activeTask.title;
-      const coverSubtitles = activeTask.artifacts.rewrite?.subtitle || [];
-      const coverConfigs = [{
-        mode: activeTask.options.coverMode,
-        templateId: activeTask.options.coverTemplateId,
-        ratio: activeTask.options.coverRatio,
-      }, ...(activeTask.options.secondCover ? [{
-        mode: activeTask.options.secondCoverMode || "titled",
-        templateId: activeTask.options.secondCoverTemplateId || "cinematic-poster",
-        ratio: activeTask.options.secondCoverRatio || "3:4",
-      }] : [])];
-      coverImages = [];
-      for (const [index, coverConfig] of coverConfigs.entries()) {
-        const coverPrompt = buildCoverImagePrompt({
-          corePrompt: `${activeTask.visualStyle}，主题：${coverTitle}，${prompts[index % prompts.length]?.prompt || "高完成度短视频封面"}`,
-          title: coverTitle,
-          subtitles: coverSubtitles,
-          mode: coverConfig.mode === "titled" ? "titled" : "plain",
-          templateId: coverConfig.templateId,
-        });
-        const coverResult = await generateImages({ taskId: activeTask.id, prompts: [{ shotId: 9001 + index, ...coverPrompt }], apiKey: config.minimax.apiKey, aspectRatio: coverAspectRatio(coverConfig.ratio), maxImages: 1, track: activeTask.track, visualStyle: activeTask.visualStyle, coverBackgroundOnly: true, provider: activeTask.options.imageProvider }, signal);
-        coverImages.push(...coverResult.images.map((image) => ({ ...image, status: image.status || (image.path ? "ready" : "failed") })) as StoredImage[]);
-      }
-    }
+    const coverImages = await generateTaskCoverImages(activeTask, prompts, signal);
     return persistState(activeTask, { media: { ...activeTask.media, images, coverImages }, draft: null });
   }
 
@@ -1003,6 +1029,32 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
     } catch (error) { window.alert(error instanceof Error ? error.message : "重画失败"); } finally { setBusy(false); }
   }
 
+  async function regenerateCovers(): Promise<void> {
+    if (!task || busy) return;
+    const prompts = task.artifacts.prompts?.prompts || [];
+    if (!prompts.length) {
+      window.alert("没有绘图提示词，请先完成 Step 4");
+      return;
+    }
+    setBusy(true);
+    try {
+      const coverImages = await generateTaskCoverImages(task, prompts, undefined, true);
+      const failed = coverImages.find((image) => !image.path || image.status === "failed");
+      if (failed) throw new Error(failed.error || "封面重画失败");
+      const statuses = [...task.stepStatuses];
+      statuses[6] = "pending";
+      setTask(await updateTask(task.id, {
+        media: { ...task.media, coverImages },
+        draft: null,
+        stepStatuses: statuses,
+      }));
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "封面重画失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function replaceImage(shotId: number, file: File): Promise<void> {
     if (!task) return;
     setBusy(true);
@@ -1245,7 +1297,7 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         <div className={`credential-warning ${hasTtsCredentials && hasLlmCredentials ? "credential-warning--ready" : "credential-warning--partial"}`}><span className="credential-warning__icon">▽</span><div className="credential-warning__copy"><strong>{hasTtsCredentials && hasLlmCredentials ? "TTS 与 LLM 已就绪" : hasTtsCredentials ? "TTS 已就绪，还有 1 项凭证未配置" : "还有必要的本地凭据未配置"}</strong><span>{hasTtsCredentials ? `${activeTtsProvider === "minimax" ? "MiniMax" : "豆包"} 可直接配音` : "缺少 TTS 凭据"} · {hasLlmCredentials ? `原版 ${llmCredentialStatus.promptLibrary?.sourceVersion || "1.16.1"} 提示词库已接入` : "仍需 LLM API Key"}</span></div><button type="button" onClick={onNavigateSettings}>前往设置 →</button></div>
 
         {!task || task.runState === "idle" || task.status === "draft" ? <TaskCreateForm form={form} voices={availableVoices} hasLlmCredentials={hasLlmCredentials} hasTtsCredentials={hasTtsCredentials} aiGenerating={aiGenerating} taskReady={Boolean(task)} referenceName={task?.options.referenceImage?.fileName} coverLocalName={task?.options.coverLocalAsset?.fileName} externalAudioName={task?.media.externalAudio?.fileName} bgmName={task?.media.bgm?.fileName} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} previewingVoiceMode={previewingVoiceMode} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId, text) => void previewVoice(voiceId, text)} onChange={changeForm} onGenerateCopy={() => void handleGenerateCopy()} onUploadImages={(files) => void uploadImages(files)} onUploadReference={(file) => void uploadReference(file)} onUploadCover={(file) => void uploadCover(file)} onUploadTemplateBackground={uploadTemplateBackground} onUploadExternalAudio={(file) => void uploadExternalAudio(file)} onUploadBgm={(file) => void uploadBgm(file)} /> : null}
-        {task ? <TaskWorkbench task={task} busy={busy} voices={availableVoices} configuredVoiceId={configuredVoiceId} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} previewingVoiceMode={previewingVoiceMode} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId, text) => void previewVoice(voiceId, text)} onApplyTaskVoice={(voiceId) => void applyVoiceToTask(voiceId)} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRepairPromptAlignment={(track) => void repairPromptAlignment(track)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
+        {task ? <TaskWorkbench task={task} busy={busy} voices={availableVoices} configuredVoiceId={configuredVoiceId} voicePreview={voicePreview} previewingVoiceId={previewingVoiceId} previewingVoiceMode={previewingVoiceMode} voicePreviewError={voicePreviewError} onPreviewVoice={(voiceId, text) => void previewVoice(voiceId, text)} onApplyTaskVoice={(voiceId) => void applyVoiceToTask(voiceId)} onTaskChange={setTask} onPause={handlePause} onContinue={() => void handleContinue()} onCancel={handleCancel} onRunFromStep={(step) => void handleRunFromStep(step)} onSaveArtifact={(step) => void handleSaveArtifact(step)} onRepairPromptAlignment={(track) => void repairPromptAlignment(track)} onRegenerateImage={(shotId) => void regenerateImage(shotId)} onRegenerateCovers={() => void regenerateCovers()} onUploadImage={(shotId, file) => void replaceImage(shotId, file)} onUploadDynamicVideo={(shotId, file) => void replaceDynamicVideo(shotId, file)} onBorrowImage={(shotId) => void borrowImage(shotId)} onRepairFailedImages={() => void repairFailedImages()} onRegenerateAudio={(shotId) => void regenerateAudio(shotId)} onUpdateImageCrop={(shotId, crop) => void updateImageCrop(shotId, crop)} onUpdateTimeline={(index, patch) => void updateTimelineEntry(index, patch)} onRepackDraft={() => void repackDraft()} /> : null}
       </div>
       <footer className="task-builder__footer"><div className="task-builder__footer-inner"><div className="footer-status"><span className={canStart ? "is-ready" : ""}>{busy ? "正在处理并写入任务目录…" : saved ? "所有更改已保存" : task ? `任务 ${task.id.slice(0, 8)} · ${task.status}` : canStart ? "文案长度已满足" : "请输入至少 50 字文案"}</span></div><div className="footer-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void handleSave()}>保存草稿</button>{!task || task.status === "draft" ? <button type="button" className="secondary-button" disabled={!canStart || busy} onClick={() => void handleEnqueue()}>加入队列</button> : null}{!task || task.status === "draft" || task.status === "pending" ? <button type="button" className="start-button" disabled={!canStart || busy} onClick={() => void handleStart()}><span>▶</span>{task?.status === "pending" ? "立即执行" : "开始制作"}</button> : task.runState === "completed" ? <button type="button" className="start-button" disabled={busy} onClick={() => void repackDraft()}>重新打包草稿</button> : null}</div></div></footer>
     </main>

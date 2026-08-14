@@ -753,9 +753,27 @@ function taskReferenceSubject(task) {
   return rawTitle || "当前人物";
 }
 
-function compactReferencePrompt(item, shotId, task, aspectRatio) {
+function compactReferencePrompt(item, shotId, task, aspectRatio, coverBackgroundOnly = false) {
   const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
   const text = String(shot?.text || item?.prompt || "");
+  const sourcePrompt = String(item?.prompt || "").trim();
+  if (Number(shotId) >= 9000) {
+    const subject = taskReferenceSubject(task);
+    const title = String(task?.artifacts?.rewrite?.title || task?.title || subject).trim();
+    const subtitles = Array.isArray(task?.artifacts?.rewrite?.subtitle)
+      ? task.artifacts.rewrite.subtitle.map((line) => String(line || "").trim()).filter(Boolean).slice(0, 2)
+      : [];
+    const titled = !coverBackgroundOnly && (task?.options?.coverMode === "titled"
+      || (Number(shotId) > 9001 && task?.options?.secondCoverMode === "titled"));
+    return [
+      `专业人物故事短视频封面，${aspectRatio}竖版，高对比电影海报质感。${sourcePrompt.slice(0, 620)}`,
+      `所附图片是“${subject}”在本任务中的唯一人物身份参考；封面人物必须保持同一张脸、同一族裔和真实五官，不得套用其他任务人物，不得添加参考图中没有的长白胡须，不得生成西方人脸。`,
+      titled
+        ? `封面文字必须逐字准确：主标题「${title}」；副标题${subtitles.map((line) => `「${line}」`).join("、")}。主标题用超大号粗体中文横排，副标题分行置于其下；文字完整清晰、无错字、无漏字、无额外文字。`
+        : "封面不得出现任何文字、字母、数字、水印或标志。",
+      "人物与文字分区清楚，人物面部不得被文字遮挡，手机信息流缩略图仍须清晰可读。",
+    ].join(" ");
+  }
   if (isYuYourenTask(task)) {
     const era = referenceEra(text, shotId);
     const lateLife = era.includes("晚年") || Number(shotId) === 6 || Number(shotId) === 7;
@@ -768,7 +786,6 @@ function compactReferencePrompt(item, shotId, task, aspectRatio) {
     ].join(" ");
   }
   const subject = taskReferenceSubject(task);
-  const sourcePrompt = String(item?.prompt || "").trim();
   return [
     `严格人物参考：所附图片是“${subject}”在本任务中的唯一身份参考。必须保持参考图中的真实脸型、五官比例、发型与族裔特征，不得套用其他任务、其他历史人物或泛化老人形象。`,
     sourcePrompt,
@@ -936,29 +953,39 @@ async function generateMinimaxImages(body) {
     subjectReference = entries.filter(Boolean).slice(0, 1);
   }
   const selectedPrompts = prompts.slice(0, maxImages);
+  const forcedAssetVersion = body.force ? Date.now() : 0;
+  function generatedAssetUrl(saved, fallback) {
+    if (!saved?.url) return fallback;
+    if (!forcedAssetVersion) return saved.url;
+    const separator = saved.url.includes("?") ? "&" : "?";
+    return `${saved.url}${separator}v=${forcedAssetVersion}`;
+  }
   function coverBackgroundPrompt(value, shotId) {
     if (!body.coverBackgroundOnly || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return value;
-    // MiniMax owns the complete titled-cover composition in the default route.
-    // Keep the title/subtitle instructions in the prompt so the provider can
-    // render the cover as one asset; the compositor remains available as a
-    // fallback for other image providers.
-    if (generationTask?.options?.imageProvider === "minimax") return value;
     const marker = /[，。；]?(?:整体按电影海报式排版|极简排版|情感海报排版|冲击式排版|国风题字排版|人物传奇式排版)[:：][\s\S]*$/u;
     const visualPrompt = String(value).replace(marker, "").replace(/。画面中避免出现[:：][\s\S]*$/u, "").trim();
     return `${visualPrompt}，只生成干净的封面视觉底图，中部构图简洁并预留标题区；画面中不得出现任何文字、字母、数字、水印、标志、招牌或乱码`;
   }
   async function finalizeCover(saved, shotId) {
     if (!saved || shotId < 9000 || generationTask?.options?.coverMode !== "titled") return saved;
-    if (generationTask?.options?.imageProvider === "minimax") {
-      return { ...saved, textComposited: false, textRenderer: "minimax" };
-    }
     try {
+      const [width, height] = aspectRatio === "3:4"
+        ? [1080, 1440]
+        : aspectRatio === "4:3"
+          ? [1440, 1080]
+          : aspectRatio === "16:9"
+            ? [1920, 1080]
+            : aspectRatio === "1:1"
+              ? [1080, 1080]
+              : [1080, 1920];
       const rendered = await renderTitledCover({
         sourcePath: saved.path,
         title: generationTask.artifacts?.rewrite?.title || generationTask.title,
         subtitles: generationTask.artifacts?.rewrite?.subtitle || [],
+        width,
+        height,
       });
-      return rendered ? { ...saved, bytes: rendered.bytes, width: rendered.width, height: rendered.height, sourceBackupPath: rendered.backupPath, textComposited: true } : saved;
+      return rendered ? { ...saved, bytes: rendered.bytes, width: rendered.width, height: rendered.height, sourceBackupPath: rendered.backupPath, textComposited: true, textRenderer: "local-compositor" } : saved;
     } catch (error) {
       console.warn("[cover] 精确标题合成失败，保留 AI 原图:", error);
       return saved;
@@ -969,14 +996,15 @@ async function generateMinimaxImages(body) {
     const useSubjectReference = Boolean(subjectReference) && promptUsesReference(item, shotId, generationTask, track);
     const isCharacterAction = item?.characterAction === true;
     const basePrompt = coverBackgroundPrompt(String(item.prompt || "").trim(), shotId);
+    const generationItem = basePrompt === item.prompt ? item : { ...item, prompt: basePrompt };
     // A prompt sent to image-01 must preserve the scene and composition.  In
     // particular, do not prepend a second full identity essay here: that could
     // consume the 1500-character provider limit before the action is reached.
     const prompt = (useSubjectReference
-      ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
+      ? compactReferencePrompt(generationItem, shotId, generationTask, aspectRatio, Boolean(body.coverBackgroundOnly))
       : isCharacterAction
-        ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
-      : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio)
+        ? compactChineseActionPrompt(generationItem, shotId, generationTask, aspectRatio)
+      : compactEnvironmentPrompt(generationItem, shotId, generationTask, aspectRatio)
     ).slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
     // A failed/aborted browser run may already have written some images before
@@ -1035,9 +1063,14 @@ async function generateMinimaxImages(body) {
             prompt: activePrompt,
             useReference: useSubjectReference,
             retryLevel: attempt,
-            url: saved?.url || `data:image/jpeg;base64,${base64}`,
+            url: generatedAssetUrl(saved, `data:image/jpeg;base64,${base64}`),
             path: saved?.path,
             bytes: saved?.bytes || Math.round(base64.length * 0.75),
+            width: saved?.width,
+            height: saved?.height,
+            sourceBackupPath: saved?.sourceBackupPath,
+            textComposited: saved?.textComposited,
+            textRenderer: saved?.textRenderer,
             provider: "minimax",
             status: "ready",
           };
@@ -1053,9 +1086,14 @@ async function generateMinimaxImages(body) {
             prompt: activePrompt,
             useReference: useSubjectReference,
             retryLevel: attempt,
-            url: saved?.url || imageUrl,
+            url: generatedAssetUrl(saved, imageUrl),
             path: saved?.path,
             bytes: saved?.bytes,
+            width: saved?.width,
+            height: saved?.height,
+            sourceBackupPath: saved?.sourceBackupPath,
+            textComposited: saved?.textComposited,
+            textRenderer: saved?.textRenderer,
             provider: "minimax",
             status: "ready",
           };
