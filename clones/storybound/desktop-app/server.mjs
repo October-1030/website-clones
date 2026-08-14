@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { buildJianyingDraft } from "./server/draft-builder.mjs";
+import { renderTitledCover } from "./server/cover-compositor.mjs";
 import { handleMediaWorkbenchRequest } from "./server/media-workbench.mjs";
 import { metadataIssue, rewriteStructureContract, taskRewriteIntegrityIssue, writerPayloadIssue } from "./server/pipeline-integrity.mjs";
 import { generateRunningHubVideos, runningHubModels, testRunningHubConnection } from "./server/runninghub.mjs";
@@ -783,6 +784,24 @@ function compactReferencePrompt(item, shotId, task, aspectRatio) {
   ].join(" ");
 }
 
+function cleanCoverBackgroundPrompt(value) {
+  const marker = /[，。；]?(?:整体按电影海报式排版|极简排版|情感海报排版|冲击式排版|国风题字排版|人物传奇式排版)[:：][\s\S]*$/u;
+  const visualPrompt = String(value || "")
+    .replace(marker, "")
+    .replace(/^文字冲击海报构图法：[\s\S]*?适合观点、悬念、反转类内容[，。]?/u, "高对比、强冲击的人物故事海报底图，背景低饱和或压暗，中央预留简洁视觉区，")
+    .replace(/。画面中避免出现[:：][\s\S]*$/u, "")
+    .trim();
+  return `${visualPrompt}，只生成干净的封面视觉底图，按所选海报构图预留清晰标题区；画面中绝对不得出现任何文字、字母、数字、印章、水印、标志、招牌或乱码`;
+}
+
+function coverCanvasSize(aspectRatio) {
+  if (aspectRatio === "3:4") return { width: 1080, height: 1440 };
+  if (aspectRatio === "9:16") return { width: 1080, height: 1920 };
+  if (aspectRatio === "4:3") return { width: 1440, height: 1080 };
+  if (aspectRatio === "16:9") return { width: 1920, height: 1080 };
+  return { width: 1080, height: 1080 };
+}
+
 function compactChineseActionPrompt(item, shotId, task, aspectRatio) {
   const shot = task?.artifacts?.storyboard?.shots?.find((candidate) => Number(candidate.id) === Number(shotId));
   const text = String(shot?.text || item?.prompt || "");
@@ -949,6 +968,43 @@ async function generateMinimaxImages(body) {
     const separator = saved.url.includes("?") ? "&" : "?";
     return `${saved.url}${separator}v=${forcedAssetVersion}`;
   }
+  async function finalizeTitledCover(saved, shotId) {
+    if (!saved?.path || !body.coverBackgroundOnly || shotId < 9000 || !generationTask) return saved;
+    const mode = shotId === 9001
+      ? generationTask.options?.coverMode
+      : generationTask.options?.secondCoverMode;
+    if (mode !== "titled") return saved;
+    const title = String(generationTask.artifacts?.rewrite?.title || generationTask.title || "").trim();
+    const subtitles = Array.isArray(generationTask.artifacts?.rewrite?.subtitle)
+      ? generationTask.artifacts.rewrite.subtitle.map((line) => String(line || "").trim()).filter(Boolean).slice(0, 2)
+      : [];
+    if (!title || subtitles.length === 0) throw new Error("封面精确排字失败：缺少主标题或副标题");
+    const size = coverCanvasSize(aspectRatio);
+    try {
+      const rendered = await renderTitledCover({
+        sourcePath: saved.path,
+        title,
+        subtitles,
+        width: size.width,
+        height: size.height,
+        templateId: String(body.coverTemplateId || generationTask.options?.coverTemplateId || "cinematic-poster"),
+      });
+      if (!rendered) throw new Error("排字器未返回封面文件");
+      return {
+        ...saved,
+        bytes: rendered.bytes,
+        width: rendered.width,
+        height: rendered.height,
+        sourceBackupPath: rendered.backupPath,
+        textComposited: true,
+        textRenderer: rendered.textRenderer,
+      };
+    } catch (error) {
+      const failure = new Error(`封面精确排字失败：${error instanceof Error ? error.message : "未知错误"}`);
+      failure.code = "COVER_TEXT_RENDER_FAILED";
+      throw failure;
+    }
+  }
   const images = await mapLimit(selectedPrompts, 3, async (item, index) => {
     const shotId = Number(item.shotId || index + 1);
     const useSubjectReference = Boolean(subjectReference) && promptUsesReference(item, shotId, generationTask, track);
@@ -956,17 +1012,22 @@ async function generateMinimaxImages(body) {
     // A prompt sent to image-01 must preserve the scene and composition.  In
     // particular, do not prepend a second full identity essay here: that could
     // consume the 1500-character provider limit before the action is reached.
-    const prompt = (useSubjectReference
+    const providerPrompt = (useSubjectReference
       ? compactReferencePrompt(item, shotId, generationTask, aspectRatio)
       : isCharacterAction
         ? compactChineseActionPrompt(item, shotId, generationTask, aspectRatio)
       : compactEnvironmentPrompt(item, shotId, generationTask, aspectRatio)
-    ).slice(0, 1500);
+    );
+    const prompt = (body.coverBackgroundOnly && shotId >= 9000
+      ? cleanCoverBackgroundPrompt(providerPrompt)
+      : providerPrompt).slice(0, 1500);
     if (!prompt) throw new Error(`第 ${index + 1} 条 prompt 为空`);
     // A failed/aborted browser run may already have written some images before
     // task.json was updated. Reuse those files so retrying is a true checkpoint
     // resume and never spends API credits on the same shot twice.
-    if (body.taskId && !body.force) {
+    const existingRecord = generationTask?.media?.coverImages?.find((image) => Number(image.shotId) === shotId);
+    const resumableCover = !body.coverBackgroundOnly || existingRecord?.textComposited === true;
+    if (body.taskId && !body.force && resumableCover) {
       const existingPath = taskStore.resolveTaskFile(body.taskId, "images", `${shotId}.jpg`);
       if (existingPath && existsSync(existingPath)) {
         const existingStat = await stat(existingPath);
@@ -1009,9 +1070,10 @@ async function generateMinimaxImages(body) {
         const base64 = payload.data?.image_base64?.[0];
         const imageUrl = payload.data?.image_urls?.[0];
         if (typeof base64 === "string" && base64) {
-          const saved = body.taskId
+          let saved = body.taskId
             ? await taskStore.saveBuffer(body.taskId, "images", `${shotId}.jpg`, Buffer.from(base64, "base64"))
             : null;
+          saved = await finalizeTitledCover(saved, shotId);
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
@@ -1021,14 +1083,20 @@ async function generateMinimaxImages(body) {
             url: generatedAssetUrl(saved, `data:image/jpeg;base64,${base64}`),
             path: saved?.path,
             bytes: saved?.bytes || Math.round(base64.length * 0.75),
+            width: saved?.width,
+            height: saved?.height,
+            sourceBackupPath: saved?.sourceBackupPath,
+            textComposited: saved?.textComposited,
+            textRenderer: saved?.textRenderer,
             provider: "minimax",
             status: "ready",
           };
         }
         if (typeof imageUrl === "string" && imageUrl) {
-          const saved = body.taskId
+          let saved = body.taskId
             ? await taskStore.saveRemoteAsset(body.taskId, "images", `${shotId}.jpg`, imageUrl)
             : null;
+          saved = await finalizeTitledCover(saved, shotId);
           return {
             id: payload.id || `minimax-image-${Date.now()}-${index}`,
             shotId,
@@ -1038,6 +1106,11 @@ async function generateMinimaxImages(body) {
             url: generatedAssetUrl(saved, imageUrl),
             path: saved?.path,
             bytes: saved?.bytes,
+            width: saved?.width,
+            height: saved?.height,
+            sourceBackupPath: saved?.sourceBackupPath,
+            textComposited: saved?.textComposited,
+            textRenderer: saved?.textRenderer,
             provider: "minimax",
             status: "ready",
           };
@@ -1045,6 +1118,7 @@ async function generateMinimaxImages(body) {
         throw new Error("MiniMax 未返回图片数据");
       } catch (error) {
         lastError = error;
+        if (error?.code === "COVER_TEXT_RENDER_FAILED") break;
       }
     }
     return {

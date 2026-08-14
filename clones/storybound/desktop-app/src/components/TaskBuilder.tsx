@@ -646,6 +646,8 @@ export function TaskBuilder({ config, credentialStatus, llmConfig, llmCredential
         visualStyle: activeTask.visualStyle,
         provider: activeTask.options.imageProvider,
         force,
+        coverBackgroundOnly: activeTask.options.imageProvider === "minimax" && coverConfig.mode === "titled",
+        coverTemplateId: coverConfig.templateId,
       }, signal);
       coverImages.push(...coverResult.images.map((image) => ({
         ...image,

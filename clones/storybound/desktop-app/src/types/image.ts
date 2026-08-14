@@ -23,6 +23,9 @@ export interface GeneratedImage {
   matchReason?: string;
   matchConfidence?: number;
   provider?: ImageProviderId | string;
+  sourceBackupPath?: string;
+  textComposited?: boolean;
+  textRenderer?: string;
 }
 
 export interface ImageGenerationRequest {
@@ -35,6 +38,8 @@ export interface ImageGenerationRequest {
   visualStyle: string;
   provider?: ImageProviderId;
   force?: boolean;
+  coverBackgroundOnly?: boolean;
+  coverTemplateId?: string;
 }
 
 export interface ImageGenerationResponse {
