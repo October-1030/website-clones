@@ -1,0 +1,19 @@
+{
+  "--accent": "#BC1F1A",
+  "--accent-soft": "color-mix(in srgb, #BC1F1A 8%, #fff)",
+  "--canvas": "oklch(from #BC1F1A .975 .003 h)",
+  "--default-bg-color": "#fafbfc",
+  "--default-box-color": "#fff",
+  "--font-num": "\"SF Mono\", \"JetBrains Mono\", \"Roboto Mono\", ui-monospace, monospace",
+  "--ink-200": "oklch(from #BC1F1A .83 .018 h)",
+  "--ink-400": "oklch(from #BC1F1A .645 .028 h)",
+  "--ink-600": "oklch(from #BC1F1A .47 .033 h)",
+  "--ink-900": "oklch(from #BC1F1A .213 .033 h)",
+  "--line": "oklch(from #BC1F1A .94 .006 h)",
+  "--line-soft": "oklch(from #BC1F1A .965 .004 h)",
+  "--ok": "#12b76a",
+  "--r-lg": "14px",
+  "--r-md": "11px",
+  "--r-sm": "8px",
+  "--warn": "#f79009"
+}

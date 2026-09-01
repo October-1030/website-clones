@@ -1,0 +1,23 @@
+[
+  {
+    "size": "desktop",
+    "width": 1440,
+    "height": 900,
+    "meanChannelDifference": 0.009670267489711934,
+    "pixelsOver20Percent": 0
+  },
+  {
+    "size": "mobile",
+    "width": 390,
+    "height": 844,
+    "meanChannelDifference": 0.05030684165755256,
+    "pixelsOver20Percent": 0.011848341232227487
+  },
+  {
+    "size": "tablet",
+    "width": 768,
+    "height": 1024,
+    "meanChannelDifference": 0.06051805284288195,
+    "pixelsOver20Percent": 0.0331878662109375
+  }
+]

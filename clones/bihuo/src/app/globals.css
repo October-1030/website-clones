@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --color-primary: #bc1f1a;
+  --color-muted: #7987a1;
+  --color-foreground: #2d3748;
+}
+
+:root {
+  --primary: #bc1f1a;
+  --primary-soft: #f8e8e8;
+  --muted: #7987a1;
+  --foreground: #2d3748;
+}
+
+html { background: #fafbfc; font-family: var(--font-sans); }
+body { margin: 0; font-size: 16px; line-height: 1.5; }
+button, a { -webkit-tap-highlight-color: transparent; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+.auth-background::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: url("/images/login-background.png") center / cover no-repeat;
+}
+
+.auth-panel { animation: slide-in-right .6s cubic-bezier(.25,.46,.45,.94) forwards; }
+.auth-submit { box-shadow: 0 2px 6px #0000000d, inset 0 1px #ffffff40; }
+.auth-submit:hover { box-shadow: 0 4px 12px #5a8bff59; }
+.demo-dialog::backdrop { background: #0006; backdrop-filter: blur(3px); }
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(30px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-panel { animation: none; }
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}

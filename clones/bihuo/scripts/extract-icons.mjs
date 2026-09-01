@@ -1,0 +1,8 @@
+import fs from "node:fs";
+const icons = JSON.parse(fs.readFileSync(new URL("../docs/research/dashboard-svg.json", import.meta.url), "utf8"));
+const names = { dashboard:0, robot:1, building:2, book:3, question:4, chevronDown:5, magic:6, send:8, monitor:10, report:12, resources:14, settings:16, refresh:19, search:20, fullscreen:21, bell:22, announcement:23, globe:24, gear:25, info:27, chevronRight:34, company:35, project:36, folder:37, questionList:38, prompt:39, article:40, account:41, publish:42, checklist:43, mail:44, rank:45, matrix:46, windows:47, download:48, mac:49, plugin:51, arrowRight:53, help:65 };
+function jsx(svg) {
+  return svg.replace(/ data-v-[\w-]+="[^"]*"/g, "").replace(/ class="[^"]*"/g, "").replace(/ style="[^"]*"/g, "").replace(/xmlns:xlink/g,"xmlnsXlink").replace(/stroke-width/g,"strokeWidth").replace(/stroke-linecap/g,"strokeLinecap").replace(/stroke-linejoin/g,"strokeLinejoin").replace(/fill-rule/g,"fillRule").replace(/clip-rule/g,"clipRule").replace(/fill-opacity/g,"fillOpacity").replace(/stroke-opacity/g,"strokeOpacity").replace(/clip-path/g,"clipPath");
+}
+const entries = Object.entries(names).map(([name,index]) => `  ${name}: (${jsx(icons[index].svg)}),`).join("\n");
+fs.writeFileSync(new URL("../src/components/dashboard-icons.tsx", import.meta.url), `// SVG paths extracted from the rendered target website.\nconst iconShapes = {\n${entries}\n};\n\nexport type DashIconName = keyof typeof iconShapes;\nexport function DashIcon({ name, className = "" }: { name: DashIconName; className?: string }) {\n  return <span aria-hidden="true" className={\`inline-flex shrink-0 items-center justify-center \${className}\`}>{iconShapes[name]}</span>;\n}\n`);

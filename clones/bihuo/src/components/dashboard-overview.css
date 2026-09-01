@@ -1,0 +1,24 @@
+.overview-scope-dot {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--cv-up) 18%, transparent);
+}
+
+.overview-branch-arrow {
+  background: linear-gradient(90deg, var(--cv-line-strong), var(--cv-signal));
+}
+
+.overview-branch-arrow::after {
+  position: absolute;
+  top: -3.5px;
+  right: -1px;
+  content: "";
+  border: 4px solid transparent;
+  border-left-color: var(--cv-signal);
+}
+
+.overview-help-tooltip::after {
+  position: absolute;
+  top: 100%;
+  content: "";
+  border: 5px solid transparent;
+  border-top-color: #303133;
+}

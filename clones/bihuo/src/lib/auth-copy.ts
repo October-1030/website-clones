@@ -1,0 +1,40 @@
+import type { Locale } from "@/types/auth";
+
+export const authCopy = {
+  "zh-CN": {
+    title: "必火GEO营销登录", account: "请输入用户账号", password: "请输入账号密码",
+    passwordRequired: "请输入密码", login: "登录", noAccount: "还没有账号？", register: "注册",
+    registerTitle: "手机号注册", phone: "请输入手机号", code: "请输入验证码", getCode: "获取验证码",
+    registerPassword: "请输入密码（6-20位，需包含字母和数字）", hasAccount: "已有账号？", toLogin: "去登录",
+    phoneInvalid: "请输入正确的手机号", codeInvalid: "请输入6位验证码",
+    passwordInvalid: "密码需为6-20位，且包含字母和数字", showPassword: "显示密码", hidePassword: "隐藏密码",
+    demoTitle: "本地界面演示", demoMessage: "当前为网站界面复刻，尚未连接登录服务。账号和密码不会发送或保存。",
+    registerMessage: "表单校验通过。当前为本地演示，不会创建真实账号，也不会保存密码。",
+    codeMessage: "本地演示不会发送短信。测试验证码为 123456。", wrongCode: "本地测试验证码为123456",
+    confirm: "知道了", seconds: "秒后重试",
+  },
+  en: {
+    title: "Sign in to 必火GEO营销", account: "Please enter your account", password: "Please enter your password",
+    passwordRequired: "Please enter your password", login: "Sign In", noAccount: "No account yet?", register: "Register",
+    registerTitle: "Register with phone number", phone: "Please enter your phone number", code: "Please enter the verification code", getCode: "Get code",
+    registerPassword: "Please enter your password (6-20 chars, letters and digits)", hasAccount: "Already have an account?", toLogin: "To login",
+    phoneInvalid: "Please enter a valid phone number", codeInvalid: "Please enter a 6-digit code",
+    passwordInvalid: "Use 6-20 characters, including letters and digits", showPassword: "Show password", hidePassword: "Hide password",
+    demoTitle: "Local interface demo", demoMessage: "This is a local interface replica with no authentication service. Your account and password are never sent or saved.",
+    registerMessage: "Validation passed. This local demo does not create an account or save your password.",
+    codeMessage: "This demo does not send text messages. Use test code 123456.", wrongCode: "Use local test code 123456",
+    confirm: "Got it", seconds: "s to retry",
+  },
+  "zh-TW": {
+    title: "必火GEO营销登入", account: "請輸入使用者帳號", password: "請輸入帳號密碼",
+    passwordRequired: "請輸入密碼", login: "登入", noAccount: "還沒有帳號？", register: "註冊",
+    registerTitle: "手機號註冊", phone: "請輸入手機號", code: "請輸入驗證碼", getCode: "獲取驗證碼",
+    registerPassword: "請輸入密碼（6-20位，需包含字母和數字）", hasAccount: "已有帳號？", toLogin: "去登入",
+    phoneInvalid: "請輸入正確的手機號", codeInvalid: "請輸入6位驗證碼",
+    passwordInvalid: "密碼需為6-20位，且包含字母和數字", showPassword: "顯示密碼", hidePassword: "隱藏密碼",
+    demoTitle: "本地介面示範", demoMessage: "目前為網站介面復刻，尚未連接登入服務。帳號和密碼不會傳送或儲存。",
+    registerMessage: "表單驗證通過。目前為本地示範，不會建立真實帳號，也不會儲存密碼。",
+    codeMessage: "本地示範不會傳送簡訊。測試驗證碼為 123456。", wrongCode: "本地測試驗證碼為123456",
+    confirm: "知道了", seconds: "秒後重試",
+  },
+} satisfies Record<Locale, Record<string, string>>;
