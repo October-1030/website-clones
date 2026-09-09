@@ -1,0 +1,11 @@
+# Behaviors and boundaries
+
+Observed: guide skip reveals homepage; new-work button opens a 600px modal with title, novel/script choice, description, advanced settings and submit; appearance opens a theme/skin popover; mobile layout reorganizes navigation. Native independent community scroll. Source hover card transitions are 0.4s cubic-bezier(.2,.8,.2,1); guide hover is 300ms with an 8px upward translation. Header/sidebar transitions are 300ms; display-mode buttons are click-driven, not scroll-driven.
+
+Local implementation: guide shown on first visit and reopened from tutorial; new work, text/Markdown import, local editor, auto-save, text export, search, type filter, three view modes, folders, archive/recycle/restore, batch archive/recycle, collapsible sidebar, dismissible alert, appearance themes and skins.
+
+Works, folders, appearance, view preference, and dismissed guide persist in browser localStorage. No original-site account, profile, credentials, payment requests, or AI requests are copied. Account-dependent navigation, community details, sign-in rewards, and recharge explain availability and link to the original site. Public community article titles are a captured snapshot; full articles are not fabricated. A captcha iframe existed in the original page but did not block visible UI inspection; no captcha was completed or bypassed.
+
+Golden opening extension: 创意 opens a tool grid; its gold-opening card, library shortcut and guide action open an independent 1200px dialog. Locally authored preset/custom prompts, story fields, optional local-book context, streaming output, cancellation, explicit failures, editing, copy/export and save-to-novel are implemented. A Next route forwards requests using an in-memory user DeepSeek key or server-only WRITING_* configuration. No source credentials, paid generations or private community prompt bodies were accessed. Other tool cards visibly link to the original site.
+
+Boundaries: account authentication, payments, other generators and the source's authenticated editor/backend are not implemented. The editor stores data locally. The generator calls an independently configured provider, not the original site's credit system. Theme names and swatches are observed; alternate theme token behavior is a local approximation.
